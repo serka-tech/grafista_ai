@@ -1,4 +1,5 @@
 import { pool } from '../pool.js';
+import type { StorageProviderName } from '../../storage/types.js';
 
 export interface BrandAsset {
   id: string;
@@ -8,6 +9,11 @@ export interface BrandAsset {
   fileUrl?: string;
   mimeType?: string;
   fileSizeBytes?: number;
+  originalFilename?: string;
+  storageProvider?: StorageProviderName;
+  storageKey?: string;
+  storageBucket?: string;
+  uploadedBy?: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
 }
@@ -21,6 +27,11 @@ function mapRow(row: Record<string, unknown>): BrandAsset {
     fileUrl: (row.file_url as string) ?? undefined,
     mimeType: (row.mime_type as string) ?? undefined,
     fileSizeBytes: row.file_size_bytes != null ? Number(row.file_size_bytes) : undefined,
+    originalFilename: (row.original_filename as string) ?? undefined,
+    storageProvider: (row.storage_provider as StorageProviderName) ?? undefined,
+    storageKey: (row.storage_key as string) ?? undefined,
+    storageBucket: (row.storage_bucket as string) ?? undefined,
+    uploadedBy: (row.uploaded_by as string) ?? undefined,
     metadata: (row.metadata as Record<string, unknown>) ?? undefined,
     createdAt: (row.created_at as Date).toISOString(),
   };
@@ -34,6 +45,11 @@ export const brandAssetsRepo = {
     return rows.map(mapRow);
   },
 
+  async getById(clientId: string, id: string): Promise<BrandAsset | undefined> {
+    const { rows } = await pool.query('SELECT * FROM brand_assets WHERE client_id = $1 AND id = $2', [clientId, id]);
+    return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
   async create(data: {
     id: string;
     clientId: string;
@@ -42,11 +58,19 @@ export const brandAssetsRepo = {
     fileUrl?: string;
     mimeType?: string;
     fileSizeBytes?: number;
+    originalFilename?: string;
+    storageProvider?: StorageProviderName;
+    storageKey?: string;
+    storageBucket?: string;
+    uploadedBy?: string;
     metadata?: Record<string, unknown>;
   }): Promise<BrandAsset> {
     const { rows } = await pool.query(
-      `INSERT INTO brand_assets (id, client_id, type, name, file_url, mime_type, file_size_bytes, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO brand_assets (
+         id, client_id, type, name, file_url, mime_type, file_size_bytes,
+         original_filename, storage_provider, storage_key, storage_bucket, uploaded_by, metadata
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [
         data.id,
         data.clientId,
@@ -55,6 +79,11 @@ export const brandAssetsRepo = {
         data.fileUrl ?? null,
         data.mimeType ?? null,
         data.fileSizeBytes ?? null,
+        data.originalFilename ?? null,
+        data.storageProvider ?? null,
+        data.storageKey ?? null,
+        data.storageBucket ?? null,
+        data.uploadedBy ?? null,
         JSON.stringify(data.metadata ?? {}),
       ]
     );

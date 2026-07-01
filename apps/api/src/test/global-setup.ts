@@ -53,6 +53,8 @@ export async function setup(): Promise<void> {
   process.env.API_PORT ??= '4999';
   process.env.AUTH_SECRET ??= 'test-auth-secret-not-for-production-use-only';
   process.env.COOKIE_SECURE ??= 'false';
+  process.env.STORAGE_PROVIDER ??= 'local';
+  process.env.UPLOAD_MAX_SIZE_MB ??= '2';
 
   const pool = new Pool({ connectionString: databaseUrl });
   const { runMigrations } = await import('../db/migrate.js');

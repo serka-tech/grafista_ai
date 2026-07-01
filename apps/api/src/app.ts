@@ -20,7 +20,6 @@ import { outputsRouter } from './routes/outputs.js';
 import { settingsRouter } from './routes/settings.js';
 import { workflowsRouter } from './routes/workflows.js';
 import { errorHandler } from './middleware/error-handler.js';
-import { UPLOAD_DIR } from './middleware/upload.js';
 
 export const app: Express = express();
 
@@ -29,7 +28,10 @@ app.use(cors({ origin: process.env.API_CORS_ORIGIN ?? 'http://localhost:3000', c
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(UPLOAD_DIR));
+// NOTE: uploaded files are intentionally NOT served via express.static — that would expose
+// brand assets/design references to anyone with the URL, no auth check. Files are only
+// reachable through the authenticated, permission-checked `/file` routes in
+// brand-assets.ts / design-references.ts (see storage/file-service.ts).
 
 // Health check
 app.get('/api/health', (_req, res) => {

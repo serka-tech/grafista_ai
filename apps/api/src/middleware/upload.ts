@@ -1,9 +1,13 @@
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
 
-export const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+/**
+ * Buffers the upload in memory instead of writing straight to disk — the
+ * storage provider abstraction (see ../storage/) decides where the bytes
+ * actually land (local disk or S3-compatible), and only after that succeeds
+ * does the route handler persist a Postgres metadata row. This is what makes
+ * "no fallback, no partial row on storage failure" possible: multer no
+ * longer has an opinion about where files live.
+ */
 
 const MAX_SIZE = parseInt(process.env.UPLOAD_MAX_SIZE_MB ?? '50') * 1024 * 1024;
 
@@ -19,14 +23,6 @@ const DEFAULT_ALLOWED_TYPES = [
   'application/x-zip-compressed',
 ].join(',');
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
-  },
-});
-
 const fileFilter = (_req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   const allowed = (process.env.ALLOWED_FILE_TYPES ?? DEFAULT_ALLOWED_TYPES).split(',');
   if (allowed.includes(file.mimetype)) {
@@ -38,4 +34,4 @@ const fileFilter = (_req: Express.Request, file: Express.Multer.File, cb: multer
   }
 };
 
-export const upload = multer({ storage, fileFilter, limits: { fileSize: MAX_SIZE } });
+export const upload = multer({ storage: multer.memoryStorage(), fileFilter, limits: { fileSize: MAX_SIZE } });

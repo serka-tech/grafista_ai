@@ -18,6 +18,13 @@ export default defineConfig({
       DATABASE_URL: TEST_DATABASE_URL,
       AUTH_SECRET: 'test-auth-secret-not-for-production-use-only',
       COOKIE_SECURE: 'false',
+      // Default storage provider for the suite is local disk — individual tests that need to
+      // exercise the S3 code path (mocked) override process.env.STORAGE_PROVIDER for the
+      // duration of that test only (see storage.test.ts) and restore it afterwards.
+      STORAGE_PROVIDER: 'local',
+      // Small limit so the "oversized file rejected" test doesn't need to allocate/upload a
+      // real 50MB buffer — production default (50MB, see .env.example) is untouched.
+      UPLOAD_MAX_SIZE_MB: '2',
     },
   },
 });
