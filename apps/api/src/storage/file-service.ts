@@ -70,3 +70,14 @@ export async function getFileAccess(ref: StoredFileRef, filename: string, conten
   const provider = getStorageProviderByName(ref.storageProvider);
   return provider.getObjectAccess({ key: ref.storageKey, filename, contentType });
 }
+
+/**
+ * Reads a previously-stored file's raw bytes into memory for server-side/in-process
+ * use (e.g. base64-encoding an image before sending it to a vision AI provider).
+ * Unlike getFileAccess, this is never wired to an HTTP response — it exists purely
+ * for backend processing (see services/design-dna-analysis.ts).
+ */
+export async function getObjectBuffer(ref: StoredFileRef): Promise<Buffer> {
+  const provider = getStorageProviderByName(ref.storageProvider);
+  return provider.getObjectBuffer({ key: ref.storageKey });
+}

@@ -65,4 +65,27 @@ export class S3StorageProvider implements StorageProvider {
       throw new StorageError(`S3 signed URL generation failed: ${(err as Error).message}`, 502);
     }
   }
+
+  /** Direct GetObject + buffer the body in-process (server-side use only — never exposed to clients). */
+  async getObjectBuffer({ key }: { key: string }): Promise<Buffer> {
+    try {
+      const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+      const response = await this.client.send(command);
+      const body = response.Body;
+      if (!body) {
+        throw new Error('S3 GetObject returned an empty body');
+      }
+      return await streamToBuffer(body as NodeJS.ReadableStream);
+    } catch (err) {
+      throw new StorageError(`S3 object read failed: ${(err as Error).message}`, 502);
+    }
+  }
+}
+
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }

@@ -40,7 +40,7 @@ contentIdeasRouter.post(
   }
   const { platform, format, topic, optionCount, campaignName, mood, additionalNotes } = parsedBody.data;
 
-  const designDNA = store.designDNA.findByClientId(client.id);
+  const designDNA = await store.designDna.getApprovedByClientId(client.id);
   const approvedIdeas = await store.contentIdeas.listApprovedByClient(client.id);
   const previousApproved = approvedIdeas.map((i) => `- ${i.title}: ${i.description}`).join('\n');
 

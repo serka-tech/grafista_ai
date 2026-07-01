@@ -16,6 +16,9 @@ import { HiggsFieldAdapter } from './providers/higgsfield.js';
 const DEFAULT_ROUTING: TaskRouting[] = [
   { taskType: 'brand_intake', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'style_analysis', primaryProvider: 'openai', fallbackProviders: ['gemini', 'claude'], requiredCapabilities: ['vision'] },
+  // Synthesizes already-extracted per-reference JSON (text) into one client-level DesignDNA —
+  // no raw images involved, so this does not require vision capability.
+  { taskType: 'design_dna_synthesis', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'tone_extraction', primaryProvider: 'claude', fallbackProviders: ['openai', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'content_ideation', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'caption_generation', primaryProvider: 'claude', fallbackProviders: ['openai', 'gemini'], requiredCapabilities: ['text'] },

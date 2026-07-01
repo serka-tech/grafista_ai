@@ -45,4 +45,13 @@ export class LocalStorageProvider implements StorageProvider {
     const stat = fs.statSync(filePath);
     return { kind: 'stream', stream: fs.createReadStream(filePath), contentType, contentLength: stat.size };
   }
+
+  async getObjectBuffer({ key }: { key: string }): Promise<Buffer> {
+    const filePath = resolveSafePath(key);
+    try {
+      return await fs.promises.readFile(filePath);
+    } catch (err) {
+      throw new StorageError(`Local storage read failed: ${(err as Error).message}`, 404);
+    }
+  }
 }

@@ -2,10 +2,11 @@
  * Grafista AI Studio — Data Access Composition
  *
  * Phase 2 Step 1: clients, brand_assets, design_references, content_ideas,
- * approvals, and design_briefs are now backed by real PostgreSQL (see
- * ../db/repositories/*). Design DNA remains an intentional, explicitly
- * out-of-scope in-memory store (see ../db/design-dna-store.ts) — vision
- * analysis and its persistence are not part of this migration step.
+ * approvals, and design_briefs are backed by real PostgreSQL (see
+ * ../db/repositories/*). Phase 2 Step 4 moves Design DNA (and its
+ * per-reference style analyses) onto real PostgreSQL too, backed by real AI
+ * vision analysis (see ../services/design-dna-analysis.ts) — the previous
+ * in-memory mock (../db/design-dna-store.ts) is fully retired.
  *
  * All repositories are async; every call site must be awaited.
  */
@@ -16,7 +17,7 @@ import { designReferencesRepo } from '../db/repositories/design-references.js';
 import { contentIdeasRepo } from '../db/repositories/content-ideas.js';
 import { approvalsRepo } from '../db/repositories/approvals.js';
 import { designBriefsRepo } from '../db/repositories/design-briefs.js';
-import { designDnaStore } from '../db/design-dna-store.js';
+import { designAnalysisRepo, designDnaRepo } from '../db/repositories/design-dna.js';
 
 export const store = {
   clients: clientsRepo,
@@ -25,5 +26,6 @@ export const store = {
   contentIdeas: contentIdeasRepo,
   approvals: approvalsRepo,
   designBriefs: designBriefsRepo,
-  designDNA: designDnaStore,
+  designAnalysis: designAnalysisRepo,
+  designDna: designDnaRepo,
 };

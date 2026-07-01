@@ -23,6 +23,10 @@ export const PERMISSIONS = [
   'creative_qa:run',
   'outputs:final_approve',
   'settings:manage',
+  'design_dna:run',
+  'design_dna:read',
+  'design_dna:approve',
+  'design_dna:revise',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

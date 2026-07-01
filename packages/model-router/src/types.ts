@@ -7,6 +7,7 @@ export type AIProvider = 'openai' | 'gemini' | 'claude' | 'kie-ai' | 'higgsfield
 export type AITaskType =
   | 'brand_intake'
   | 'style_analysis'
+  | 'design_dna_synthesis'
   | 'tone_extraction'
   | 'content_ideation'
   | 'caption_generation'

@@ -3,6 +3,7 @@ export type { PromptTemplate, PromptVariable, BuiltPrompt } from './builder.js';
 
 export { brandIntakeTemplate } from './templates/brand-intake.js';
 export { styleAnalysisTemplate } from './templates/style-analysis.js';
+export { designDnaSynthesisTemplate } from './templates/design-dna-synthesis.js';
 export { toneExtractionTemplate } from './templates/tone-extraction.js';
 export { contentIdeationTemplate } from './templates/content-ideation.js';
 export { captionGenerationTemplate } from './templates/caption-generation.js';

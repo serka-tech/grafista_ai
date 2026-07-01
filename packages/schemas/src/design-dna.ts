@@ -35,6 +35,22 @@ export const VisualMoodEnum = z.enum([
 ]);
 export type VisualMood = z.infer<typeof VisualMoodEnum>;
 
+export const DesignCategoryEnum = z.enum([
+  'story',
+  'post',
+  'carousel',
+  'billboard',
+  'brochure',
+  'menu',
+  'real_estate',
+  'school',
+  'healthcare',
+  'cafe_restaurant',
+  'corporate',
+  'other',
+]);
+export type DesignCategory = z.infer<typeof DesignCategoryEnum>;
+
 export const StyleAnalysisSchema = z.object({
   id: z.string().uuid(),
   designReferenceId: z.string().uuid(),
@@ -51,7 +67,7 @@ export const StyleAnalysisSchema = z.object({
     bodyStyle: z.string().max(200).optional(),
     captionStyle: z.string().max(200).optional(),
     fontCount: z.number().int().min(0).max(10).optional(),
-  }),
+  }).default({}),
   logoPosition: z.enum([
     'top-left', 'top-center', 'top-right',
     'bottom-left', 'bottom-center', 'bottom-right',
@@ -65,16 +81,27 @@ export const StyleAnalysisSchema = z.object({
   visualMood: VisualMoodEnum.optional(),
   brandConsistencyNotes: z.string().max(2000).optional(),
   reusableDesignRules: z.array(z.string().max(500)).default([]),
+  designCategory: DesignCategoryEnum.optional(),
   confidence: z.number().min(0).max(1).default(0.5),
   analyzedAt: z.string().datetime(),
 });
 export type StyleAnalysis = z.infer<typeof StyleAnalysisSchema>;
 
 // ─── Design DNA ──────────────────────────────────────────
+export const DesignDNAStatusEnum = z.enum([
+  'draft',
+  'generated',
+  'waiting_for_approval',
+  'approved',
+  'needs_revision',
+]);
+export type DesignDNAStatus = z.infer<typeof DesignDNAStatusEnum>;
+
 export const DesignDNASchema = z.object({
   id: z.string().uuid(),
   clientId: z.string().uuid(),
   version: z.number().int().positive().default(1),
+  status: DesignDNAStatusEnum.default('draft'),
 
   brandPersonality: z.array(z.string().max(100)).default([]),
   preferredLayouts: z.array(LayoutPatternEnum).default([]),
@@ -100,6 +127,11 @@ export const DesignDNASchema = z.object({
     preferredPosition: z.string().max(100).optional(),
   })).default([]),
 
+  imageTreatmentRules: z.array(z.object({
+    rule: z.string().max(500),
+    example: z.string().max(200).optional(),
+  })).default([]),
+
   contentTone: z.object({
     primary: z.string().max(100),
     secondary: z.string().max(100).optional(),
@@ -122,8 +154,32 @@ export const DesignDNASchema = z.object({
     styleModifiers: z.array(z.string().max(100)).default([]),
   }).optional(),
 
+  confidenceScore: z.number().min(0).max(1).optional(),
+  referencesUsed: z.array(z.string().uuid()).default([]),
+
   sourceAnalysisCount: z.number().int().nonnegative().default(0),
+  approvedBy: z.string().uuid().optional(),
+  approvedAt: z.string().datetime().optional(),
+  revisionNotes: z.string().max(2000).optional(),
   lastUpdatedAt: z.string().datetime(),
   createdAt: z.string().datetime(),
 });
 export type DesignDNA = z.infer<typeof DesignDNASchema>;
+
+/** Subset the AI synthesis call is expected to produce — server-controlled fields
+ * (id, clientId, version, status, referencesUsed, sourceAnalysisCount, timestamps,
+ * approval fields) are attached by the service after parsing, never invented by the model. */
+export const DesignDNAContentSchema = DesignDNASchema.omit({
+  id: true,
+  clientId: true,
+  version: true,
+  status: true,
+  referencesUsed: true,
+  sourceAnalysisCount: true,
+  approvedBy: true,
+  approvedAt: true,
+  revisionNotes: true,
+  lastUpdatedAt: true,
+  createdAt: true,
+});
+export type DesignDNAContent = z.infer<typeof DesignDNAContentSchema>;

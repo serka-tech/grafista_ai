@@ -33,6 +33,15 @@ export interface StorageProvider {
    * a permanent/public URL.
    */
   getObjectAccess(input: { key: string; filename: string; contentType?: string }): Promise<ObjectAccess>;
+
+  /**
+   * Reads the object's full bytes into memory for server-side/in-process use (e.g.
+   * base64-encoding an image before sending it to a vision AI provider). This is an
+   * addition alongside getObjectAccess, not a replacement — getObjectAccess remains
+   * the only path used for client-facing HTTP downloads. Must throw StorageError on
+   * failure (not found, I/O error, etc).
+   */
+  getObjectBuffer(input: { key: string }): Promise<Buffer>;
 }
 
 /**

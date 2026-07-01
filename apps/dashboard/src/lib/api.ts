@@ -55,6 +55,12 @@ export const api = {
   // Design DNA
   getDesignDNA: (clientId: string) => fetchAPI<{ data: any }>(`/api/clients/${clientId}/design-dna`),
   analyzeDesignDNA: (clientId: string) => fetchAPI<any>(`/api/clients/${clientId}/design-dna/analyze`, { method: 'POST' }),
+  getDesignDnaReferences: (clientId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/clients/${clientId}/design-dna/references`),
+  approveDesignDna: (clientId: string) =>
+    fetchAPI<{ data: any }>(`/api/clients/${clientId}/design-dna/approve`, { method: 'POST' }),
+  reviseDesignDna: (clientId: string, notes?: string) =>
+    fetchAPI<{ data: any }>(`/api/clients/${clientId}/design-dna/revise`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
   // Content Ideas
   getContentIdeas: (clientId: string, status?: string) =>

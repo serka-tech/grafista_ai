@@ -9,7 +9,9 @@ export const clientsRouter: Router = Router();
 // GET /api/clients — list all
 clientsRouter.get('/', requireAuth, requirePermission('clients:read'), asyncHandler(async (_req: Request, res: Response) => {
   const clients = await store.clients.listWithCounts();
-  const withDna = clients.map((c) => ({ ...c, hasDNA: store.designDNA.hasForClient(c.id) }));
+  const withDna = await Promise.all(
+    clients.map(async (c) => ({ ...c, hasDNA: await store.designDna.hasForClient(c.id) }))
+  );
   res.json({ data: withDna, total: withDna.length });
 }));
 
