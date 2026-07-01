@@ -1,0 +1,73 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
+
+const DEFAULT_MODEL = 'claude-opus-4-8';
+
+export class ClaudeAdapter implements ProviderAdapter {
+  name = 'claude' as const;
+  private apiKey: string | undefined;
+  private client: Anthropic | undefined;
+
+  constructor() {
+    this.apiKey = process.env.ANTHROPIC_API_KEY;
+    if (this.apiKey) {
+      this.client = new Anthropic({ apiKey: this.apiKey });
+    }
+  }
+
+  isAvailable(): boolean {
+    return !!this.apiKey;
+  }
+
+  async complete(request: AIRequest): Promise<AIResponse> {
+    const start = Date.now();
+
+    if (!this.client) {
+      return {
+        success: false,
+        provider: 'claude',
+        model: request.model ?? DEFAULT_MODEL,
+        content: '',
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        latencyMs: Date.now() - start,
+        error: 'Provider configuration error: ANTHROPIC_API_KEY is not set',
+      };
+    }
+
+    try {
+      const model = request.model ?? DEFAULT_MODEL;
+      const response = await this.client.messages.create({
+        model,
+        max_tokens: request.maxTokens ?? 4096,
+        system: request.systemPrompt,
+        messages: [{ role: 'user', content: request.userPrompt }],
+      });
+
+      const textBlock = response.content.find((block) => block.type === 'text');
+      const content = textBlock && textBlock.type === 'text' ? textBlock.text : '';
+
+      return {
+        success: true,
+        provider: 'claude',
+        model: response.model,
+        content,
+        usage: {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+        },
+        latencyMs: Date.now() - start,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        provider: 'claude',
+        model: request.model ?? DEFAULT_MODEL,
+        content: '',
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        latencyMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+}

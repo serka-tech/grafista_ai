@@ -1,0 +1,40 @@
+{
+  "workflow_id": "style-library-ingestion",
+  "name": "Style Library Ingestion Workflow",
+  "purpose": "Analyze previous approved designs and create a reusable design intelligence library.",
+  "trigger": "Upload of design references or 'Analyze References' action",
+  "required_inputs": {
+    "client_id": { "type": "string", "required": true },
+    "design_files": { "type": "file[]", "required": true, "accepted_formats": ["png", "jpg", "webp"] },
+    "psd_files": { "type": "file[]", "required": false, "accepted_formats": ["psd"] },
+    "file_descriptions": { "type": "string[]", "required": false },
+    "tags": { "type": "string[]", "required": false }
+  },
+  "steps": [
+    { "step_id": "upload_references", "order": 1, "action": "Upload previous design previews as PNG/JPG", "type": "user_action", "inputs": ["client_id", "design_files", "psd_files"], "outputs": ["design_reference_ids"], "skill": null, "approval_required": false },
+    { "step_id": "upload_psd", "order": 2, "action": "Optionally upload PSD files for deeper layer analysis", "type": "user_action", "inputs": ["psd_files"], "outputs": ["psd_reference_ids"], "skill": null, "approval_required": false },
+    { "step_id": "extract_metadata", "order": 3, "action": "Extract visual metadata: dimensions, format, file info", "type": "system", "inputs": ["design_reference_ids"], "outputs": ["metadata_records"], "skill": "style-analysis", "approval_required": false },
+    { "step_id": "analyze_styles", "order": 4, "action": "AI analyzes layout, colors, typography, logo usage, image style, CTA style, mood, composition", "type": "ai_task", "inputs": ["design_reference_ids", "metadata_records"], "outputs": ["style_analysis_results"], "skill": "style-analysis", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "group_references", "order": 5, "action": "Group references by format (post, story, carousel) and campaign type", "type": "system", "inputs": ["style_analysis_results"], "outputs": ["grouped_references", "layout_patterns_json"], "skill": "style-analysis", "approval_required": false },
+    { "step_id": "generate_dna", "order": 6, "action": "Synthesize all style analyses into a unified DesignDNA document", "type": "ai_task", "inputs": ["style_analysis_results", "grouped_references", "client_id"], "outputs": ["design_dna_draft"], "skill": "style-analysis", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "user_approval", "order": 7, "action": "Present DesignDNA to user for approval or correction", "type": "approval_gate", "inputs": ["design_dna_draft"], "outputs": ["approval_status", "revision_notes"], "skill": "approval-gate", "approval_required": true, "on_reject": "return_to_step_6_with_revision_learning" },
+    { "step_id": "learn_from_corrections", "order": 8, "action": "If user made corrections, extract rules from feedback", "type": "ai_task", "inputs": ["revision_notes"], "outputs": ["learned_rules"], "skill": "revision-learning", "condition": "revision_notes !== null", "approval_required": false },
+    { "step_id": "save_dna", "order": 9, "action": "Save approved DesignDNA to client profile in database", "type": "system", "inputs": ["client_id", "design_dna_draft", "approval_status"], "outputs": ["design_dna_id"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" }
+  ],
+  "skills_used": ["style-analysis", "approval-gate", "revision-learning", "model-routing"],
+  "approval_required": true,
+  "outputs": {
+    "DesignDNA": { "type": "json", "schema": "DesignDNA", "stored_in": "design_dna" },
+    "design_reference_metadata": { "type": "json[]", "stored_in": "design_references" },
+    "layout_patterns_json": { "type": "json", "description": "Grouped layout patterns by format" },
+    "style_analysis_json": { "type": "json[]", "schema": "StyleAnalysis", "stored_in": "design_analysis" }
+  },
+  "failure_cases": [
+    { "case": "No design files uploaded", "action": "Prompt user to upload at least 3 references" },
+    { "case": "AI vision model unavailable", "action": "Queue for retry, notify user" },
+    { "case": "Low confidence analysis (<0.3)", "action": "Flag for manual review" },
+    { "case": "User rejects DNA", "action": "Apply revision-learning, regenerate with corrections" }
+  ],
+  "next_workflow": "content-generation",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

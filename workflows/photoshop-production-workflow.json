@@ -1,0 +1,35 @@
+{
+  "workflow_id": "photoshop-production",
+  "name": "Photoshop Production Workflow",
+  "purpose": "Prepare editable Photoshop production based on the approved LayoutPlan.",
+  "trigger": "Layout plan approved, user clicks 'Generate PSD'",
+  "required_inputs": {
+    "layout_plan_id": { "type": "string", "required": true },
+    "client_id": { "type": "string", "required": true },
+    "design_brief_id": { "type": "string", "required": true }
+  },
+  "steps": [
+    { "step_id": "load_layout", "order": 1, "action": "Load approved LayoutPlan with all layer definitions", "type": "system", "inputs": ["layout_plan_id"], "outputs": ["layout_plan"], "skill": null, "approval_required": false },
+    { "step_id": "send_to_photoshop", "order": 2, "action": "Send structured layer instructions to Photoshop UXP worker", "type": "worker_task", "inputs": ["layout_plan"], "outputs": ["psd_generation_job_id"], "skill": "photoshop-automation", "approval_required": false },
+    { "step_id": "create_psd", "order": 3, "action": "Create editable PSD with named layers: insert logo, text, visual assets, masks and effects", "type": "worker_task", "inputs": ["psd_generation_job_id"], "outputs": ["psd_file_url"], "skill": "photoshop-automation", "approval_required": false },
+    { "step_id": "export_preview", "order": 4, "action": "Export PNG/JPG preview from generated PSD", "type": "worker_task", "inputs": ["psd_file_url"], "outputs": ["preview_url"], "skill": "photoshop-automation", "approval_required": false },
+    { "step_id": "return_urls", "order": 5, "action": "Return PSD and preview URLs to dashboard", "type": "system", "inputs": ["psd_file_url", "preview_url"], "outputs": ["export_report"], "skill": null, "approval_required": false },
+    { "step_id": "qa_check", "order": 6, "action": "Run full creative QA on generated PSD preview", "type": "ai_task", "inputs": ["preview_url", "design_brief_id"], "outputs": ["qa_report"], "skill": "creative-director-qa", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "user_approval", "order": 7, "action": "Present PSD preview and QA report for final approval", "type": "approval_gate", "inputs": ["preview_url", "psd_file_url", "qa_report"], "outputs": ["approval_status"], "skill": "approval-gate", "approval_required": true, "on_reject": "return_to_step_2_with_revisions" }
+  ],
+  "skills_used": ["photoshop-automation", "creative-director-qa", "approval-gate"],
+  "approval_required": true,
+  "outputs": {
+    "editable_psd": { "type": "file", "format": "psd", "stored_in": "generated_outputs" },
+    "preview_image": { "type": "file", "format": "png/jpg", "stored_in": "generated_outputs" },
+    "export_report": { "type": "json", "description": "Export status, file URLs, any errors" }
+  },
+  "failure_cases": [
+    { "case": "Photoshop worker not connected (Phase 2)", "action": "Return 'not_implemented' status with LayoutPlan JSON for manual production" },
+    { "case": "PSD generation error", "action": "Return error report with details" },
+    { "case": "QA fails", "action": "Return revision recommendations" },
+    { "case": "Missing fonts/assets", "action": "Flag missing resources, use fallback" }
+  ],
+  "next_workflow": "creative-qa",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

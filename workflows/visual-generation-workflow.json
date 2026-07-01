@@ -1,0 +1,36 @@
+{
+  "workflow_id": "visual-generation",
+  "name": "Visual Generation Workflow",
+  "purpose": "Generate or edit supporting visuals for the design when required.",
+  "trigger": "Layout plan requires generated imagery, or user requests visual generation",
+  "required_inputs": {
+    "client_id": { "type": "string", "required": true },
+    "design_brief_id": { "type": "string", "required": true },
+    "layout_plan_id": { "type": "string", "required": false },
+    "ai_image_prompts": { "type": "json[]", "required": false }
+  },
+  "steps": [
+    { "step_id": "check_existing", "order": 1, "action": "Check if existing client visuals are sufficient", "type": "system", "inputs": ["client_id", "design_brief_id"], "outputs": ["existing_visuals", "needs_generation"], "skill": null, "approval_required": false },
+    { "step_id": "generate_prompts", "order": 2, "action": "If needed, generate AI visual prompts using brand context", "type": "ai_task", "inputs": ["design_brief_id", "ai_image_prompts"], "outputs": ["refined_prompts"], "skill": "model-routing", "condition": "needs_generation === true", "approval_required": false },
+    { "step_id": "route_generation", "order": 3, "action": "Route visual generation task to best image/video model provider", "type": "ai_task", "inputs": ["refined_prompts"], "outputs": ["generated_visuals"], "skill": "model-routing", "approval_required": false },
+    { "step_id": "brand_check", "order": 4, "action": "Run brand consistency check on generated visuals", "type": "ai_task", "inputs": ["generated_visuals", "client_id"], "outputs": ["brand_check_report"], "skill": "creative-director-qa", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "style_check", "order": 5, "action": "Verify visual style matches client DesignDNA", "type": "ai_task", "inputs": ["generated_visuals", "client_id"], "outputs": ["style_match_score"], "skill": "style-analysis", "approval_required": false },
+    { "step_id": "user_approval", "order": 6, "action": "Present visual alternatives with brand/style check results to user for approval", "type": "approval_gate", "inputs": ["generated_visuals", "brand_check_report", "style_match_score"], "outputs": ["approval_status", "approved_visual"], "skill": "approval-gate", "approval_required": true, "on_reject": "regenerate_with_feedback" },
+    { "step_id": "save_visual", "order": 7, "action": "Save approved visual asset to storage and database", "type": "system", "inputs": ["approved_visual", "client_id"], "outputs": ["visual_asset_id", "visual_usage_notes"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" }
+  ],
+  "skills_used": ["model-routing", "style-analysis", "creative-director-qa", "approval-gate"],
+  "approval_required": true,
+  "outputs": {
+    "generated_assets": { "type": "file[]", "description": "Generated image/video assets" },
+    "approved_visual": { "type": "file", "stored_in": "generated_outputs" },
+    "visual_usage_notes": { "type": "json", "description": "How to use the visual in the design" }
+  },
+  "failure_cases": [
+    { "case": "No image provider available", "action": "Return placeholder instructions for manual design" },
+    { "case": "Brand check fails", "action": "Regenerate with stricter brand constraints" },
+    { "case": "Style mismatch", "action": "Adjust prompts using DesignDNA style modifiers" },
+    { "case": "User rejects all visuals", "action": "Regenerate or allow manual upload" }
+  ],
+  "next_workflow": "photoshop-production",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

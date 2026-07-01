@@ -1,0 +1,38 @@
+{
+  "workflow_id": "monthly-content-calendar",
+  "name": "Monthly Content Calendar Workflow",
+  "purpose": "Generate a monthly content plan for a selected client.",
+  "trigger": "User clicks 'Generate Monthly Calendar' or selects a month",
+  "required_inputs": {
+    "client_id": { "type": "string", "required": true },
+    "month": { "type": "string", "required": true, "format": "YYYY-MM" },
+    "posts_per_week": { "type": "number", "required": false, "default": 5 },
+    "platforms": { "type": "Platform[]", "required": false },
+    "special_dates": { "type": "string[]", "required": false }
+  },
+  "steps": [
+    { "step_id": "select_client_month", "order": 1, "action": "User selects client and target month", "type": "user_action", "inputs": ["client_id", "month"], "outputs": ["calendar_scope"], "skill": null, "approval_required": false },
+    { "step_id": "load_context", "order": 2, "action": "Load brand profile, sector trends, past content, important dates", "type": "system", "inputs": ["client_id", "month"], "outputs": ["brand_profile", "design_dna", "past_content", "important_dates", "revision_memory"], "skill": null, "approval_required": false },
+    { "step_id": "generate_calendar", "order": 3, "action": "Generate monthly content calendar with AI — spread across weeks and platforms", "type": "ai_task", "inputs": ["calendar_scope", "brand_profile", "design_dna", "past_content", "important_dates", "revision_memory"], "outputs": ["calendar_draft"], "skill": "content-strategy", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "split_by_format", "order": 4, "action": "Split content by format: post, story, reels cover, carousel, campaign visual", "type": "system", "inputs": ["calendar_draft"], "outputs": ["formatted_calendar"], "skill": null, "approval_required": false },
+    { "step_id": "generate_briefs_preview", "order": 5, "action": "Generate preview design briefs for key calendar items", "type": "ai_task", "inputs": ["formatted_calendar", "brand_profile"], "outputs": ["brief_previews"], "skill": "design-brief-generator", "approval_required": false },
+    { "step_id": "user_approval", "order": 6, "action": "Present full monthly calendar to user for approval", "type": "approval_gate", "inputs": ["formatted_calendar", "brief_previews"], "outputs": ["approval_status", "approved_items", "rejected_items", "revision_notes"], "skill": "approval-gate", "approval_required": true, "on_reject": "revise_specific_items" },
+    { "step_id": "learn_from_edits", "order": 7, "action": "Learn from any calendar edits or rejections", "type": "ai_task", "inputs": ["rejected_items", "revision_notes"], "outputs": ["learned_calendar_preferences"], "skill": "revision-learning", "condition": "rejected_items.length > 0", "approval_required": false },
+    { "step_id": "create_production_queue", "order": 8, "action": "Move approved items into production queue as content ideas", "type": "system", "inputs": ["approved_items", "client_id"], "outputs": ["content_idea_ids", "production_queue"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" }
+  ],
+  "skills_used": ["content-strategy", "approval-gate", "design-brief-generator", "revision-learning"],
+  "approval_required": true,
+  "outputs": {
+    "monthly_calendar": { "type": "json", "description": "Full month calendar with daily content assignments" },
+    "production_queue": { "type": "json[]", "description": "Ordered list of items ready for production", "stored_in": "content_ideas" },
+    "approved_content_list": { "type": "json[]", "stored_in": "content_ideas" }
+  },
+  "failure_cases": [
+    { "case": "No brand profile", "action": "Redirect to client-onboarding" },
+    { "case": "AI generation failed", "action": "Retry with simpler calendar template" },
+    { "case": "User rejects entire calendar", "action": "Regenerate with revision notes" },
+    { "case": "Too many posts requested", "action": "Cap at platform-specific limits" }
+  ],
+  "next_workflow": "content-generation",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

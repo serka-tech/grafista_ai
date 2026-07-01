@@ -1,0 +1,35 @@
+{
+  "workflow_id": "revision-learning",
+  "name": "Revision Learning Workflow",
+  "purpose": "Learn from the user's approvals, rejections and revision notes.",
+  "trigger": "Any approval/rejection action, or explicit 'Learn from feedback'",
+  "required_inputs": {
+    "client_id": { "type": "string", "required": true },
+    "feedback_entries": { "type": "FeedbackEntry[]", "required": true }
+  },
+  "steps": [
+    { "step_id": "capture_feedback", "order": 1, "action": "Capture user feedback from approval/rejection actions", "type": "system", "inputs": ["feedback_entries"], "outputs": ["raw_feedback"], "skill": null, "approval_required": false },
+    { "step_id": "classify_feedback", "order": 2, "action": "Classify feedback by type: copy, layout, color, logo, visual, typography, tone", "type": "ai_task", "inputs": ["raw_feedback"], "outputs": ["classified_feedback"], "skill": "revision-learning", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "update_memory", "order": 3, "action": "Update client RevisionMemory with new rules", "type": "ai_task", "inputs": ["classified_feedback", "client_id"], "outputs": ["updated_revision_memory"], "skill": "revision-learning", "approval_required": false },
+    { "step_id": "update_approval_bias", "order": 4, "action": "Update approval bias patterns — what gets approved vs rejected", "type": "system", "inputs": ["updated_revision_memory"], "outputs": ["approval_bias_update"], "skill": null, "approval_required": false },
+    { "step_id": "adjust_dna", "order": 5, "action": "Adjust DesignDNA rules based on learned preferences", "type": "ai_task", "inputs": ["updated_revision_memory", "client_id"], "outputs": ["dna_adjustments"], "skill": "revision-learning", "approval_required": false },
+    { "step_id": "review_changes", "order": 6, "action": "Present learned rules and DNA adjustments for user confirmation", "type": "approval_gate", "inputs": ["dna_adjustments", "updated_revision_memory"], "outputs": ["approval_status"], "skill": "approval-gate", "approval_required": true },
+    { "step_id": "save_changes", "order": 7, "action": "Save updated RevisionMemory and DesignDNA to database", "type": "system", "inputs": ["updated_revision_memory", "dna_adjustments"], "outputs": ["revision_memory_id"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" },
+    { "step_id": "log_changelog", "order": 8, "action": "Log preference changes to changelog", "type": "system", "inputs": ["dna_adjustments"], "outputs": ["changelog_entry"], "skill": null, "approval_required": false }
+  ],
+  "skills_used": ["revision-learning", "approval-gate", "model-routing"],
+  "approval_required": true,
+  "outputs": {
+    "RevisionMemory": { "type": "json", "schema": "RevisionMemory", "stored_in": "revision_feedback" },
+    "updated_dna_recommendations": { "type": "json", "description": "DesignDNA rule changes" },
+    "client_prompt_improvements": { "type": "json", "description": "Adjusted prompt modifiers for future generation" }
+  },
+  "failure_cases": [
+    { "case": "No feedback provided", "action": "Skip workflow" },
+    { "case": "Conflicting rules detected", "action": "Flag for user resolution" },
+    { "case": "AI provider unavailable", "action": "Store raw feedback, process later" },
+    { "case": "User rejects learned rules", "action": "Discard adjustments, keep original" }
+  ],
+  "next_workflow": null,
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

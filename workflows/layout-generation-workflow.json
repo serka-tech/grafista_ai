@@ -1,0 +1,34 @@
+{
+  "workflow_id": "layout-generation",
+  "name": "Layout Generation Workflow",
+  "purpose": "Create a structured layout plan for the approved design brief.",
+  "trigger": "Design brief approved, user clicks 'Generate Layout'",
+  "required_inputs": {
+    "design_brief_id": { "type": "string", "required": true },
+    "client_id": { "type": "string", "required": true },
+    "alternative_count": { "type": "number", "required": false, "default": 3 }
+  },
+  "steps": [
+    { "step_id": "load_brief", "order": 1, "action": "Load approved DesignBrief with all specifications", "type": "system", "inputs": ["design_brief_id"], "outputs": ["design_brief"], "skill": null, "approval_required": false },
+    { "step_id": "generate_layouts", "order": 2, "action": "Generate 2-3 LayoutPlan alternatives with canvas size, grid, safe zones, text boxes, visual masks, logo area, CTA area, layer order", "type": "ai_task", "inputs": ["design_brief", "alternative_count"], "outputs": ["layout_alternatives"], "skill": "layout-generation", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "qa_check", "order": 3, "action": "Run creative QA on each layout alternative", "type": "ai_task", "inputs": ["layout_alternatives", "design_brief"], "outputs": ["qa_reports"], "skill": "creative-director-qa", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "present_alternatives", "order": 4, "action": "Present layout alternatives with QA scores and preview instructions to user", "type": "user_action", "inputs": ["layout_alternatives", "qa_reports"], "outputs": ["selected_layout_index"], "skill": null, "approval_required": false },
+    { "step_id": "user_approval", "order": 5, "action": "User approves one selected layout", "type": "approval_gate", "inputs": ["selected_layout_index", "layout_alternatives"], "outputs": ["approval_status", "approved_layout"], "skill": "approval-gate", "approval_required": true, "on_reject": "return_to_step_2" },
+    { "step_id": "save_layout", "order": 6, "action": "Save approved LayoutPlan to database, link to design brief", "type": "system", "inputs": ["design_brief_id", "approved_layout"], "outputs": ["layout_plan_id"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" }
+  ],
+  "skills_used": ["layout-generation", "approval-gate", "creative-director-qa", "model-routing"],
+  "approval_required": true,
+  "outputs": {
+    "LayoutPlan[]": { "type": "json[]", "schema": "LayoutPlan", "description": "2-3 layout alternatives" },
+    "selected_LayoutPlan": { "type": "json", "schema": "LayoutPlan", "stored_in": "layout_plans" },
+    "preview_instructions": { "type": "json", "description": "Instructions for rendering preview" }
+  },
+  "failure_cases": [
+    { "case": "Brief not approved", "action": "Redirect to design-brief-workflow" },
+    { "case": "AI generation failed", "action": "Retry with fallback provider" },
+    { "case": "QA failed all alternatives", "action": "Flag issues, regenerate" },
+    { "case": "User rejects all layouts", "action": "Regenerate with feedback" }
+  ],
+  "next_workflow": "visual-generation",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

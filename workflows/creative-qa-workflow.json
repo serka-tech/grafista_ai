@@ -1,0 +1,40 @@
+{
+  "workflow_id": "creative-qa",
+  "name": "Creative QA Workflow",
+  "purpose": "Review every generated design before final approval.",
+  "trigger": "Design output generated, before final delivery",
+  "required_inputs": {
+    "design_brief_id": { "type": "string", "required": true },
+    "client_id": { "type": "string", "required": true },
+    "preview_url": { "type": "string", "required": false },
+    "layout_plan_id": { "type": "string", "required": false }
+  },
+  "steps": [
+    { "step_id": "brand_consistency", "order": 1, "action": "Check brand consistency — colors, fonts, personality match", "type": "ai_task", "inputs": ["design_brief_id", "client_id"], "outputs": ["brand_check"], "skill": "creative-director-qa", "approval_required": false },
+    { "step_id": "logo_check", "order": 2, "action": "Check logo usage and safe area compliance", "type": "ai_task", "inputs": ["preview_url", "client_id"], "outputs": ["logo_check"], "skill": "creative-director-qa", "approval_required": false },
+    { "step_id": "typography_check", "order": 3, "action": "Check typography hierarchy — heading/body/caption order", "type": "ai_task", "inputs": ["design_brief_id"], "outputs": ["typography_check"], "skill": "creative-director-qa", "approval_required": false },
+    { "step_id": "spelling_check", "order": 4, "action": "Check spelling and grammar in all text elements", "type": "ai_task", "inputs": ["design_brief_id"], "outputs": ["spelling_check"], "skill": "creative-director-qa", "approval_required": false },
+    { "step_id": "mobile_readability", "order": 5, "action": "Check mobile readability — font sizes, contrast on small screens", "type": "ai_task", "inputs": ["design_brief_id", "layout_plan_id"], "outputs": ["mobile_check"], "skill": "creative-director-qa", "approval_required": false },
+    { "step_id": "visual_hierarchy", "order": 6, "action": "Check visual hierarchy — eye flow, focal points, CTA prominence", "type": "ai_task", "inputs": ["layout_plan_id"], "outputs": ["hierarchy_check"], "skill": "creative-director-qa", "approval_required": false },
+    { "step_id": "dna_comparison", "order": 7, "action": "Compare output with client DesignDNA — pattern match score", "type": "ai_task", "inputs": ["design_brief_id", "client_id"], "outputs": ["dna_match"], "skill": "style-analysis", "approval_required": false },
+    { "step_id": "generate_score", "order": 8, "action": "Calculate overall QA score from all checks", "type": "system", "inputs": ["brand_check", "logo_check", "typography_check", "spelling_check", "mobile_check", "hierarchy_check", "dna_match"], "outputs": ["qa_report"], "skill": null, "approval_required": false },
+    { "step_id": "revision_recommendations", "order": 9, "action": "If score below threshold, create specific revision recommendations", "type": "ai_task", "inputs": ["qa_report"], "outputs": ["revision_list"], "skill": "creative-director-qa", "condition": "qa_report.overallScore < 80", "approval_required": false },
+    { "step_id": "learn_patterns", "order": 10, "action": "Feed QA results into revision learning for future improvement", "type": "ai_task", "inputs": ["qa_report", "client_id"], "outputs": ["learned_patterns"], "skill": "revision-learning", "approval_required": false },
+    { "step_id": "user_approval", "order": 11, "action": "If score passes threshold, present QA report for final user approval", "type": "approval_gate", "inputs": ["qa_report", "revision_list"], "outputs": ["final_approval_status"], "skill": "approval-gate", "approval_required": true, "condition": "qa_report.overallScore >= 50" }
+  ],
+  "skills_used": ["creative-director-qa", "style-analysis", "approval-gate", "revision-learning"],
+  "approval_required": true,
+  "outputs": {
+    "CreativeQAReport": { "type": "json", "schema": "CreativeQAReport", "stored_in": "qa_reports" },
+    "revision_recommendations": { "type": "json[]", "description": "Specific fixes if QA fails" },
+    "final_approval_status": { "type": "string", "stored_in": "approvals" }
+  },
+  "failure_cases": [
+    { "case": "QA score < 50 (failed)", "action": "Block final approval, show critical issues" },
+    { "case": "QA score 50-79 (needs revision)", "action": "Allow approval with warnings" },
+    { "case": "AI provider unavailable", "action": "Manual QA checklist fallback" },
+    { "case": "User rejects despite passing QA", "action": "Capture feedback via revision-learning" }
+  ],
+  "next_workflow": null,
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

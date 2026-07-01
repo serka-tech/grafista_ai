@@ -1,0 +1,88 @@
+import { Router, Request, Response } from 'express';
+import { v4 as uuid } from 'uuid';
+import { store } from '../data/store.js';
+
+export const designBriefsRouter: Router = Router();
+
+// POST /api/design-briefs — create (requires approved content idea)
+designBriefsRouter.post('/design-briefs', (req: Request, res: Response) => {
+  const { contentIdeaId } = req.body;
+  if (!contentIdeaId) return res.status(400).json({ error: 'contentIdeaId is required' });
+
+  const idea = store.contentIdeas.get(contentIdeaId);
+  if (!idea) return res.status(404).json({ error: 'Content idea not found' });
+
+  // ── APPROVAL GATE ──
+  if (idea.status !== 'approved') {
+    return res.status(403).json({
+      error: 'Content idea must be approved before creating a design brief',
+      currentStatus: idea.status,
+      message: 'Approve this content idea first via POST /api/content-ideas/:id/approve',
+    });
+  }
+
+  const now = new Date().toISOString();
+
+  // Platform dimension mapping
+  const dimensionMap: Record<string, { width: number; height: number }> = {
+    instagram_post: { width: 1080, height: 1080 },
+    instagram_story: { width: 1080, height: 1920 },
+    instagram_reel: { width: 1080, height: 1920 },
+    instagram_carousel: { width: 1080, height: 1080 },
+    facebook_post: { width: 1200, height: 630 },
+    twitter_post: { width: 1200, height: 675 },
+    linkedin_post: { width: 1200, height: 627 },
+    youtube_thumbnail: { width: 1280, height: 720 },
+  };
+
+  const dims = dimensionMap[idea.platform] ?? { width: 1080, height: 1080 };
+
+  const brief = {
+    id: uuid(),
+    clientId: idea.clientId,
+    contentIdeaId: idea.id,
+    approvalId: idea.approvalId!,
+    title: `Brief: ${idea.title}`,
+    objective: idea.description,
+    platform: idea.platform,
+    format: idea.format,
+    dimensions: { ...dims, unit: 'px' },
+    contentElements: {
+      headline: idea.hook ?? idea.title,
+      caption: idea.caption,
+      callToAction: idea.callToAction,
+      hashtags: idea.hashtags,
+    },
+    visualDirection: {
+      mood: idea.toneOfVoice ?? 'professional',
+      imageDirection: idea.visualDirection,
+    },
+    brandConstraints: {
+      requiredElements: ['logo'],
+    },
+    aiImagePrompts: idea.aiImagePrompt ? [{ label: 'Main Image', prompt: idea.aiImagePrompt }] : [],
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.designBriefs.set(brief.id, brief);
+
+  res.status(201).json({ data: brief });
+});
+
+// GET /api/design-briefs/:id
+designBriefsRouter.get('/design-briefs/:id', (req: Request, res: Response) => {
+  const brief = store.designBriefs.get(req.params.id);
+  if (!brief) return res.status(404).json({ error: 'Design brief not found' });
+
+  const idea = store.contentIdeas.get(brief.contentIdeaId);
+  const client = store.clients.get(brief.clientId);
+
+  res.json({ data: { ...brief, contentIdea: idea, client } });
+});
+
+// GET /api/design-briefs — list all
+designBriefsRouter.get('/design-briefs', (_req: Request, res: Response) => {
+  const briefs = Array.from(store.designBriefs.values());
+  res.json({ data: briefs, total: briefs.length });
+});

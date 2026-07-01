@@ -1,0 +1,108 @@
+{
+  "workflow_id": "client-onboarding",
+  "name": "Client Onboarding Workflow",
+  "purpose": "Create a new client profile, upload brand assets, normalize brand information, and generate the first BrandProfile.",
+  "trigger": "New client creation or 'onboard client' action",
+  "required_inputs": {
+    "client_name": { "type": "string", "required": true },
+    "industry": { "type": "string", "required": false },
+    "website": { "type": "string", "required": false },
+    "contact_name": { "type": "string", "required": false },
+    "contact_email": { "type": "string", "required": false },
+    "brand_notes": { "type": "string", "required": false },
+    "logo_files": { "type": "file[]", "required": false, "accepted_formats": ["png", "svg", "jpg"] },
+    "color_palette": { "type": "Color[]", "required": false },
+    "font_list": { "type": "Font[]", "required": false },
+    "brand_rules_text": { "type": "string", "required": false }
+  },
+  "steps": [
+    {
+      "step_id": "create_client",
+      "order": 1,
+      "action": "Create client record in database",
+      "type": "system",
+      "inputs": ["client_name", "industry", "website", "contact_name", "contact_email"],
+      "outputs": ["client_id"],
+      "skill": null,
+      "approval_required": false
+    },
+    {
+      "step_id": "upload_assets",
+      "order": 2,
+      "action": "Upload logo, color palette, fonts, and brand notes",
+      "type": "user_action",
+      "inputs": ["client_id", "logo_files", "color_palette", "font_list", "brand_notes"],
+      "outputs": ["brand_asset_ids"],
+      "skill": null,
+      "approval_required": false
+    },
+    {
+      "step_id": "validate_assets",
+      "order": 3,
+      "action": "Validate uploaded asset formats and completeness",
+      "type": "system",
+      "inputs": ["brand_asset_ids"],
+      "outputs": ["validation_report"],
+      "skill": "brand-intake",
+      "approval_required": false
+    },
+    {
+      "step_id": "generate_brand_profile",
+      "order": 4,
+      "action": "Normalize raw brand data into structured BrandProfile JSON using AI",
+      "type": "ai_task",
+      "inputs": ["client_id", "brand_asset_ids", "brand_notes", "brand_rules_text"],
+      "outputs": ["brand_profile_draft"],
+      "skill": "brand-intake",
+      "ai_provider_routing": "model-routing",
+      "approval_required": false
+    },
+    {
+      "step_id": "generate_brand_rules",
+      "order": 5,
+      "action": "Generate brand-rules.md and forbidden-rules.md documents",
+      "type": "ai_task",
+      "inputs": ["brand_profile_draft"],
+      "outputs": ["brand_rules_md", "forbidden_rules_md"],
+      "skill": "brand-intake",
+      "approval_required": false
+    },
+    {
+      "step_id": "user_approval",
+      "order": 6,
+      "action": "Present BrandProfile, brand-rules.md, and forbidden-rules.md to user for review",
+      "type": "approval_gate",
+      "inputs": ["brand_profile_draft", "brand_rules_md", "forbidden_rules_md"],
+      "outputs": ["approval_status", "revision_notes"],
+      "skill": "approval-gate",
+      "approval_required": true,
+      "on_reject": "return_to_step_4"
+    },
+    {
+      "step_id": "save_profile",
+      "order": 7,
+      "action": "Save approved brand profile to database and link to client",
+      "type": "system",
+      "inputs": ["client_id", "brand_profile_draft", "approval_status"],
+      "outputs": ["brand_profile_id"],
+      "skill": null,
+      "approval_required": false,
+      "condition": "approval_status === 'approved'"
+    }
+  ],
+  "skills_used": ["brand-intake", "approval-gate", "model-routing"],
+  "approval_required": true,
+  "outputs": {
+    "BrandProfile": { "type": "json", "schema": "BrandProfile", "stored_in": "brand_profiles" },
+    "brand_rules_md": { "type": "markdown", "description": "Human-readable brand rules document" },
+    "forbidden_rules_md": { "type": "markdown", "description": "Forbidden elements and restrictions document" }
+  },
+  "failure_cases": [
+    { "case": "No brand information provided", "action": "Prompt user to provide minimum brand data (name + at least 1 color)" },
+    { "case": "AI provider unavailable", "action": "Fallback to manual BrandProfile template" },
+    { "case": "Asset format invalid", "action": "Return validation error with accepted formats" },
+    { "case": "User rejects BrandProfile", "action": "Return to generation step with revision notes" }
+  ],
+  "next_workflow": "style-library-ingestion",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

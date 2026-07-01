@@ -1,0 +1,26 @@
+{
+  "name": "grafista-ai-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agency Creative Intelligence System — AI-powered advertising agency platform",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:api": "pnpm --filter @grafista/api dev",
+    "dev:dashboard": "pnpm --filter @grafista/dashboard dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@9.1.0",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7",
+    "@typescript-eslint/parser": "^7",
+    "eslint": "8"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "workflow_id": "design-brief",
+  "name": "Design Brief Workflow",
+  "purpose": "Convert approved content into a structured design brief.",
+  "trigger": "Content idea approved, user clicks 'Create Design Brief'",
+  "required_inputs": {
+    "content_idea_id": { "type": "string", "required": true },
+    "client_id": { "type": "string", "required": true }
+  },
+  "steps": [
+    { "step_id": "load_content", "order": 1, "action": "Load approved content idea with all copy and visual direction", "type": "system", "inputs": ["content_idea_id"], "outputs": ["approved_content"], "skill": null, "approval_required": false, "condition": "content.status === 'approved'" },
+    { "step_id": "load_brand_context", "order": 2, "action": "Load client BrandProfile and DesignDNA", "type": "system", "inputs": ["client_id"], "outputs": ["brand_profile", "design_dna"], "skill": null, "approval_required": false },
+    { "step_id": "select_references", "order": 3, "action": "Select most relevant design references based on platform and format", "type": "ai_task", "inputs": ["design_dna", "approved_content"], "outputs": ["selected_references"], "skill": "style-analysis", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "generate_brief", "order": 4, "action": "Generate structured DesignBrief with format, size, hierarchy, copy placement, logo placement, visual direction and export needs", "type": "ai_task", "inputs": ["approved_content", "brand_profile", "design_dna", "selected_references"], "outputs": ["design_brief_draft"], "skill": "design-brief-generator", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "generate_ai_prompts", "order": 5, "action": "Generate AI image prompts if visual generation is needed", "type": "ai_task", "inputs": ["design_brief_draft", "brand_profile"], "outputs": ["ai_image_prompts"], "skill": "design-brief-generator", "condition": "brief_requires_imagery", "approval_required": false },
+    { "step_id": "user_approval", "order": 6, "action": "Present design brief to user for approval before design production", "type": "approval_gate", "inputs": ["design_brief_draft", "ai_image_prompts", "selected_references"], "outputs": ["approval_status", "revision_notes"], "skill": "approval-gate", "approval_required": true, "on_reject": "return_to_step_4" },
+    { "step_id": "save_brief", "order": 7, "action": "Save approved DesignBrief to database", "type": "system", "inputs": ["client_id", "design_brief_draft", "approval_status"], "outputs": ["design_brief_id"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" }
+  ],
+  "skills_used": ["design-brief-generator", "style-analysis", "approval-gate", "model-routing"],
+  "approval_required": true,
+  "outputs": {
+    "DesignBrief": { "type": "json", "schema": "DesignBrief", "stored_in": "design_briefs" },
+    "selected_references": { "type": "json[]", "description": "Most relevant reference designs for this brief" },
+    "ai_image_prompts": { "type": "json[]", "description": "AI prompts for generating imagery", "conditional": true }
+  },
+  "failure_cases": [
+    { "case": "Content idea not approved", "action": "Return 403, redirect to approval queue" },
+    { "case": "No DesignDNA exists", "action": "Generate brief with BrandProfile only" },
+    { "case": "AI provider unavailable", "action": "Use template-based brief generation" },
+    { "case": "User rejects brief", "action": "Return to generation with revision notes" }
+  ],
+  "next_workflow": "layout-generation",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

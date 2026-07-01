@@ -1,0 +1,43 @@
+{
+  "workflow_id": "content-generation",
+  "name": "Content Generation Workflow",
+  "purpose": "Generate client-specific social media content ideas according to the client's brand profile and campaign goal.",
+  "trigger": "User clicks 'Generate Content' or starts a new campaign",
+  "required_inputs": {
+    "client_id": { "type": "string", "required": true },
+    "campaign_goal": { "type": "string", "required": true },
+    "platform": { "type": "Platform", "required": true },
+    "format": { "type": "ContentFormat", "required": false },
+    "target_audience": { "type": "string", "required": false },
+    "topic": { "type": "string", "required": false },
+    "mood": { "type": "string", "required": false },
+    "option_count": { "type": "number", "required": false, "default": 3 }
+  },
+  "steps": [
+    { "step_id": "select_client", "order": 1, "action": "User selects client from list", "type": "user_action", "inputs": [], "outputs": ["client_id"], "skill": null, "approval_required": false },
+    { "step_id": "enter_campaign_details", "order": 2, "action": "User enters campaign goal, platform, format and target audience", "type": "user_action", "inputs": ["campaign_goal", "platform", "format", "target_audience"], "outputs": ["campaign_brief"], "skill": null, "approval_required": false },
+    { "step_id": "load_brand_context", "order": 3, "action": "Load BrandProfile, DesignDNA and past approved content for context", "type": "system", "inputs": ["client_id"], "outputs": ["brand_profile", "design_dna", "past_approved_content", "revision_memory"], "skill": null, "approval_required": false },
+    { "step_id": "generate_ideas", "order": 4, "action": "Generate multiple content ideas using AI with full brand context", "type": "ai_task", "inputs": ["campaign_brief", "brand_profile", "design_dna", "past_approved_content", "revision_memory"], "outputs": ["content_ideas_draft"], "skill": "content-strategy", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "generate_copy", "order": 5, "action": "Generate captions, headlines, CTA options and visual directions for each idea", "type": "ai_task", "inputs": ["content_ideas_draft", "brand_profile"], "outputs": ["content_ideas_with_copy"], "skill": "content-strategy", "ai_provider_routing": "model-routing", "approval_required": false },
+    { "step_id": "present_options", "order": 6, "action": "Present all content options to user with brand alignment scores", "type": "user_action", "inputs": ["content_ideas_with_copy"], "outputs": ["user_selection"], "skill": null, "approval_required": false },
+    { "step_id": "user_approval", "order": 7, "action": "User approves, rejects, or requests revision for each idea", "type": "approval_gate", "inputs": ["user_selection"], "outputs": ["approval_status", "approved_ideas", "rejected_ideas", "revision_notes"], "skill": "approval-gate", "approval_required": true, "on_reject": "apply_revision_learning_and_regenerate" },
+    { "step_id": "learn_from_feedback", "order": 8, "action": "Process rejection reasons and revision notes into learned rules", "type": "ai_task", "inputs": ["rejected_ideas", "revision_notes"], "outputs": ["learned_rules"], "skill": "revision-learning", "condition": "rejected_ideas.length > 0", "approval_required": false },
+    { "step_id": "save_approved", "order": 9, "action": "Save approved content ideas to database linked to client", "type": "system", "inputs": ["client_id", "approved_ideas"], "outputs": ["content_idea_ids"], "skill": null, "approval_required": false }
+  ],
+  "skills_used": ["content-strategy", "approval-gate", "revision-learning", "model-routing"],
+  "approval_required": true,
+  "outputs": {
+    "ContentIdea[]": { "type": "json[]", "schema": "ContentIdea", "stored_in": "content_ideas" },
+    "captions": { "type": "string[]", "description": "Platform-optimized captions" },
+    "headline_options": { "type": "string[]", "description": "Multiple headline alternatives" },
+    "approved_content_record": { "type": "json", "stored_in": "approvals" }
+  },
+  "failure_cases": [
+    { "case": "No BrandProfile exists", "action": "Redirect to client-onboarding workflow" },
+    { "case": "No DesignDNA exists", "action": "Warn user, generate with brand profile only" },
+    { "case": "AI provider unavailable", "action": "Retry with fallback provider" },
+    { "case": "All ideas rejected", "action": "Apply revision-learning, regenerate with new context" }
+  ],
+  "next_workflow": "design-brief",
+  "status_tracking": ["draft", "waiting_for_approval", "approved", "in_progress", "qa_failed", "completed"]
+}

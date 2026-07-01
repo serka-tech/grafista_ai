@@ -1,0 +1,85 @@
+/**
+ * Grafista AI Studio — Model Router Types
+ */
+
+export type AIProvider = 'openai' | 'gemini' | 'claude' | 'kie-ai' | 'higgsfield';
+
+export type AITaskType =
+  | 'brand_intake'
+  | 'style_analysis'
+  | 'tone_extraction'
+  | 'content_ideation'
+  | 'caption_generation'
+  | 'design_brief'
+  | 'layout_generation'
+  | 'creative_qa'
+  | 'revision_learning'
+  | 'image_generation'
+  | 'video_generation';
+
+export type AICapability = 'text' | 'vision' | 'image_generation' | 'video_generation' | 'embedding';
+
+export interface ProviderConfig {
+  name: AIProvider;
+  displayName: string;
+  apiKeyEnv: string;
+  baseUrl?: string;
+  capabilities: AICapability[];
+  models: ModelConfig[];
+  isEnabled: boolean;
+  maxRetries: number;
+  timeoutMs: number;
+  costPerMToken?: number;
+}
+
+export interface ModelConfig {
+  id: string;
+  name: string;
+  capabilities: AICapability[];
+  maxTokens: number;
+  costPer1kInput?: number;
+  costPer1kOutput?: number;
+}
+
+export interface AIRequest {
+  taskType: AITaskType;
+  provider?: AIProvider;
+  model?: string;
+  systemPrompt: string;
+  userPrompt: string;
+  images?: string[];
+  outputFormat: 'json' | 'text' | 'markdown';
+  maxTokens?: number;
+  temperature?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AIResponse {
+  success: boolean;
+  provider: AIProvider;
+  model: string;
+  content: string;
+  parsedContent?: unknown;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedCost?: number;
+  };
+  latencyMs: number;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProviderAdapter {
+  name: AIProvider;
+  isAvailable(): boolean;
+  complete(request: AIRequest): Promise<AIResponse>;
+}
+
+export interface TaskRouting {
+  taskType: AITaskType;
+  primaryProvider: AIProvider;
+  fallbackProviders: AIProvider[];
+  requiredCapabilities: AICapability[];
+}
