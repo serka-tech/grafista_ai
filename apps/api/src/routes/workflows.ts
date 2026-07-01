@@ -51,14 +51,14 @@ workflowsRouter.get('/:workflowId', (req: Request, res: Response) => {
 });
 
 // POST /api/workflows/:workflowId/start — start a new workflow instance
-workflowsRouter.post('/:workflowId/start', (req: Request, res: Response) => {
+workflowsRouter.post('/:workflowId/start', async (req: Request, res: Response) => {
   const def = WORKFLOW_DEFINITIONS.find(w => w.workflow_id === req.params.workflowId);
   if (!def) return res.status(404).json({ error: 'Workflow not found' });
 
   const { clientId, inputs } = req.body;
   if (!clientId) return res.status(400).json({ error: 'clientId is required' });
 
-  const client = store.clients.get(clientId);
+  const client = await store.clients.getById(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
   const now = new Date().toISOString();
@@ -81,32 +81,33 @@ workflowsRouter.post('/:workflowId/start', (req: Request, res: Response) => {
 });
 
 // GET /api/workflows/instances — list running workflow instances
-workflowsRouter.get('/instances/list', (req: Request, res: Response) => {
+workflowsRouter.get('/instances/list', async (req: Request, res: Response) => {
   const clientId = req.query.clientId as string | undefined;
   let instances = Array.from(workflowInstances.values());
   if (clientId) instances = instances.filter(i => i.clientId === clientId);
 
-  const enriched = instances.map(inst => ({
+  const enriched = await Promise.all(instances.map(async (inst) => ({
     ...inst,
     workflowName: WORKFLOW_DEFINITIONS.find(w => w.workflow_id === inst.workflowId)?.name,
     workflowIcon: WORKFLOW_DEFINITIONS.find(w => w.workflow_id === inst.workflowId)?.icon,
-    clientName: store.clients.get(inst.clientId)?.name,
-  }));
+    clientName: (await store.clients.getById(inst.clientId))?.name,
+  })));
 
   res.json({ data: enriched, total: enriched.length });
 });
 
 // GET /api/workflows/instances/:id — get a specific workflow instance
-workflowsRouter.get('/instances/:id', (req: Request, res: Response) => {
+workflowsRouter.get('/instances/:id', async (req: Request, res: Response) => {
   const instance = workflowInstances.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Workflow instance not found' });
 
   const def = WORKFLOW_DEFINITIONS.find(w => w.workflow_id === instance.workflowId);
+  const client = await store.clients.getById(instance.clientId);
   res.json({
     data: {
       ...instance,
       definition: def,
-      clientName: store.clients.get(instance.clientId)?.name,
+      clientName: client?.name,
     },
   });
 });

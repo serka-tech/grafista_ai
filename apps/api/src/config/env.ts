@@ -14,6 +14,12 @@ const EnvSchema = z.object({
     errorMap: () => ({ message: 'AI_DEFAULT_PROVIDER must be one of: openai, claude' }),
   }),
   API_PORT: z.coerce.number({ invalid_type_error: 'API_PORT must be a number' }).int().positive(),
+  DATABASE_URL: z
+    .string()
+    .min(1, 'DATABASE_URL is required — set it in .env (e.g. postgresql://user:password@localhost:5432/grafista)')
+    .refine((v) => v.startsWith('postgres://') || v.startsWith('postgresql://'), {
+      message: 'DATABASE_URL must be a postgres:// or postgresql:// connection string',
+    }),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

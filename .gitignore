@@ -32,3 +32,6 @@ logs/
 # Coverage
 coverage/
 .nyc_output/
+
+# Ephemeral test database (embedded-postgres, created/destroyed per test run)
+.test-pgdata/

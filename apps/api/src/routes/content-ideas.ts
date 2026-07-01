@@ -12,16 +12,15 @@ const modelRouter = new ModelRouter();
 const BodySchema = GenerateContentRequestSchema.omit({ clientId: true });
 
 // GET /api/clients/:clientId/content-ideas
-contentIdeasRouter.get('/:clientId/content-ideas', (req: Request, res: Response) => {
-  const ideas = Array.from(store.contentIdeas.values()).filter((i) => i.clientId === req.params.clientId);
+contentIdeasRouter.get('/:clientId/content-ideas', async (req: Request, res: Response) => {
   const status = req.query.status as string | undefined;
-  const filtered = status ? ideas.filter((i) => i.status === status) : ideas;
-  res.json({ data: filtered, total: filtered.length });
+  const ideas = await store.contentIdeas.listByClient(req.params.clientId, status);
+  res.json({ data: ideas, total: ideas.length });
 });
 
 // POST /api/clients/:clientId/content-ideas — generate ideas via a real AI provider call
 contentIdeasRouter.post('/:clientId/content-ideas', async (req: Request, res: Response) => {
-  const client = store.clients.get(req.params.clientId);
+  const client = await store.clients.getById(req.params.clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
   const parsedBody = BodySchema.safeParse(req.body);
@@ -30,11 +29,9 @@ contentIdeasRouter.post('/:clientId/content-ideas', async (req: Request, res: Re
   }
   const { platform, format, topic, optionCount, campaignName, mood, additionalNotes } = parsedBody.data;
 
-  const designDNA = Array.from(store.designDNA.values()).find((d) => d.clientId === client.id);
-  const previousApproved = Array.from(store.contentIdeas.values())
-    .filter((i) => i.clientId === client.id && i.status === 'approved')
-    .map((i) => `- ${i.title}: ${i.description}`)
-    .join('\n');
+  const designDNA = store.designDNA.findByClientId(client.id);
+  const approvedIdeas = await store.contentIdeas.listApprovedByClient(client.id);
+  const previousApproved = approvedIdeas.map((i) => `- ${i.title}: ${i.description}`).join('\n');
 
   const prompt = createPromptBuilder(contentIdeationTemplate)
     .setVariables({
@@ -81,9 +78,9 @@ contentIdeasRouter.post('/:clientId/content-ideas', async (req: Request, res: Re
     });
   }
 
-  const now = new Date().toISOString();
-  const ideas = rawIdeas.slice(0, optionCount).map((raw, i) => {
-    const idea = {
+  const ideas = [];
+  for (const [i, raw] of rawIdeas.slice(0, optionCount).entries()) {
+    const idea = await store.contentIdeas.create({
       id: uuid(),
       clientId: client.id,
       campaignName,
@@ -99,12 +96,9 @@ contentIdeasRouter.post('/:clientId/content-ideas', async (req: Request, res: Re
       visualDirection: typeof raw.visualDirection === 'string' ? raw.visualDirection : undefined,
       status: 'pending_approval',
       generatedBy: 'ai',
-      createdAt: now,
-      updatedAt: now,
-    };
-    store.contentIdeas.set(idea.id, idea);
-    return idea;
-  });
+    });
+    ideas.push(idea);
+  }
 
   res.status(201).json({ data: ideas, total: ideas.length, provider: aiResponse.provider, model: aiResponse.model });
 });

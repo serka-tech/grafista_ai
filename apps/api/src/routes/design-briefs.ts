@@ -5,11 +5,11 @@ import { store } from '../data/store.js';
 export const designBriefsRouter: Router = Router();
 
 // POST /api/design-briefs — create (requires approved content idea)
-designBriefsRouter.post('/design-briefs', (req: Request, res: Response) => {
+designBriefsRouter.post('/design-briefs', async (req: Request, res: Response) => {
   const { contentIdeaId } = req.body;
   if (!contentIdeaId) return res.status(400).json({ error: 'contentIdeaId is required' });
 
-  const idea = store.contentIdeas.get(contentIdeaId);
+  const idea = await store.contentIdeas.getById(contentIdeaId);
   if (!idea) return res.status(404).json({ error: 'Content idea not found' });
 
   // ── APPROVAL GATE ──
@@ -20,8 +20,6 @@ designBriefsRouter.post('/design-briefs', (req: Request, res: Response) => {
       message: 'Approve this content idea first via POST /api/content-ideas/:id/approve',
     });
   }
-
-  const now = new Date().toISOString();
 
   // Platform dimension mapping
   const dimensionMap: Record<string, { width: number; height: number }> = {
@@ -37,7 +35,7 @@ designBriefsRouter.post('/design-briefs', (req: Request, res: Response) => {
 
   const dims = dimensionMap[idea.platform] ?? { width: 1080, height: 1080 };
 
-  const brief = {
+  const brief = await store.designBriefs.create({
     id: uuid(),
     clientId: idea.clientId,
     contentIdeaId: idea.id,
@@ -61,28 +59,24 @@ designBriefsRouter.post('/design-briefs', (req: Request, res: Response) => {
       requiredElements: ['logo'],
     },
     aiImagePrompts: idea.aiImagePrompt ? [{ label: 'Main Image', prompt: idea.aiImagePrompt }] : [],
-    status: 'draft',
-    createdAt: now,
-    updatedAt: now,
-  };
-  store.designBriefs.set(brief.id, brief);
+  });
 
   res.status(201).json({ data: brief });
 });
 
 // GET /api/design-briefs/:id
-designBriefsRouter.get('/design-briefs/:id', (req: Request, res: Response) => {
-  const brief = store.designBriefs.get(req.params.id);
+designBriefsRouter.get('/design-briefs/:id', async (req: Request, res: Response) => {
+  const brief = await store.designBriefs.getById(req.params.id);
   if (!brief) return res.status(404).json({ error: 'Design brief not found' });
 
-  const idea = store.contentIdeas.get(brief.contentIdeaId);
-  const client = store.clients.get(brief.clientId);
+  const idea = await store.contentIdeas.getById(brief.contentIdeaId);
+  const client = await store.clients.getById(brief.clientId);
 
   res.json({ data: { ...brief, contentIdea: idea, client } });
 });
 
 // GET /api/design-briefs — list all
-designBriefsRouter.get('/design-briefs', (_req: Request, res: Response) => {
-  const briefs = Array.from(store.designBriefs.values());
+designBriefsRouter.get('/design-briefs', async (_req: Request, res: Response) => {
+  const briefs = await store.designBriefs.list();
   res.json({ data: briefs, total: briefs.length });
 });
