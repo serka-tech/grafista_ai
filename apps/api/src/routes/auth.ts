@@ -7,6 +7,7 @@ import { verifyPassword } from '../auth/password.js';
 import { generateSessionToken, hashSessionToken, SESSION_COOKIE_NAME, SESSION_TTL_MS } from '../auth/session-token.js';
 import { requireAuth } from '../auth/middleware.js';
 import { env } from '../config/env.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const authRouter: Router = Router();
 
@@ -26,7 +27,7 @@ function cookieOptions() {
 }
 
 // POST /api/auth/login
-authRouter.post('/auth/login', async (req: Request, res: Response) => {
+authRouter.post('/auth/login', asyncHandler(async (req: Request, res: Response) => {
   const parsed = LoginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request body', issues: parsed.error.issues });
@@ -55,17 +56,17 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
 
   const access = await usersRepo.getWithAccess(user.id);
   res.json({ data: { user: access } });
-});
+}));
 
 // POST /api/auth/logout
-authRouter.post('/auth/logout', async (req: Request, res: Response) => {
+authRouter.post('/auth/logout', asyncHandler(async (req: Request, res: Response) => {
   const token = req.cookies?.[SESSION_COOKIE_NAME] as string | undefined;
   if (token) {
     await sessionsRepo.revokeByTokenHash(hashSessionToken(token));
   }
   res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
   res.json({ data: { loggedOut: true } });
-});
+}));
 
 // GET /api/auth/me
 authRouter.get('/auth/me', requireAuth, (req: Request, res: Response) => {

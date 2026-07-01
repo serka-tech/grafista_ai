@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { upload } from '../middleware/upload.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const designReferencesRouter: Router = Router();
 
@@ -11,10 +12,10 @@ designReferencesRouter.get(
   '/:clientId/design-references',
   requireAuth,
   requirePermission('clients:read'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const refs = await store.designReferences.listByClient(req.params.clientId);
     res.json({ data: refs, total: refs.length });
-  }
+  })
 );
 
 // POST /api/clients/:clientId/design-references — accepts multipart/form-data with an optional `file` field
@@ -23,7 +24,7 @@ designReferencesRouter.post(
   requireAuth,
   requirePermission('design_references:upload'),
   upload.single('file'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const client = await store.clients.getById(req.params.clientId);
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -40,7 +41,7 @@ designReferencesRouter.post(
       tags: parseTags(tags),
     });
     res.status(201).json({ data: ref });
-  }
+  })
 );
 
 function parseTags(raw: unknown): string[] {

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const approvalsRouter: Router = Router();
 
@@ -10,10 +11,10 @@ approvalsRouter.get(
   '/approvals',
   requireAuth,
   requirePermission('content_ideas:approve'),
-  async (_req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     const pendingIdeas = await store.approvals.listPendingContentIdeas();
     res.json({ data: pendingIdeas, total: pendingIdeas.length });
-  }
+  })
 );
 
 // POST /api/content-ideas/:id/approve
@@ -21,7 +22,7 @@ approvalsRouter.post(
   '/content-ideas/:id/approve',
   requireAuth,
   requirePermission('content_ideas:approve'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const idea = await store.contentIdeas.getById(req.params.id);
     if (!idea) return res.status(404).json({ error: 'Content idea not found' });
 
@@ -39,7 +40,7 @@ approvalsRouter.post(
     const updatedIdea = await store.contentIdeas.setApprovalOutcome(idea.id, 'approved', approval.id);
 
     res.json({ data: { approval, idea: updatedIdea } });
-  }
+  })
 );
 
 // POST /api/content-ideas/:id/reject
@@ -47,7 +48,7 @@ approvalsRouter.post(
   '/content-ideas/:id/reject',
   requireAuth,
   requirePermission('content_ideas:approve'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const idea = await store.contentIdeas.getById(req.params.id);
     if (!idea) return res.status(404).json({ error: 'Content idea not found' });
 
@@ -64,8 +65,8 @@ approvalsRouter.post(
       revisionNotes: req.body.revisionNotes,
       rejectedAt: new Date(),
     });
-    const updatedIdea = await store.contentIdeas.setApprovalOutcome(idea.id, newStatus, idea.approvalId ?? null);
+    const updatedIdea = await store.contentIdeas.setApprovalOutcome(idea.id, newStatus, approval.id);
 
     res.json({ data: { approval, idea: updatedIdea } });
-  }
+  })
 );

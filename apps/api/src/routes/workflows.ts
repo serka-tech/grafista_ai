@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const workflowsRouter: Router = Router();
 
@@ -52,7 +53,7 @@ workflowsRouter.get('/:workflowId', (req: Request, res: Response) => {
 });
 
 // POST /api/workflows/:workflowId/start — start a new workflow instance
-workflowsRouter.post('/:workflowId/start', requireAuth, requirePermission('clients:read'), async (req: Request, res: Response) => {
+workflowsRouter.post('/:workflowId/start', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
   const def = WORKFLOW_DEFINITIONS.find(w => w.workflow_id === req.params.workflowId);
   if (!def) return res.status(404).json({ error: 'Workflow not found' });
 
@@ -79,10 +80,10 @@ workflowsRouter.post('/:workflowId/start', requireAuth, requirePermission('clien
 
   workflowInstances.set(instance.id, instance);
   res.status(201).json({ data: instance });
-});
+}));
 
 // GET /api/workflows/instances — list running workflow instances
-workflowsRouter.get('/instances/list', requireAuth, requirePermission('clients:read'), async (req: Request, res: Response) => {
+workflowsRouter.get('/instances/list', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
   const clientId = req.query.clientId as string | undefined;
   let instances = Array.from(workflowInstances.values());
   if (clientId) instances = instances.filter(i => i.clientId === clientId);
@@ -95,10 +96,10 @@ workflowsRouter.get('/instances/list', requireAuth, requirePermission('clients:r
   })));
 
   res.json({ data: enriched, total: enriched.length });
-});
+}));
 
 // GET /api/workflows/instances/:id — get a specific workflow instance
-workflowsRouter.get('/instances/:id', requireAuth, requirePermission('clients:read'), async (req: Request, res: Response) => {
+workflowsRouter.get('/instances/:id', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
   const instance = workflowInstances.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Workflow instance not found' });
 
@@ -111,7 +112,7 @@ workflowsRouter.get('/instances/:id', requireAuth, requirePermission('clients:re
       clientName: client?.name,
     },
   });
-});
+}));
 
 // POST /api/workflows/instances/:id/advance — advance workflow to next step
 workflowsRouter.post('/instances/:id/advance', requireAuth, (req: Request, res: Response) => {

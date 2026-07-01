@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { upload } from '../middleware/upload.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const brandAssetsRouter: Router = Router();
 
@@ -11,10 +12,10 @@ brandAssetsRouter.get(
   '/:clientId/brand-assets',
   requireAuth,
   requirePermission('clients:read'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const assets = await store.brandAssets.listByClient(req.params.clientId);
     res.json({ data: assets, total: assets.length });
-  }
+  })
 );
 
 // POST /api/clients/:clientId/brand-assets — accepts multipart/form-data with an optional `file` field
@@ -23,7 +24,7 @@ brandAssetsRouter.post(
   requireAuth,
   requirePermission('brand_assets:upload'),
   upload.single('file'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const client = await store.clients.getById(req.params.clientId);
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -42,7 +43,7 @@ brandAssetsRouter.post(
       metadata: parseMetadata(metadata),
     });
     res.status(201).json({ data: asset });
-  }
+  })
 );
 
 function parseMetadata(raw: unknown): Record<string, unknown> | undefined {

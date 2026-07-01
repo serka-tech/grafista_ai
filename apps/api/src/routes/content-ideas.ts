@@ -6,6 +6,7 @@ import { createPromptBuilder, contentIdeationTemplate } from '@grafista/prompt-e
 import { GenerateContentRequestSchema } from '@grafista/schemas';
 import { env } from '../config/env.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const contentIdeasRouter: Router = Router();
 
@@ -17,11 +18,11 @@ contentIdeasRouter.get(
   '/:clientId/content-ideas',
   requireAuth,
   requirePermission('clients:read'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const status = req.query.status as string | undefined;
     const ideas = await store.contentIdeas.listByClient(req.params.clientId, status);
     res.json({ data: ideas, total: ideas.length });
-  }
+  })
 );
 
 // POST /api/clients/:clientId/content-ideas — generate ideas via a real AI provider call
@@ -29,7 +30,7 @@ contentIdeasRouter.post(
   '/:clientId/content-ideas',
   requireAuth,
   requirePermission('content_ideas:create'),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
   const client = await store.clients.getById(req.params.clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -111,7 +112,8 @@ contentIdeasRouter.post(
   }
 
   res.status(201).json({ data: ideas, total: ideas.length, provider: aiResponse.provider, model: aiResponse.model });
-});
+  })
+);
 
 /** Parses the model's JSON output into an array of raw idea objects, tolerating markdown code fences. */
 function parseIdeasFromModelOutput(content: string): Array<Record<string, unknown>> {

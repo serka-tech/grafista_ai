@@ -58,19 +58,21 @@ export const usersRepo = {
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
     if (!rows[0]) return undefined;
 
-    const { rows: roleRows } = await pool.query(
-      `SELECT r.name FROM roles r
-       JOIN user_roles ur ON ur.role_id = r.id
-       WHERE ur.user_id = $1`,
-      [userId]
-    );
-    const { rows: permRows } = await pool.query(
-      `SELECT DISTINCT p.key FROM permissions p
-       JOIN role_permissions rp ON rp.permission_id = p.id
-       JOIN user_roles ur ON ur.role_id = rp.role_id
-       WHERE ur.user_id = $1`,
-      [userId]
-    );
+    const [{ rows: roleRows }, { rows: permRows }] = await Promise.all([
+      pool.query(
+        `SELECT r.name FROM roles r
+         JOIN user_roles ur ON ur.role_id = r.id
+         WHERE ur.user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT DISTINCT p.key FROM permissions p
+         JOIN role_permissions rp ON rp.permission_id = p.id
+         JOIN user_roles ur ON ur.role_id = rp.role_id
+         WHERE ur.user_id = $1`,
+        [userId]
+      ),
+    ]);
 
     return {
       ...mapRow(rows[0]),

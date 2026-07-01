@@ -13,28 +13,39 @@ declare global {
   }
 }
 
-/** Loads the session from PostgreSQL and attaches the user (with roles/permissions) to req.user. 401s otherwise. */
+/**
+ * Loads the session from PostgreSQL and attaches the user (with roles/permissions) to req.user. 401s otherwise.
+ *
+ * Wrapped in an internal try/catch (rather than relying on every route to apply `asyncHandler`)
+ * because this middleware itself performs `await pool.query(...)` calls that can reject on a DB
+ * hiccup — Express 4 does not auto-forward rejected promises from async middleware to the error
+ * handler, so without this the whole process would crash.
+ */
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const token = req.cookies?.[SESSION_COOKIE_NAME] as string | undefined;
-  if (!token) {
-    res.status(401).json({ error: 'Authentication required' });
-    return;
-  }
+  try {
+    const token = req.cookies?.[SESSION_COOKIE_NAME] as string | undefined;
+    if (!token) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
 
-  const session = await sessionsRepo.findValidByTokenHash(hashSessionToken(token));
-  if (!session) {
-    res.status(401).json({ error: 'Invalid or expired session' });
-    return;
-  }
+    const session = await sessionsRepo.findValidByTokenHash(hashSessionToken(token));
+    if (!session) {
+      res.status(401).json({ error: 'Invalid or expired session' });
+      return;
+    }
 
-  const user = await usersRepo.getWithAccess(session.userId);
-  if (!user || user.status !== 'active') {
-    res.status(401).json({ error: 'Invalid or expired session' });
-    return;
-  }
+    const user = await usersRepo.getWithAccess(session.userId);
+    if (!user || user.status !== 'active') {
+      res.status(401).json({ error: 'Invalid or expired session' });
+      return;
+    }
 
-  req.user = user;
-  next();
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 /** Must run after requireAuth. 403s if the authenticated user lacks the given permission. */

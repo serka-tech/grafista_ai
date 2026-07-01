@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 export const designDnaRouter: Router = Router();
 
@@ -12,7 +13,7 @@ designDnaRouter.get('/:clientId/design-dna', requireAuth, requirePermission('cli
 });
 
 // POST /api/clients/:clientId/design-dna/analyze — trigger analysis
-designDnaRouter.post('/:clientId/design-dna/analyze', requireAuth, requirePermission('clients:read'), async (req: Request, res: Response) => {
+designDnaRouter.post('/:clientId/design-dna/analyze', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
   const client = await store.clients.getById(req.params.clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -29,4 +30,4 @@ designDnaRouter.post('/:clientId/design-dna/analyze', requireAuth, requirePermis
     message: 'Analysis queued. In production, the ingestion worker would process uploaded design references and generate Design DNA.',
     status: 'mock_queued',
   });
-});
+}));
