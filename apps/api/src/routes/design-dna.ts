@@ -1,17 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { store } from '../data/store.js';
+import { requireAuth, requirePermission } from '../auth/middleware.js';
 
 export const designDnaRouter: Router = Router();
 
 // GET /api/clients/:clientId/design-dna
-designDnaRouter.get('/:clientId/design-dna', (req: Request, res: Response) => {
+designDnaRouter.get('/:clientId/design-dna', requireAuth, requirePermission('clients:read'), (req: Request, res: Response) => {
   const dna = store.designDNA.findByClientId(req.params.clientId);
   if (!dna) return res.status(404).json({ error: 'Design DNA not found. Run analysis first.' });
   res.json({ data: dna });
 });
 
 // POST /api/clients/:clientId/design-dna/analyze — trigger analysis
-designDnaRouter.post('/:clientId/design-dna/analyze', async (req: Request, res: Response) => {
+designDnaRouter.post('/:clientId/design-dna/analyze', requireAuth, requirePermission('clients:read'), async (req: Request, res: Response) => {
   const client = await store.clients.getById(req.params.clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 

@@ -7,6 +7,8 @@
 
 import express, { type Express } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import { authRouter } from './routes/auth.js';
 import { clientsRouter } from './routes/clients.js';
 import { brandAssetsRouter } from './routes/brand-assets.js';
 import { designReferencesRouter } from './routes/design-references.js';
@@ -23,7 +25,8 @@ import { UPLOAD_DIR } from './middleware/upload.js';
 export const app: Express = express();
 
 // Middleware
-app.use(cors({ origin: process.env.API_CORS_ORIGIN ?? 'http://localhost:3000' }));
+app.use(cors({ origin: process.env.API_CORS_ORIGIN ?? 'http://localhost:3000', credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(UPLOAD_DIR));
@@ -39,6 +42,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 // Routes
+app.use('/api', authRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/clients', brandAssetsRouter);
 app.use('/api/clients', designReferencesRouter);

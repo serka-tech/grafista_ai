@@ -16,6 +16,8 @@ export default defineConfig({
       AI_DEFAULT_PROVIDER: 'openai',
       API_PORT: '4999',
       DATABASE_URL: TEST_DATABASE_URL,
+      AUTH_SECRET: 'test-auth-secret-not-for-production-use-only',
+      COOKIE_SECURE: 'false',
     },
   },
 });

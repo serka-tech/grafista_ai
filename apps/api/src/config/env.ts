@@ -20,6 +20,13 @@ const EnvSchema = z.object({
     .refine((v) => v.startsWith('postgres://') || v.startsWith('postgresql://'), {
       message: 'DATABASE_URL must be a postgres:// or postgresql:// connection string',
     }),
+  AUTH_SECRET: z
+    .string()
+    .min(16, 'AUTH_SECRET is required and must be at least 16 characters — set it in .env'),
+  COOKIE_SECURE: z
+    .enum(['true', 'false'], { errorMap: () => ({ message: 'COOKIE_SECURE must be "true" or "false"' }) })
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

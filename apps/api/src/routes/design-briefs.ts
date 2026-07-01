@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
+import { requireAuth, requirePermission } from '../auth/middleware.js';
 
 export const designBriefsRouter: Router = Router();
 
 // POST /api/design-briefs — create (requires approved content idea)
-designBriefsRouter.post('/design-briefs', async (req: Request, res: Response) => {
+designBriefsRouter.post('/design-briefs', requireAuth, requirePermission('design_briefs:create'), async (req: Request, res: Response) => {
   const { contentIdeaId } = req.body;
   if (!contentIdeaId) return res.status(400).json({ error: 'contentIdeaId is required' });
 
@@ -65,7 +66,7 @@ designBriefsRouter.post('/design-briefs', async (req: Request, res: Response) =>
 });
 
 // GET /api/design-briefs/:id
-designBriefsRouter.get('/design-briefs/:id', async (req: Request, res: Response) => {
+designBriefsRouter.get('/design-briefs/:id', requireAuth, requirePermission('clients:read'), async (req: Request, res: Response) => {
   const brief = await store.designBriefs.getById(req.params.id);
   if (!brief) return res.status(404).json({ error: 'Design brief not found' });
 
@@ -76,7 +77,7 @@ designBriefsRouter.get('/design-briefs/:id', async (req: Request, res: Response)
 });
 
 // GET /api/design-briefs — list all
-designBriefsRouter.get('/design-briefs', async (_req: Request, res: Response) => {
+designBriefsRouter.get('/design-briefs', requireAuth, requirePermission('clients:read'), async (_req: Request, res: Response) => {
   const briefs = await store.designBriefs.list();
   res.json({ data: briefs, total: briefs.length });
 });

@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { ModelRouter } from '@grafista/model-router';
+import { requireAuth, requirePermission } from '../auth/middleware.js';
 
 export const settingsRouter: Router = Router();
 
 const router = new ModelRouter();
 
 // GET /api/settings/providers — AI provider status
-settingsRouter.get('/settings/providers', (_req: Request, res: Response) => {
+settingsRouter.get('/settings/providers', requireAuth, requirePermission('settings:manage'), (_req: Request, res: Response) => {
   const status = router.getProviderStatus();
   const providers = Object.entries(status).map(([name, available]) => ({
     name,

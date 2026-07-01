@@ -1,11 +1,19 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+function redirectToLoginOn401(status: number) {
+  if (status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.href = '/login';
+  }
+}
+
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
   });
   if (!res.ok) {
+    redirectToLoginOn401(res.status);
     const error = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(error.error ?? error.message ?? 'API Error');
   }
@@ -13,8 +21,9 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 async function uploadAPI<T>(path: string, formData: FormData): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: formData });
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: formData, credentials: 'include' });
   if (!res.ok) {
+    redirectToLoginOn401(res.status);
     const error = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(error.error ?? error.message ?? 'Upload failed');
   }
@@ -22,6 +31,12 @@ async function uploadAPI<T>(path: string, formData: FormData): Promise<T> {
 }
 
 export const api = {
+  // Auth
+  login: (email: string, password: string) =>
+    fetchAPI<{ data: { user: any } }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  logout: () => fetchAPI<{ data: { loggedOut: boolean } }>('/api/auth/logout', { method: 'POST' }),
+  getCurrentUser: () => fetchAPI<{ data: { user: any } }>('/api/auth/me'),
+
   // Clients
   getClients: () => fetchAPI<{ data: any[]; total: number }>('/api/clients'),
   getClient: (id: string) => fetchAPI<{ data: any }>(`/api/clients/${id}`),
