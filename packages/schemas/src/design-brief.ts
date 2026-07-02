@@ -59,7 +59,10 @@ export const DesignBriefSchema = z.object({
   layoutPlanId: z.string().uuid().optional(),
   qaReportId: z.string().uuid().optional(),
 
-  status: z.enum(['draft', 'in_progress', 'qa_pending', 'qa_passed', 'approved', 'exported']).default('draft'),
+  status: z.enum([
+    'draft', 'in_progress', 'qa_pending', 'qa_passed', 'approved', 'exported',
+    'rejected', 'needs_revision',
+  ]).default('draft'),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

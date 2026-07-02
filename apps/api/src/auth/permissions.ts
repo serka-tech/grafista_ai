@@ -27,6 +27,9 @@ export const PERMISSIONS = [
   'design_dna:read',
   'design_dna:approve',
   'design_dna:revise',
+  'layout_plans:read',
+  'layout_plans:approve',
+  'layout_plans:reject',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

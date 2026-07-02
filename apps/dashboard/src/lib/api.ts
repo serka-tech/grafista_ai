@@ -78,6 +78,23 @@ export const api = {
     fetchAPI<{ data: any }>('/api/design-briefs', { method: 'POST', body: JSON.stringify({ contentIdeaId }) }),
   getDesignBrief: (id: string) => fetchAPI<{ data: any }>(`/api/design-briefs/${id}`),
   getDesignBriefs: () => fetchAPI<{ data: any[] }>('/api/design-briefs'),
+  approveDesignBrief: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/design-briefs/${id}/approve`, { method: 'POST' }),
+  rejectDesignBrief: (id: string, revisionNotes?: string) =>
+    fetchAPI<{ data: any }>(`/api/design-briefs/${id}/reject`, { method: 'POST', body: JSON.stringify({ revisionNotes }) }),
+
+  // Layout Plans
+  generateLayoutPlans: (designBriefId: string) =>
+    fetchAPI<{ data: any[] }>(`/api/design-briefs/${designBriefId}/layout-plans`, { method: 'POST' }),
+  getLayoutPlansForBrief: (designBriefId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/design-briefs/${designBriefId}/layout-plans`),
+  getLayoutPlansForClient: (clientId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/clients/${clientId}/layout-plans`),
+  getLayoutPlan: (id: string) => fetchAPI<{ data: any }>(`/api/layout-plans/${id}`),
+  approveLayoutPlan: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/layout-plans/${id}/approve`, { method: 'POST' }),
+  rejectLayoutPlan: (id: string, notes?: string) =>
+    fetchAPI<{ data: any }>(`/api/layout-plans/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),

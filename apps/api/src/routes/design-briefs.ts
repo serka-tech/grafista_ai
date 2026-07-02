@@ -82,3 +82,24 @@ designBriefsRouter.get('/design-briefs', requireAuth, requirePermission('clients
   const briefs = await store.designBriefs.list();
   res.json({ data: briefs, total: briefs.length });
 }));
+
+// POST /api/design-briefs/:id/approve — required before layout generation can run
+// against this brief (see services/layout-generation.ts).
+designBriefsRouter.post('/design-briefs/:id/approve', requireAuth, requirePermission('design_briefs:approve'), asyncHandler(async (req: Request, res: Response) => {
+  const brief = await store.designBriefs.getById(req.params.id);
+  if (!brief) return res.status(404).json({ error: 'Design brief not found' });
+
+  const updated = await store.designBriefs.updateStatus(brief.id, 'approved');
+  res.json({ data: updated });
+}));
+
+// POST /api/design-briefs/:id/reject — mirrors approvals.ts's content-idea reject pattern:
+// { revisionNotes } present -> 'needs_revision', otherwise -> 'rejected'.
+designBriefsRouter.post('/design-briefs/:id/reject', requireAuth, requirePermission('design_briefs:approve'), asyncHandler(async (req: Request, res: Response) => {
+  const brief = await store.designBriefs.getById(req.params.id);
+  if (!brief) return res.status(404).json({ error: 'Design brief not found' });
+
+  const newStatus = req.body?.revisionNotes ? 'needs_revision' : 'rejected';
+  const updated = await store.designBriefs.updateStatus(brief.id, newStatus);
+  res.json({ data: updated });
+}));

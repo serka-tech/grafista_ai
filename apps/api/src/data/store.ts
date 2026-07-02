@@ -18,6 +18,7 @@ import { contentIdeasRepo } from '../db/repositories/content-ideas.js';
 import { approvalsRepo } from '../db/repositories/approvals.js';
 import { designBriefsRepo } from '../db/repositories/design-briefs.js';
 import { designAnalysisRepo, designDnaRepo } from '../db/repositories/design-dna.js';
+import { layoutPlansRepo } from '../db/repositories/layout-plans.js';
 
 export const store = {
   clients: clientsRepo,
@@ -28,4 +29,5 @@ export const store = {
   designBriefs: designBriefsRepo,
   designAnalysis: designAnalysisRepo,
   designDna: designDnaRepo,
+  layoutPlans: layoutPlansRepo,
 };

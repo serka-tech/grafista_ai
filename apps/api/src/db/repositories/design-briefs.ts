@@ -14,6 +14,9 @@ export interface DesignBrief {
   visualDirection: Record<string, unknown>;
   brandConstraints: Record<string, unknown>;
   aiImagePrompts: unknown[];
+  // Denormalized-read convenience — column has existed since 001_initial_schema.sql
+  // (default '[]') but was previously never mapped/read by this repo.
+  referenceDesignIds: string[];
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -34,6 +37,7 @@ function mapRow(row: Record<string, unknown>): DesignBrief {
     visualDirection: (row.visual_direction as Record<string, unknown>) ?? {},
     brandConstraints: (row.brand_constraints as Record<string, unknown>) ?? {},
     aiImagePrompts: (row.ai_image_prompts as unknown[]) ?? [],
+    referenceDesignIds: (row.reference_design_ids as string[]) ?? [],
     status: row.status as string,
     createdAt: (row.created_at as Date).toISOString(),
     updatedAt: (row.updated_at as Date).toISOString(),
@@ -87,5 +91,14 @@ export const designBriefsRepo = {
   async list(): Promise<DesignBrief[]> {
     const { rows } = await pool.query('SELECT * FROM design_briefs ORDER BY created_at ASC');
     return rows.map(mapRow);
+  },
+
+  /** Plain status transition — the `trg_design_briefs_updated` trigger auto-bumps updated_at. */
+  async updateStatus(id: string, status: string): Promise<DesignBrief | undefined> {
+    const { rows } = await pool.query(
+      'UPDATE design_briefs SET status = $2 WHERE id = $1 RETURNING *',
+      [id, status]
+    );
+    return rows[0] ? mapRow(rows[0]) : undefined;
   },
 };
