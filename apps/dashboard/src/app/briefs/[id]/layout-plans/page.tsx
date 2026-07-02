@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { CreativeQAReportCard } from '@/components/creative-qa-report';
 
 const STATUS_BADGES: Record<string, { class: string; label: string }> = {
   generated: { class: 'badge-info', label: 'Oluşturuldu' },
@@ -43,6 +44,18 @@ function emptyActionState(): ActionState {
   return { approving: false, approveError: null, rejecting: false, rejectError: null, notes: '' };
 }
 
+// ─── Creative QA (Phase 2 Step 5B) per-plan run state ────────
+type QaRunState = {
+  running: boolean;
+  runError: string | null;
+  loadingReports: boolean;
+  loadError: string | null;
+};
+
+function emptyQaRunState(): QaRunState {
+  return { running: false, runError: null, loadingReports: false, loadError: null };
+}
+
 export default function LayoutPlansPage({ params }: { params: { id: string } }) {
   const designBriefId = params.id;
 
@@ -58,6 +71,14 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
   const updateActionState = (planId: string, patch: Partial<ActionState>) =>
     setActionStates((prev) => ({ ...prev, [planId]: { ...emptyActionState(), ...prev[planId], ...patch } }));
 
+  // ─── Creative QA (Phase 2 Step 5B) ───────────────────────
+  const [qaReports, setQaReports] = useState<Record<string, any[]>>({});
+  const [qaRunStates, setQaRunStates] = useState<Record<string, QaRunState>>({});
+
+  const getQaRunState = (planId: string) => qaRunStates[planId] ?? emptyQaRunState();
+  const updateQaRunState = (planId: string, patch: Partial<QaRunState>) =>
+    setQaRunStates((prev) => ({ ...prev, [planId]: { ...emptyQaRunState(), ...prev[planId], ...patch } }));
+
   const loadAll = useCallback(async () => {
     const [userResult, briefResult, layoutPlansResult] = await Promise.allSettled([
       api.getCurrentUser(),
@@ -72,6 +93,17 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
       const plans = [...(layoutPlansResult.value.data ?? [])].sort((a, b) => (a.alternativeIndex ?? 0) - (b.alternativeIndex ?? 0));
       setLayoutPlans(plans);
       setLoadError(null);
+
+      // Fetch each alternative's existing Creative QA reports on page load (list route
+      // returns [] rather than 404 when none exist yet — see routes/creative-qa.ts).
+      // A 403 here (user lacks creative_qa:read) is an expected gating outcome, not a
+      // load failure — just show no reports for that plan rather than an error banner.
+      const qaResults = await Promise.allSettled(plans.map((p) => api.getCreativeQaForLayoutPlan(p.id)));
+      const qaMap: Record<string, any[]> = {};
+      qaResults.forEach((r, i) => {
+        qaMap[plans[i].id] = r.status === 'fulfilled' ? (r.value.data ?? []) : [];
+      });
+      setQaReports(qaMap);
     } else {
       setLayoutPlans([]);
       setLoadError(layoutPlansResult.reason?.message ?? 'Yerleşim planları yüklenirken hata oluştu.');
@@ -109,12 +141,37 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
     }
   }
 
+  async function handleRunQa(planId: string) {
+    updateQaRunState(planId, { running: true, runError: null });
+    try {
+      const res = await api.runCreativeQa(planId);
+      // Prepend the freshly created report rather than reloading everything — matches
+      // the "expand a report panel directly under the alternative" UX from the spec.
+      setQaReports((prev) => ({ ...prev, [planId]: [res.data, ...(prev[planId] ?? [])] }));
+    } catch (err: any) {
+      const message = err.status === 502
+        ? 'Creative QA tamamlanamadı — AI sağlayıcı veya yanıt doğrulaması başarısız oldu. Rapor kaydedilmedi.'
+        : (err.message ?? 'Creative QA çalıştırılamadı.');
+      updateQaRunState(planId, { runError: message });
+    } finally {
+      updateQaRunState(planId, { running: false });
+    }
+  }
+
+  function handleQaReportUpdated(planId: string, updated: any) {
+    setQaReports((prev) => ({
+      ...prev,
+      [planId]: (prev[planId] ?? []).map((r) => (r.id === updated.id ? updated : r)),
+    }));
+  }
+
   if (loading) {
     return <div className="empty-state" style={{ animation: 'pulse 1.5s infinite' }}>🎨 Yerleşim planları yükleniyor...</div>;
   }
 
   const canApprove = permissions.includes('layout_plans:approve');
   const canReject = permissions.includes('layout_plans:reject');
+  const canRunQa = permissions.includes('creative_qa:run');
 
   return (
     <div className="animate-fade-in">
@@ -160,6 +217,15 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
               : !canActOnThis
                 ? 'Bu alternatif şu an reddedilebilir durumda değil'
                 : 'Notlu gönderirsen alternatif revizyona düşer, boş gönderirsen reddedilir';
+
+            const qaRun = getQaRunState(plan.id);
+            const planQaReports = qaReports[plan.id] ?? [];
+            const isPlanApproved = plan.status === 'approved';
+            const runQaTitle = !canRunQa
+              ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+              : !isPlanApproved
+                ? 'Bu alternatif şu an onaylı değil'
+                : 'Bu yerleşim planı alternatifi için Creative QA çalıştır';
 
             return (
               <div key={plan.id} className="card dna-section">
@@ -262,6 +328,49 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
 
                 <ErrorNote message={state.approveError} />
                 <ErrorNote message={state.rejectError} />
+
+                {/* ─── Creative QA (Phase 2 Step 5B) ──────────────── */}
+                <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                    <span className="form-label" style={{ marginBottom: 0 }}>🔍 Creative QA {planQaReports.length > 0 ? `(${planQaReports.length})` : ''}</span>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={!canRunQa || !isPlanApproved || qaRun.running}
+                      title={runQaTitle}
+                      onClick={() => handleRunQa(plan.id)}
+                    >
+                      {qaRun.running ? '⏳ Çalıştırılıyor...' : '▶ Creative QA Çalıştır'}
+                    </button>
+                  </div>
+
+                  {!isPlanApproved && (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '10px' }}>
+                      Creative QA çalıştırmadan önce bu alternatifi onaylayın.
+                    </p>
+                  )}
+
+                  <ErrorNote message={qaRun.runError} />
+                  <ErrorNote message={qaRun.loadError} />
+
+                  {qaRun.loadingReports && (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Raporlar yükleniyor...</p>
+                  )}
+
+                  {planQaReports.length === 0 && !qaRun.loadingReports ? (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                      Bu alternatif için henüz Creative QA raporu yok.
+                    </p>
+                  ) : (
+                    planQaReports.map((report) => (
+                      <CreativeQAReportCard
+                        key={report.id}
+                        report={report}
+                        permissions={permissions}
+                        onUpdated={(updated) => handleQaReportUpdated(plan.id, updated)}
+                      />
+                    ))
+                  )}
+                </div>
               </div>
             );
           })}

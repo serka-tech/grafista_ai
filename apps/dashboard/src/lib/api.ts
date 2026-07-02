@@ -1,5 +1,20 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+// Carries the HTTP status code alongside the message so callers can branch on
+// specific statuses (e.g. 409 conflict vs 502 provider failure) without
+// re-parsing the response themselves. Existing callers that only read
+// `err.message` keep working unchanged since ApiError extends Error.
+export class ApiError extends Error {
+  status: number;
+  requiredPermission?: string;
+  constructor(message: string, status: number, requiredPermission?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.requiredPermission = requiredPermission;
+  }
+}
+
 function redirectToLoginOn401(status: number) {
   if (status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
     window.location.href = '/login';
@@ -15,7 +30,7 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     redirectToLoginOn401(res.status);
     const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error ?? error.message ?? 'API Error');
+    throw new ApiError(error.error ?? error.message ?? 'API Error', res.status, error.requiredPermission);
   }
   return res.json();
 }
@@ -25,7 +40,7 @@ async function uploadAPI<T>(path: string, formData: FormData): Promise<T> {
   if (!res.ok) {
     redirectToLoginOn401(res.status);
     const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error ?? error.message ?? 'Upload failed');
+    throw new ApiError(error.error ?? error.message ?? 'Upload failed', res.status, error.requiredPermission);
   }
   return res.json();
 }
@@ -95,6 +110,21 @@ export const api = {
     fetchAPI<{ data: any }>(`/api/layout-plans/${id}/approve`, { method: 'POST' }),
   rejectLayoutPlan: (id: string, notes?: string) =>
     fetchAPI<{ data: any }>(`/api/layout-plans/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
+
+  // Creative QA (Phase 2 Step 5B)
+  runCreativeQa: (layoutPlanId: string) =>
+    fetchAPI<{ data: any }>(`/api/layout-plans/${layoutPlanId}/creative-qa`, { method: 'POST' }),
+  getCreativeQaForLayoutPlan: (layoutPlanId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/layout-plans/${layoutPlanId}/creative-qa`),
+  getCreativeQaForDesignBrief: (designBriefId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/design-briefs/${designBriefId}/creative-qa`),
+  getCreativeQaForClient: (clientId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/clients/${clientId}/creative-qa`),
+  getCreativeQaReport: (id: string) => fetchAPI<{ data: any }>(`/api/creative-qa/${id}`),
+  approveCreativeQa: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/creative-qa/${id}/approve`, { method: 'POST' }),
+  rejectCreativeQa: (id: string, notes?: string) =>
+    fetchAPI<{ data: any }>(`/api/creative-qa/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),

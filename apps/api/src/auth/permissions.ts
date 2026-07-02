@@ -30,6 +30,9 @@ export const PERMISSIONS = [
   'layout_plans:read',
   'layout_plans:approve',
   'layout_plans:reject',
+  'creative_qa:read',
+  'creative_qa:approve',
+  'creative_qa:reject',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
