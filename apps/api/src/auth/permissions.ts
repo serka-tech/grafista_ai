@@ -38,6 +38,10 @@ export const PERMISSIONS = [
   'workflows:advance',
   'workflows:approve',
   'workflows:cancel',
+  'visual_generation:run',
+  'visual_generation:read',
+  'visual_generation:approve',
+  'visual_generation:reject',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

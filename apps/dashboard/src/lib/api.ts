@@ -126,6 +126,17 @@ export const api = {
   rejectCreativeQa: (id: string, notes?: string) =>
     fetchAPI<{ data: any }>(`/api/creative-qa/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
+  // Visual Generation (Phase 2 Step 7)
+  runVisualGeneration: (layoutPlanId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/layout-plans/${layoutPlanId}/visual-generation`, { method: 'POST' }),
+  listVisualOutputs: (layoutPlanId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/layout-plans/${layoutPlanId}/visual-generation`),
+  getVisualOutput: (id: string) => fetchAPI<{ data: any }>(`/api/visual-outputs/${id}`),
+  approveVisualOutput: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/visual-outputs/${id}/approve`, { method: 'POST' }),
+  rejectVisualOutput: (id: string, notes?: string) =>
+    fetchAPI<{ data: any }>(`/api/visual-outputs/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
+
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),
 

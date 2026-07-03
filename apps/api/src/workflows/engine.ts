@@ -39,6 +39,7 @@ import { runContentIdeation, ContentIdeationRequestSchema } from '../services/co
 import { createDesignBriefFromContentIdea } from '../services/design-brief-creation.js';
 import { runLayoutGeneration } from '../services/layout-generation.js';
 import { runCreativeQa } from '../services/creative-qa.js';
+import { runVisualGeneration } from '../services/visual-generation.js';
 import { assertReadyForVisualProduction } from '../services/production-gate.js';
 
 // ─── Error helpers (same error-with-status pattern as the services) ─────────
@@ -69,6 +70,7 @@ export interface RunWithSteps {
 export interface ApproveStepBody {
   contentIdeaId?: string;
   layoutPlanId?: string;
+  generatedOutputId?: string;
   notes?: string;
 }
 
@@ -512,6 +514,36 @@ async function executeBinding(binding: StepBinding, ctx: StepExecutionContext): 
       };
     }
 
+    case 'run_visual_generation': {
+      const layoutPlanId = stringField(ctx.input, 'layout_plan_id');
+      if (!layoutPlanId) {
+        throw conflict('layout_plan_id is required — visual generation renders one approved, QA-cleared layout plan');
+      }
+      const plan = await store.layoutPlans.getById(layoutPlanId);
+      if (!plan) throw notFound('Layout plan not found');
+      if (plan.clientId !== ctx.run.clientId) {
+        throw conflict('Layout plan does not belong to this client');
+      }
+      // The service re-checks the production gate as its own first await (409 unless a
+      // Creative QA report is 'approved'/'passed') and PERSISTS failures: a provider/
+      // schema failure writes a 'failed' generated_outputs row then rethrows (502); a
+      // per-image download/storage failure records that image as 'failed' and continues,
+      // so `outputs` here can mix 'generated' and 'failed' rows — both are recorded as
+      // run entities so failures stay visible in the workflow trail too.
+      const { outputs } = await runVisualGeneration(layoutPlanId, ctx.user.id);
+      return {
+        output: {
+          outputCount: outputs.length,
+          generatedCount: outputs.filter((o) => o.status === 'generated').length,
+          failedCount: outputs.filter((o) => o.status === 'failed').length,
+          outputs: outputs.map((o) => ({ id: o.id, alternativeIndex: o.alternativeIndex, status: o.status })),
+          note: 'Tek servis çağrısı prompt üretimini VE görsel üretimini kapsar — route_generation adımı bu sonucu kaydeder, yeni AI çağrısı yapılmaz',
+        },
+        entities: outputs.map((o) => ({ entityType: 'generated_output', entityId: o.id, outputKey: 'generated_output' })),
+        runOutput: { generatedOutputIds: outputs.map((o) => o.id) },
+      };
+    }
+
     case 'qa_report_fact':
       return executeQaReportFact(binding.fact, ctx);
 
@@ -580,6 +612,7 @@ const REGENERATING_BINDING_KINDS = new Set<StepBinding['kind']>([
   'create_design_brief',
   'generate_layout_plans',
   'run_creative_qa',
+  'run_visual_generation',
 ]);
 
 /**
@@ -797,6 +830,36 @@ async function performGateApproval(
         output: { approved: true, creativeQaReportId: approved.id, status: approved.status, score: approved.overallScore },
       };
     }
+
+    case 'generated_output': {
+      if (!body.generatedOutputId) {
+        throw badRequest('generatedOutputId is required to approve a generated visual');
+      }
+      const generatedIds = await runEntityIds(run.id, 'generated_output');
+      if (!generatedIds.includes(body.generatedOutputId)) {
+        throw conflict('Generated output does not belong to this workflow run');
+      }
+      const output = await store.generatedOutputs.getById(body.generatedOutputId);
+      if (!output) throw notFound('Generated output not found');
+      // Repo guard: only status = 'generated' rows with an open approval match — a
+      // 'failed' alternative can never be approved.
+      const approved = await store.generatedOutputs.approve(output.id, user.id);
+      if (!approved) {
+        throw conflict(
+          `Generated output is not in an approvable state (status: ${output.status}, approval: ${output.approvalStatus})`
+        );
+      }
+      return {
+        entityType: 'generated_output',
+        entityId: approved.id,
+        output: {
+          approved: true,
+          generatedOutputId: approved.id,
+          alternativeIndex: approved.alternativeIndex,
+          approvalStatus: approved.approvalStatus,
+        },
+      };
+    }
   }
 }
 
@@ -956,6 +1019,31 @@ async function performGateRejection(
         entityType: 'creative_qa_report',
         entityId: rejected.id,
         output: { rejected: true, creativeQaReportId: rejected.id, status: rejected.status },
+      };
+    }
+
+    case 'generated_output': {
+      if (!body.generatedOutputId) {
+        throw badRequest('generatedOutputId is required to reject a generated visual');
+      }
+      const generatedIds = await runEntityIds(run.id, 'generated_output');
+      if (!generatedIds.includes(body.generatedOutputId)) {
+        throw conflict('Generated output does not belong to this workflow run');
+      }
+      const output = await store.generatedOutputs.getById(body.generatedOutputId);
+      if (!output) throw notFound('Generated output not found');
+      // Same semantics as POST /api/visual-outputs/:id/reject: notes -> 'revision_requested',
+      // otherwise -> 'rejected' (mapping lives in the repo).
+      const rejected = await store.generatedOutputs.reject(output.id, notes);
+      if (!rejected) {
+        throw conflict(
+          `Generated output is not in a rejectable state (status: ${output.status}, approval: ${output.approvalStatus})`
+        );
+      }
+      return {
+        entityType: 'generated_output',
+        entityId: rejected.id,
+        output: { rejected: true, generatedOutputId: rejected.id, approvalStatus: rejected.approvalStatus },
       };
     }
   }

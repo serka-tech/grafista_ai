@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { CreativeQAReportCard } from '@/components/creative-qa-report';
+import { VisualOutputsPanel } from '@/components/visual-outputs-panel';
 
 const STATUS_BADGES: Record<string, { class: string; label: string }> = {
   generated: { class: 'badge-info', label: 'Oluşturuldu' },
@@ -221,6 +222,10 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
             const qaRun = getQaRunState(plan.id);
             const planQaReports = qaReports[plan.id] ?? [];
             const isPlanApproved = plan.status === 'approved';
+            // Visual generation gate (Phase 2 Step 7): the backend service also
+            // enforces this (409 when no approved CreativeQA report exists), so
+            // this only drives the early-warning UX in VisualOutputsPanel.
+            const hasApprovedQa = planQaReports.some((r) => r.status === 'approved');
             const runQaTitle = !canRunQa
               ? 'Bu işlemi çalıştırmak için yetkiniz yok'
               : !isPlanApproved
@@ -371,6 +376,13 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
                     ))
                   )}
                 </div>
+
+                {/* ─── Visual Generation (Phase 2 Step 7) ─────────── */}
+                <VisualOutputsPanel
+                  layoutPlanId={plan.id}
+                  creativeQaApproved={hasApprovedQa}
+                  permissions={permissions}
+                />
               </div>
             );
           })}

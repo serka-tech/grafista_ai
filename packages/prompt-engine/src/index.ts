@@ -10,4 +10,5 @@ export { captionGenerationTemplate } from './templates/caption-generation.js';
 export { designBriefTemplate } from './templates/design-brief.js';
 export { layoutGenerationTemplate } from './templates/layout-generation.js';
 export { creativeQATemplate } from './templates/creative-qa.js';
+export { visualGenerationTemplate } from './templates/visual-generation.js';
 export { revisionLearningTemplate } from './templates/revision-learning.js';

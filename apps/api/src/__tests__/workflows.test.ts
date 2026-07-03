@@ -164,6 +164,23 @@ vi.mock('@grafista/model-router', () => {
       else if (req.taskType === 'layout_generation') content = LAYOUT_ALTERNATIVES;
       else if (req.taskType === 'creative_qa') {
         content = aiControl.mode === 'low_score_creative_qa' ? CREATIVE_QA_LOW_SCORE_CONTENT : CREATIVE_QA_SUCCESS_CONTENT;
+      } else if (req.taskType === 'image_generation') {
+        content = {
+          images: [
+            {
+              imageBase64: Buffer.from('fake-generated-image-bytes-alternative-1').toString('base64'),
+              mimeType: 'image/png',
+              width: 1080,
+              height: 1080,
+            },
+            {
+              imageBase64: Buffer.from('fake-generated-image-bytes-alternative-2').toString('base64'),
+              mimeType: 'image/png',
+              width: 1080,
+              height: 1080,
+            },
+          ],
+        };
       } else content = {};
 
       return {
@@ -322,9 +339,13 @@ describe('1. Workflow catalog API serves the validated definitions', () => {
     expect(res.body.data.map((d: { workflowId: string }) => d.workflowId)).toEqual([...PIPELINE_ORDER]);
 
     const visual = res.body.data.find((d: { workflowId: string }) => d.workflowId === 'visual-generation');
-    expect(visual.executable.supported).toBe(false);
-    expect(visual.executable.futureSteps).toContain('generate_prompts');
+    expect(visual.executable.supported).toBe(true);
+    expect(visual.executable.futureSteps).toEqual([]);
     expect(visual.executable.gateSteps).toContain('user_approval');
+
+    const psd = res.body.data.find((d: { workflowId: string }) => d.workflowId === 'photoshop-production');
+    expect(psd.executable.supported).toBe(false);
+    expect(psd.executable.futureSteps).toContain('send_to_photoshop');
 
     const styleLib = res.body.data.find((d: { workflowId: string }) => d.workflowId === 'style-library-ingestion');
     expect(styleLib.executable.supported).toBe(true);
@@ -761,7 +782,7 @@ describe('11. Production gate — visual-generation', () => {
   );
 
   it(
-    'with an approved QA report the gate clears, then the run blocks as blocked_future_feature',
+    'with an approved QA report the gate clears, real visuals are generated, and gate approval completes the run',
     async () => {
       const { briefId, layoutPlanId, clientId } = await createFullyReadyLayoutPlan('Workflow Visual Cleared Client');
       await approveCreativeQaFor(layoutPlanId);
@@ -772,26 +793,96 @@ describe('11. Production gate — visual-generation', () => {
         layout_plan_id: layoutPlanId,
       });
 
-      const blocked = await advanceToPause(owner, run.id);
-      expect(blocked.run.status).toBe('blocked_future_feature');
-      expect(blocked.run.currentStepId).toBe('generate_prompts');
-      expect(blocked.run.errorJson.feature).toBe('visual_generation');
-      expect(blocked.run.errorJson.message).toMatch(/Görsel üretim henüz uygulanmadı/);
-      // The production gate result is surfaced alongside the block.
-      expect(blocked.run.errorJson.pipelineState).toBe('ready_for_visual_generation');
-      expect(stepByStepId(blocked.steps, 'check_existing').status).toBe('completed');
-      expect(stepByStepId(blocked.steps, 'check_existing').outputJson.pipelineState).toBe('ready_for_visual_generation');
-      expect(stepByStepId(blocked.steps, 'generate_prompts').status).toBe('pending');
-      expect(stepByStepId(blocked.steps, 'generate_prompts').outputJson.futureFeature).toBe(true);
+      const paused = await advanceToPause(owner, run.id);
+      expect(paused.run.status).toBe('waiting_for_approval');
+      expect(paused.run.currentStepId).toBe('user_approval');
+      expect(stepByStepId(paused.steps, 'check_existing').status).toBe('completed');
+      expect(stepByStepId(paused.steps, 'check_existing').outputJson.pipelineState).toBe('ready_for_visual_generation');
 
-      // Never faked as success — a further advance is a clear 409, not a completion.
-      const advanceRes = await owner.post(`/api/workflow-runs/${run.id}/advance`).send({});
-      expect(advanceRes.status).toBe(409);
-      expect(advanceRes.body.message).toMatch(/not implemented yet/);
+      const genStep = stepByStepId(paused.steps, 'generate_prompts');
+      expect(genStep.status).toBe('completed');
+      expect(genStep.outputJson.generatedCount).toBe(2);
+      expect(genStep.outputJson.failedCount).toBe(0);
+      const generated = genStep.outputJson.outputs as Array<{ id: string; alternativeIndex: number; status: string }>;
+      expect(generated.map((o) => o.alternativeIndex)).toEqual([1, 2]);
+      expect(paused.run.outputJson.generatedOutputIds).toEqual(generated.map((o) => o.id));
 
-      const runRows = await pool.query('SELECT status, completed_at FROM workflow_runs WHERE id = $1', [run.id]);
-      expect(runRows.rows[0].status).toBe('blocked_future_feature');
-      expect(runRows.rows[0].completed_at).toBeNull();
+      // route_generation records the REAL routing outcome; brand/style checks are honest skips.
+      expect(stepByStepId(paused.steps, 'route_generation').status).toBe('completed');
+      expect(stepByStepId(paused.steps, 'route_generation').outputJson.providers).toEqual(['openai']);
+      expect(stepByStepId(paused.steps, 'brand_check').status).toBe('skipped');
+      expect(stepByStepId(paused.steps, 'style_check').status).toBe('skipped');
+
+      // Real generated_outputs rows exist in PostgreSQL, stored and indexed.
+      const outputRows = await pool.query(
+        'SELECT id, status, alternative_index, storage_key, created_by, creative_qa_report_id FROM generated_outputs WHERE layout_plan_id = $1 ORDER BY alternative_index ASC',
+        [layoutPlanId]
+      );
+      expect(outputRows.rows.length).toBe(2);
+      expect(outputRows.rows.map((r) => Number(r.alternative_index))).toEqual([1, 2]);
+      expect(outputRows.rows.every((r) => r.status === 'generated' && r.storage_key && r.creative_qa_report_id)).toBe(true);
+
+      // The gate demands an explicit choice — no id is a 400, a foreign id is a 409.
+      const noIdRes = await owner.post(`/api/workflow-runs/${run.id}/approve-step`).send({});
+      expect(noIdRes.status).toBe(400);
+      expect(noIdRes.body.message).toMatch(/generatedOutputId is required/);
+
+      const approveRes = await owner
+        .post(`/api/workflow-runs/${run.id}/approve-step`)
+        .send({ generatedOutputId: generated[0].id });
+      expect(approveRes.status).toBe(200);
+
+      const done = await advanceToPause(owner, run.id);
+      expect(done.run.status).toBe('completed');
+      expect(stepByStepId(done.steps, 'user_approval').status).toBe('approved');
+      expect(stepByStepId(done.steps, 'save_visual').status).toBe('completed');
+
+      // The REAL domain approval happened (not just workflow bookkeeping).
+      const approvedRow = await pool.query(
+        'SELECT approval_status, approved_by FROM generated_outputs WHERE id = $1',
+        [generated[0].id]
+      );
+      expect(approvedRow.rows[0].approval_status).toBe('approved');
+      expect(approvedRow.rows[0].approved_by).toBeTruthy();
+
+      const approvalRows = await pool.query(
+        "SELECT decision, entity_type, entity_id FROM workflow_approvals WHERE workflow_run_id = $1",
+        [run.id]
+      );
+      expect(approvalRows.rows.length).toBe(1);
+      expect(approvalRows.rows[0].decision).toBe('approved');
+      expect(approvalRows.rows[0].entity_type).toBe('generated_output');
+      expect(approvalRows.rows[0].entity_id).toBe(generated[0].id);
+    },
+    30_000
+  );
+
+  it(
+    're-running generation for the same layout plan appends a NEW alternative set with continuing alternative_index',
+    async () => {
+      const { briefId, layoutPlanId, clientId } = await createFullyReadyLayoutPlan('Workflow Visual Rerun Client');
+      await approveCreativeQaFor(layoutPlanId);
+
+      // First batch via the direct route (same service the workflow binding calls).
+      const owner = await loginAs(TEST_USERS.OWNER);
+      const firstRes = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(firstRes.status).toBe(201);
+      expect(firstRes.body.total).toBe(2);
+      expect(firstRes.body.data.map((o: { alternativeIndex: number }) => o.alternativeIndex)).toEqual([1, 2]);
+
+      // Second batch via the workflow — indices continue at 3/4, never reset.
+      const { run } = await startRun(owner, 'visual-generation', clientId, {
+        design_brief_id: briefId,
+        layout_plan_id: layoutPlanId,
+      });
+      const paused = await advanceToPause(owner, run.id);
+      expect(paused.run.status).toBe('waiting_for_approval');
+      const generated = stepByStepId(paused.steps, 'generate_prompts').outputJson.outputs as Array<{ alternativeIndex: number }>;
+      expect(generated.map((o) => o.alternativeIndex)).toEqual([3, 4]);
+
+      const listRes = await owner.get(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.total).toBe(4);
     },
     30_000
   );

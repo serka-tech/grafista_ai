@@ -10,7 +10,7 @@
  *  - record_context     bookkeeping steps recording REAL data (counts, ids,
  *                       statuses) and validating preconditions (400/409).
  *  - run_design_dna_analysis / generate_content_ideas / create_design_brief /
- *    generate_layout_plans / run_creative_qa
+ *    generate_layout_plans / run_creative_qa / run_visual_generation
  *                       call the EXISTING services — never reimplemented.
  *  - production_gate_check
  *                       calls services/production-gate.ts's
@@ -30,7 +30,7 @@ import { PlatformEnum, type WorkflowRun, type WorkflowStepRecord } from '@grafis
 import type { Permission } from '../auth/permissions.js';
 import type { UserWithAccess } from '../db/repositories/users.js';
 import type { ContentIdea } from '../db/repositories/content-ideas.js';
-import type { LayoutPlan } from '@grafista/schemas';
+import type { GeneratedOutput, LayoutPlan } from '@grafista/schemas';
 import { store } from '../data/store.js';
 
 // ─── Execution context/result contracts ─────────────────────────────────────
@@ -68,10 +68,10 @@ export type ApprovalGateKind =
   | 'design_brief'
   | 'layout_plan'
   | 'creative_qa'
+  | 'generated_output'
   | 'brand_profile_future';
 
 export type FutureFeature =
-  | 'visual_generation'
   | 'photoshop_production'
   | 'brand_profile_ai'
   | 'calendar_ai'
@@ -94,6 +94,7 @@ export type StepBinding =
   | { kind: 'create_design_brief' }
   | { kind: 'generate_layout_plans' }
   | { kind: 'run_creative_qa' }
+  | { kind: 'run_visual_generation' }
   | { kind: 'production_gate_check' }
   | { kind: 'approval_gate'; gate: ApprovalGateKind; approvePermission: Permission; rejectPermission: Permission }
   | { kind: 'future'; feature: FutureFeature; message: string }
@@ -115,6 +116,8 @@ export function bindingPermission(binding: StepBinding): Permission | undefined 
       return 'layout_plans:create';
     case 'run_creative_qa':
       return 'creative_qa:run';
+    case 'run_visual_generation':
+      return 'visual_generation:run';
     case 'production_gate_check':
       return 'workflows:advance';
     case 'approval_gate':
@@ -446,6 +449,31 @@ const requireApprovedLayoutPlan: RecordContextExec = async (ctx) => {
   };
 };
 
+/** Reads the REAL provider-routing outcome from the generated_outputs rows this run's
+ *  generate_prompts step already produced — no new AI call (routing happened inside
+ *  runVisualGeneration via the model router's image_generation table). */
+const recordVisualRoutingOutcome: RecordContextExec = async (ctx) => {
+  const ids = await runEntityIds(ctx.run.id, 'generated_output');
+  if (ids.length === 0) {
+    throw conflict('No generated outputs found in this run — run the generate_prompts step first');
+  }
+  const outputs: GeneratedOutput[] = [];
+  for (const id of ids) {
+    const output = await store.generatedOutputs.getById(id);
+    if (output) outputs.push(output);
+  }
+  return {
+    output: {
+      outputCount: outputs.length,
+      generatedCount: outputs.filter((o) => o.status === 'generated').length,
+      failedCount: outputs.filter((o) => o.status === 'failed').length,
+      providers: [...new Set(outputs.map((o) => o.provider).filter((p): p is string => !!p))],
+      models: [...new Set(outputs.map((o) => o.aiModel).filter((m): m is string => !!m))],
+      note: 'Sağlayıcı yönlendirmesi generate_prompts adımındaki üretim çağrısının içinde yapıldı (model router image_generation tablosu) — bu adım sonucu kaydeder, yeni AI çağrısı yapmaz',
+    },
+  };
+};
+
 const requireMonth: RecordContextExec = async (ctx) => {
   const month = stringInput(ctx.input, 'month');
   if (!month) {
@@ -486,7 +514,6 @@ const recordRunSummary: RecordContextExec = async (ctx) => {
 // ─── The full binding table (every step of all 10 workflows) ────────────────
 
 const FUTURE_BRAND_PROFILE = 'Marka profili AI üretimi henüz uygulanmadı';
-const FUTURE_VISUAL = 'Görsel üretim henüz uygulanmadı — Faz 2 Adım 7';
 const FUTURE_PHOTOSHOP = 'Photoshop üretimi henüz uygulanmadı';
 const FUTURE_CALENDAR = "Aylık takvim AI üretimi henüz uygulanmadı — content-generation workflow'unu kullanın";
 const FUTURE_REVISION_LEARNING = 'Revizyon öğrenme AI henüz uygulanmadı';
@@ -606,11 +633,25 @@ export const STEP_BINDINGS: Record<string, StepBinding> = {
 
   // ── visual-generation ──
   'visual-generation/check_existing': { kind: 'production_gate_check' },
-  'visual-generation/generate_prompts': { kind: 'future', feature: 'visual_generation', message: FUTURE_VISUAL },
-  'visual-generation/route_generation': { kind: 'future', feature: 'visual_generation', message: FUTURE_VISUAL },
-  'visual-generation/brand_check': { kind: 'future', feature: 'visual_generation', message: FUTURE_VISUAL },
-  'visual-generation/style_check': { kind: 'future', feature: 'visual_generation', message: FUTURE_VISUAL },
-  'visual-generation/user_approval': PLACEHOLDER_GATE,
+  // One service call covers prompt building AND generation (runVisualGeneration builds
+  // the visual prompt from the layout plan/brief/QA summary before calling the image
+  // provider) — the same single-AI-call pattern as creative-qa/brand_consistency.
+  'visual-generation/generate_prompts': { kind: 'run_visual_generation' },
+  'visual-generation/route_generation': { kind: 'record_context', exec: recordVisualRoutingOutcome },
+  'visual-generation/brand_check': {
+    kind: 'skip',
+    note: 'Üretilmiş görseller üzerinde ayrı marka kontrolü AI çağrısı henüz uygulanmadı — üretim, Creative QA onayından geçmiş layout plan üzerinden yapıldı (production gate)',
+  },
+  'visual-generation/style_check': {
+    kind: 'skip',
+    note: 'Üretilmiş görseller üzerinde ayrı DesignDNA stil kontrolü AI çağrısı henüz uygulanmadı — üretim, Creative QA onayından geçmiş layout plan üzerinden yapıldı (production gate)',
+  },
+  'visual-generation/user_approval': {
+    kind: 'approval_gate',
+    gate: 'generated_output',
+    approvePermission: 'visual_generation:approve',
+    rejectPermission: 'visual_generation:reject',
+  },
   'visual-generation/save_visual': { kind: 'record_context', exec: recordRunSummary },
 
   // ── photoshop-production ──

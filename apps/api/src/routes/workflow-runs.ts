@@ -99,6 +99,7 @@ workflowRunsRouter.post(
       body: {
         contentIdeaId: typeof req.body?.contentIdeaId === 'string' ? req.body.contentIdeaId : undefined,
         layoutPlanId: typeof req.body?.layoutPlanId === 'string' ? req.body.layoutPlanId : undefined,
+        generatedOutputId: typeof req.body?.generatedOutputId === 'string' ? req.body.generatedOutputId : undefined,
         notes: typeof req.body?.notes === 'string' ? req.body.notes : undefined,
       },
       user: req.user!,
@@ -118,6 +119,7 @@ workflowRunsRouter.post(
       body: {
         contentIdeaId: typeof req.body?.contentIdeaId === 'string' ? req.body.contentIdeaId : undefined,
         layoutPlanId: typeof req.body?.layoutPlanId === 'string' ? req.body.layoutPlanId : undefined,
+        generatedOutputId: typeof req.body?.generatedOutputId === 'string' ? req.body.generatedOutputId : undefined,
         notes: typeof req.body?.notes === 'string' ? req.body.notes : undefined,
       },
       user: req.user!,
