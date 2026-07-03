@@ -20,6 +20,7 @@ import { layoutPlansRouter, clientLayoutPlansRouter } from './routes/layout-plan
 import { creativeQaRouter, clientCreativeQaRouter } from './routes/creative-qa.js';
 import { visualGenerationRouter } from './routes/visual-generation.js';
 import { productionJobsRouter } from './routes/production-jobs.js';
+import { renderJobsRouter } from './routes/render-jobs.js';
 import { outputsRouter } from './routes/outputs.js';
 import { settingsRouter } from './routes/settings.js';
 import { workflowsRouter } from './routes/workflows.js';
@@ -63,6 +64,7 @@ app.use('/api', creativeQaRouter);
 app.use('/api/clients', clientCreativeQaRouter);
 app.use('/api', visualGenerationRouter);
 app.use('/api', productionJobsRouter);
+app.use('/api', renderJobsRouter);
 app.use('/api', outputsRouter);
 app.use('/api', settingsRouter);
 app.use('/api/workflows', workflowsRouter);

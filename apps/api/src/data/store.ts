@@ -22,6 +22,8 @@ import { layoutPlansRepo } from '../db/repositories/layout-plans.js';
 import { creativeQaReportsRepo } from '../db/repositories/creative-qa.js';
 import { generatedOutputsRepo } from '../db/repositories/generated-outputs.js';
 import { productionJobsRepo } from '../db/repositories/production-jobs.js';
+import { renderJobsRepo } from '../db/repositories/render-jobs.js';
+import { exportArtifactsRepo } from '../db/repositories/export-artifacts.js';
 import { workflowRunsRepo } from '../db/repositories/workflow-runs.js';
 import { workflowStepsRepo } from '../db/repositories/workflow-steps.js';
 import { workflowStepOutputsRepo } from '../db/repositories/workflow-step-outputs.js';
@@ -40,6 +42,8 @@ export const store = {
   creativeQaReports: creativeQaReportsRepo,
   generatedOutputs: generatedOutputsRepo,
   productionJobs: productionJobsRepo,
+  renderJobs: renderJobsRepo,
+  exportArtifacts: exportArtifactsRepo,
   workflowRuns: workflowRunsRepo,
   workflowSteps: workflowStepsRepo,
   workflowStepOutputs: workflowStepOutputsRepo,

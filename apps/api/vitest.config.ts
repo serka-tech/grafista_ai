@@ -25,6 +25,11 @@ export default defineConfig({
       // Small limit so the "oversized file rejected" test doesn't need to allocate/upload a
       // real 50MB buffer — production default (50MB, see .env.example) is untouched.
       UPLOAD_MAX_SIZE_MB: '2',
+      // Default renderer for the suite is the deterministic fake adapter (see
+      // apps/api/src/render/adapters/fake-adapter.ts) — the suite must never launch a real
+      // Playwright/Chromium browser. Production default (RENDERER_PROVIDER unset -> 'playwright',
+      // see .env.example) is untouched.
+      RENDERER_PROVIDER: 'fake',
     },
   },
 });

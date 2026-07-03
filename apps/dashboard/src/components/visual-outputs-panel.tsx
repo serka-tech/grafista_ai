@@ -44,6 +44,29 @@ const PRODUCTION_JOB_STATUS_BADGES: Record<string, { class: string; label: strin
   rejected: { class: 'badge-danger', label: 'Reddedildi' },
 };
 
+// Render job lifecycle (Phase 2 Step 9A) — see packages/schemas/src/render-job.ts
+// (RenderJobStatusEnum). No 'approved'/'rejected' states here — a render is a
+// downstream, already-approved-upstream artifact request, not another human
+// approval gate.
+const RENDER_JOB_STATUS_BADGES: Record<string, { class: string; label: string }> = {
+  pending: { class: 'badge-warning', label: 'Sırada' },
+  rendering: { class: 'badge-info', label: 'Render Ediliyor' },
+  rendered: { class: 'badge-success', label: 'Hazır' },
+  failed: { class: 'badge-danger', label: 'Başarısız' },
+  cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
+};
+
+// Render presets/formats (Phase 2 Step 9A) — mirrors RenderPresetEnum /
+// ExportFormatEnum in packages/schemas/src/render-job.ts exactly. Hardcoded
+// here rather than fetched since the dashboard doesn't import @grafista/schemas.
+const RENDER_PRESETS = [
+  { value: 'instagram_post', label: 'Instagram Post (1080×1080)' },
+  { value: 'instagram_story', label: 'Story (1080×1920)' },
+  { value: 'landscape', label: 'Landscape (1920×1080)' },
+  { value: 'ad_creative', label: 'Ad Creative (1200×628)' },
+];
+const EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
+
 function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
   return (
@@ -70,6 +93,11 @@ type OutputActionState = {
   rejectProductionJobError: string | null;
   showProductionRejectInput: boolean;
   productionRejectReason: string;
+  // Render / export (Phase 2 Step 9A) — one render request at a time per card.
+  rendering: boolean;
+  renderError: string | null;
+  selectedPreset: string;
+  selectedExportFormat: string;
 };
 
 function emptyOutputActionState(): OutputActionState {
@@ -88,6 +116,10 @@ function emptyOutputActionState(): OutputActionState {
     rejectProductionJobError: null,
     showProductionRejectInput: false,
     productionRejectReason: '',
+    rendering: false,
+    renderError: null,
+    selectedPreset: 'instagram_post',
+    selectedExportFormat: 'png',
   };
 }
 
@@ -108,11 +140,22 @@ function OutputCard({
   // status badge is visible without any user interaction.
   const [productionJob, setProductionJob] = useState<any | null>(null);
 
+  // Render job + its artifacts (Phase 2 Step 9A). MVP limitation: there is no
+  // "list render jobs for a production job" endpoint (only GET /render-jobs/:id),
+  // so unlike productionJob above this is NOT eagerly loaded on mount — it only
+  // ever reflects a render requested during the current session. A page reload
+  // loses this (the production job's own package/approve/reject status is the
+  // only part that survives a reload today).
+  const [renderJob, setRenderJob] = useState<any | null>(null);
+  const [renderArtifacts, setRenderArtifacts] = useState<any[]>([]);
+
   const canApprove = permissions.includes('visual_generation:approve');
   const canReject = permissions.includes('visual_generation:reject');
   const canSendToProduction = permissions.includes('production_jobs:create');
   const canApproveProductionJob = permissions.includes('production_jobs:approve');
   const canRejectProductionJob = permissions.includes('production_jobs:reject');
+  const canRender = permissions.includes('render_jobs:create');
+  const canReadArtifacts = permissions.includes('export_artifacts:read');
 
   useEffect(() => {
     // Jobs only ever exist for successfully generated outputs; skip the
@@ -253,6 +296,37 @@ function OutputCard({
       patch({ rejectProductionJobError: err.message ?? 'Reddetme işlemi başarısız oldu.' });
     } finally {
       patch({ rejectingProductionJob: false });
+    }
+  }
+
+  // Render / export (Phase 2 Step 9A). The backend response is synchronous —
+  // the returned RenderJob already reflects its final status ('rendered' or
+  // 'failed') — so a single POST + one artifacts fetch is enough, no polling.
+  const renderTitle = !canRender
+    ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+    : 'Seçilen format ve boyutta bir export oluştur';
+
+  async function handleRenderExport() {
+    if (!productionJob) return;
+    patch({ rendering: true, renderError: null });
+    try {
+      const res = await api.createRenderJob(productionJob.id, state.selectedPreset, state.selectedExportFormat);
+      setRenderJob(res.data);
+      setRenderArtifacts([]);
+      if (canReadArtifacts) {
+        try {
+          const artifactsRes = await api.listRenderJobArtifacts(res.data.id);
+          setRenderArtifacts(artifactsRes.data ?? []);
+        } catch {
+          // Artifact listing is a nice-to-have follow-up fetch — a failure here
+          // (e.g. a transient error) shouldn't mask the render job itself having
+          // succeeded; the download links just won't appear this session.
+        }
+      }
+    } catch (err: any) {
+      patch({ renderError: err.message ?? 'Render işlemi başarısız oldu.' });
+    } finally {
+      patch({ rendering: false });
     }
   }
 
@@ -462,6 +536,80 @@ function OutputCard({
           )}
         </div>
       )}
+
+      {/* Render / export (Phase 2 Step 9A) — only makes sense once a package
+          actually exists, same reasoning as why approve/reject only appear
+          once productionJob itself exists; this whole feature section is
+          absent (not a hidden button) for pending/packaging/failed/cancelled/
+          rejected production jobs. */}
+      {productionJob && (productionJob.status === 'package_ready' || productionJob.status === 'approved') && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Export:</span>
+          <select
+            className="form-select"
+            style={{ width: 'auto' }}
+            value={state.selectedPreset}
+            onChange={(e) => patch({ selectedPreset: e.target.value })}
+            disabled={state.rendering}
+          >
+            {RENDER_PRESETS.map((preset) => (
+              <option key={preset.value} value={preset.value}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="form-select"
+            style={{ width: 'auto' }}
+            value={state.selectedExportFormat}
+            onChange={(e) => patch({ selectedExportFormat: e.target.value })}
+            disabled={state.rendering}
+          >
+            {EXPORT_FORMATS.map((format) => (
+              <option key={format} value={format}>
+                {format.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={!canRender || state.rendering}
+            title={renderTitle}
+            onClick={handleRenderExport}
+          >
+            {state.rendering ? '⏳ Render Ediliyor...' : '🎨 Render / Export Oluştur'}
+          </button>
+
+          {renderJob && (
+            <span
+              className={`badge ${(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { class: 'badge-neutral' }).class}`}
+            >
+              {(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { label: renderJob.status }).label}
+            </span>
+          )}
+
+          {renderJob?.status === 'rendered' &&
+            renderArtifacts.map((artifact) => (
+              // Same API-origin resolution as the package/preview links above —
+              // the export-artifacts file route is API-relative and protected
+              // by the session cookie.
+              <a
+                key={artifact.id}
+                className="btn btn-secondary btn-sm"
+                href={resolveApiFileUrl(`/api/export-artifacts/${artifact.id}/file`)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                ⬇ {artifact.format.toUpperCase()} İndir
+              </a>
+            ))}
+        </div>
+      )}
+
+      {renderJob?.status === 'failed' && (
+        <ErrorNote message={renderJob.errorMessage ?? 'Render işlemi başarısız oldu.'} />
+      )}
+      <ErrorNote message={state.renderError} />
 
       {productionJob?.status === 'rejected' && productionJob.rejectionReason && (
         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>

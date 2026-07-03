@@ -157,6 +157,16 @@ export const api = {
   rejectProductionJob: (id: string, reason?: string) =>
     fetchAPI<{ data: any }>(`/api/production-jobs/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
+  // Render Jobs / Export Artifacts (Phase 2 Step 9A)
+  createRenderJob: (productionJobId: string, preset: string, exportFormat: string) =>
+    fetchAPI<{ data: any }>(`/api/production-jobs/${productionJobId}/render`, {
+      method: 'POST',
+      body: JSON.stringify({ preset, exportFormat }),
+    }),
+  getRenderJob: (id: string) => fetchAPI<{ data: any }>(`/api/render-jobs/${id}`),
+  listRenderJobArtifacts: (renderJobId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/render-jobs/${renderJobId}/artifacts`),
+
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),
 
