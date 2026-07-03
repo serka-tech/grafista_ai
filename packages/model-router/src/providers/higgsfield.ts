@@ -1,4 +1,4 @@
-import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
+import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
 
 /**
  * Higgsfield Provider Adapter (Placeholder)
@@ -6,6 +6,10 @@ import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
  */
 export class HiggsFieldAdapter implements ProviderAdapter {
   name = 'higgsfield' as const;
+  // Placeholder slated for video generation only — matches the routing table,
+  // where higgsfield appears solely as a video_generation fallback. complete()
+  // returns its structured placeholder error without any network call.
+  capabilities: AICapability[] = ['video_generation'];
   private apiKey: string | undefined;
   private baseUrl: string | undefined;
 

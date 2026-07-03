@@ -73,7 +73,9 @@ export class ModelRouter {
    * Select the best available provider for a task
    */
   private selectProvider(request: AIRequest): ProviderAdapter | null {
-    // If explicit provider requested, try it
+    // If explicit provider requested, try it. This is a deliberate user override,
+    // so only availability is checked here — no capability filtering — to keep
+    // the pre-existing override behavior intact.
     if (request.provider) {
       const adapter = this.adapters.get(request.provider);
       if (adapter?.isAvailable()) return adapter;
@@ -91,18 +93,29 @@ export class ModelRouter {
       return this.adapters.get('openai') ?? null;
     }
 
-    // Try primary
-    const primary = this.adapters.get(routing.primaryProvider);
-    if (primary?.isAvailable()) return primary;
+    // Only adapters that actually implement the task's required capabilities are
+    // selectable — an "available" provider that can't do the job (e.g. openai for
+    // image_generation) must never be picked, or we'd fire a doomed real API call.
+    // An empty/missing requiredCapabilities list means every adapter qualifies.
+    const required = routing.requiredCapabilities ?? [];
+    const candidates = [routing.primaryProvider, ...routing.fallbackProviders]
+      .map((name) => this.adapters.get(name))
+      .filter(
+        (adapter): adapter is ProviderAdapter =>
+          !!adapter && required.every((cap) => adapter.capabilities.includes(cap))
+      );
 
-    // Try fallbacks
-    for (const fallback of routing.fallbackProviders) {
-      const adapter = this.adapters.get(fallback);
-      if (adapter?.isAvailable()) return adapter;
-    }
+    // First capable AND available adapter wins (primary → fallbacks order).
+    const available = candidates.find((adapter) => adapter.isAvailable());
+    if (available) return available;
 
-    // All unavailable — return primary anyway (its complete() will report why it's unavailable)
-    return primary ?? null;
+    // No capable adapter is available — return the first capable one anyway: its
+    // complete() reports the missing configuration as a structured error without
+    // any network call (its client is never constructed without the API key).
+    // If NO adapter in the chain has the required capabilities, there is genuinely
+    // no provider for this task — complete() then returns a clean
+    // "No provider available" error instead of firing a doomed real API call.
+    return candidates[0] ?? null;
   }
 
   /**

@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, resolveApiFileUrl } from '@/lib/api';
 
 const OUTPUT_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
@@ -113,7 +113,10 @@ function OutputCard({
     }
   }
 
-  const previewSrc = output.previewUrl ?? output.fileUrl ?? null;
+  // fileUrl is an API-relative protected route (/api/visual-outputs/:id/file), so it
+  // must be resolved against the API origin — the dashboard runs on a different port.
+  const previewPath = output.previewUrl ?? output.fileUrl ?? null;
+  const previewSrc = previewPath ? resolveApiFileUrl(previewPath) : null;
 
   return (
     <div className="card dna-section" style={{ marginBottom: '14px' }}>

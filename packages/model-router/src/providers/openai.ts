@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
+import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
 
 /** Default OpenAI model for text-only completions (unchanged behavior). */
 const DEFAULT_TEXT_MODEL = 'gpt-4o';
@@ -17,10 +17,15 @@ function resolveVisionModel(requested?: string): string {
 
 /**
  * OpenAI Provider Adapter
- * Supports: text completion, vision analysis, image generation
+ * Supports: text completion, vision analysis (chat completions only).
+ * Does NOT implement the OpenAI Images API — complete() always calls
+ * chat.completions.create, so this adapter cannot generate images.
  */
 export class OpenAIAdapter implements ProviderAdapter {
   name = 'openai' as const;
+  // complete() only ever calls chat.completions.create (text + image *inputs*),
+  // never the Images API — so no image_generation capability here.
+  capabilities: AICapability[] = ['text', 'vision'];
   private apiKey: string | undefined;
   private client: OpenAI | undefined;
 

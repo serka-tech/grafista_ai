@@ -1,4 +1,4 @@
-import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
+import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
 
 /**
  * KIE AI Provider Adapter (Phase 2 Step 7 — real implementation)
@@ -83,6 +83,11 @@ async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {
 
 export class KieAIAdapter implements ProviderAdapter {
   name = 'kie-ai' as const;
+  // Real createTask/recordInfo jobs implementation. Kie AI's jobs API is
+  // model-driven and runs both image and video generation models; the routing
+  // table relies on kie-ai as primary for video_generation and fallback for
+  // image_generation.
+  capabilities: AICapability[] = ['image_generation', 'video_generation'];
   private apiKey: string | undefined;
   private baseUrl: string | undefined;
 

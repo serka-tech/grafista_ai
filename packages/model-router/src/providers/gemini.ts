@@ -1,4 +1,4 @@
-import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
+import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
 
 /**
  * Gemini Provider Adapter — typed placeholder, not active in Phase 1.
@@ -7,6 +7,12 @@ import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
  */
 export class GeminiAdapter implements ProviderAdapter {
   name = 'gemini' as const;
+  // Placeholder slated for text + vision chat (Gemini multimodal). Matches the
+  // routing table, which lists gemini as a fallback for both text tasks and the
+  // vision tasks style_analysis / creative_qa — keeps its selection eligibility
+  // identical to before the capability check existed. complete() still returns
+  // its structured placeholder error without any network call.
+  capabilities: AICapability[] = ['text', 'vision'];
   private apiKey: string | undefined;
 
   constructor() {

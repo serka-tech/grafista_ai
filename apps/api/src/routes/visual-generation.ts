@@ -1,8 +1,10 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { runVisualGeneration } from '../services/visual-generation.js';
+import { getFileAccess } from '../storage/file-service.js';
+import type { StorageProviderName } from '../storage/types.js';
 
 // Mounted at /api — layout-plan-scoped run/list routes plus standalone
 // /visual-outputs/:id routes (mirrors how creativeQaRouter from
@@ -51,6 +53,50 @@ visualGenerationRouter.get(
     const output = await store.generatedOutputs.getById(req.params.id);
     if (!output) return res.status(404).json({ error: 'Generated output not found' });
     res.json({ data: output });
+  })
+);
+
+// GET /api/visual-outputs/:id/file — authenticated, permission-checked access to the
+// generated image bytes (this is what the persisted fileUrl points at). Same access
+// pattern as brand-assets/design-references: local streams through this route, S3
+// redirects to a short-lived signed URL. Only status 'generated' rows have a file —
+// 'pending'/'failed' rows (or rows missing storage coordinates) are a 404, because the
+// file was never produced.
+visualGenerationRouter.get(
+  '/visual-outputs/:id/file',
+  requireAuth,
+  requirePermission('visual_generation:read'),
+  asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    const output = await store.generatedOutputs.getById(req.params.id);
+    if (
+      !output ||
+      output.status !== 'generated' ||
+      !output.storageKey ||
+      !output.storageProvider ||
+      !output.storageBucket
+    ) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const access = await getFileAccess(
+      {
+        storageProvider: output.storageProvider as StorageProviderName,
+        storageKey: output.storageKey,
+        storageBucket: output.storageBucket,
+      },
+      output.name,
+      output.mimeType
+    );
+
+    if (access.kind === 'redirect') {
+      return res.redirect(302, access.url);
+    }
+
+    res.setHeader('Content-Type', access.contentType ?? output.mimeType ?? 'application/octet-stream');
+    if (access.contentLength != null) res.setHeader('Content-Length', String(access.contentLength));
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(output.name)}"`);
+    access.stream.on('error', next);
+    access.stream.pipe(res);
   })
 );
 

@@ -279,12 +279,17 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
         contentType: mimeType,
       });
 
+      // Same protected-fileUrl pattern as brand-assets/design-references: the URL is the
+      // authenticated file route (GET /api/visual-outputs/:id/file), never a raw storage
+      // location — local streams through the API, S3 redirects to a short-lived signed URL.
+      const outputId = uuid();
       const persisted = await store.generatedOutputs.create({
         ...baseRow,
-        id: uuid(),
+        id: outputId,
         name,
         alternativeIndex,
         status: 'generated',
+        fileUrl: `/api/visual-outputs/${outputId}/file`,
         mimeType,
         fileSizeBytes: body.length,
         storageProvider: stored.provider,

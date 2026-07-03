@@ -15,6 +15,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Resolves an API-relative protected file path (e.g. `/api/visual-outputs/:id/file`)
+ * to an absolute URL on the API origin, so <img src> / download links work when the
+ * dashboard and API run on different origins. Absolute URLs pass through unchanged.
+ */
+export function resolveApiFileUrl(path: string): string {
+  return path.startsWith('/') ? `${API_BASE}${path}` : path;
+}
+
 function redirectToLoginOn401(status: number) {
   if (status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
     window.location.href = '/login';

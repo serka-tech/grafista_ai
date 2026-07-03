@@ -433,6 +433,9 @@ describe('4. Happy path — approved Creative QA, mocked provider, real storage 
         expect(output.generationMethod).toBe('ai_generated');
         expect(output.approvalStatus).toBe('pending');
         expect(output.errorMessage).toBeUndefined();
+        // Same protected-fileUrl pattern as brand-assets/design-references: the URL is
+        // the authenticated file route, never a raw storage location.
+        expect(output.fileUrl).toBe(`/api/visual-outputs/${output.id}/file`);
       }
       // Mime/extension mapping per image alternative.
       expect(outputs[0].mimeType).toBe('image/png');
@@ -459,6 +462,7 @@ describe('4. Happy path — approved Creative QA, mocked provider, real storage 
         expect(row.created_by).toBeTruthy();
         expect(row.creative_qa_report_id).toBe(creativeQaReportId);
         expect(Number(row.file_size_bytes)).toBeGreaterThan(0);
+        expect(row.file_url).toBe(`/api/visual-outputs/${row.id}/file`);
       }
       // The prompt snapshot captured what was actually sent (canvas dims are template variables).
       expect(String(rows.rows[0].prompt_snapshot)).toContain('1080');
@@ -579,6 +583,8 @@ describe('7. Storage failure — a failed write is never recorded as generated',
         expect(output.status).toBe('failed');
         expect(output.errorMessage).toMatch(/Simulated storage outage/);
         expect(output.storageKey).toBeUndefined();
+        // A failed row has no file, so it must never carry a fileUrl.
+        expect(output.fileUrl).toBeUndefined();
       }
 
       const failedRows = await pool.query(
@@ -658,7 +664,66 @@ describe('8. Approve / reject lifecycle on generated outputs', () => {
   );
 });
 
-describe('9. Workflow-engine coverage lives in workflows.test.ts', () => {
+describe('9. Protected file download — GET /api/visual-outputs/:id/file', () => {
+  it(
+    'streams a generated file with the right Content-Type; 401 unauthenticated; 403 without visual_generation:read; 404 unknown id',
+    async () => {
+      const { layoutPlanId } = await createQaClearedLayoutPlan('Visual Gen File Download Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const postRes = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(postRes.status).toBe(201);
+      const [first, second] = postRes.body.data as Array<{ id: string; fileUrl: string }>;
+      expect(first.fileUrl).toBe(`/api/visual-outputs/${first.id}/file`);
+
+      // The persisted fileUrl serves the ACTUAL stored bytes with the row's mime type.
+      const firstRes = await owner.get(first.fileUrl).responseType('blob');
+      expect(firstRes.status).toBe(200);
+      expect(firstRes.headers['content-type']).toContain('image/png');
+      expect(Buffer.from(firstRes.body).toString()).toBe(FAKE_IMAGE_BYTES_1);
+
+      const secondRes = await owner.get(second.fileUrl).responseType('blob');
+      expect(secondRes.status).toBe(200);
+      expect(secondRes.headers['content-type']).toContain('image/jpeg');
+      expect(Buffer.from(secondRes.body).toString()).toBe(FAKE_IMAGE_BYTES_2);
+
+      // Same auth gates as every other visual_generation read.
+      expect((await request(app).get(first.fileUrl)).status).toBe(401);
+
+      const contentManager = await loginAs(TEST_USERS.CONTENT_MANAGER);
+      const forbiddenRes = await contentManager.get(first.fileUrl);
+      expect(forbiddenRes.status).toBe(403);
+      expect(forbiddenRes.body.requiredPermission).toBe('visual_generation:read');
+
+      // Unknown output id — mirrors GET /api/visual-outputs/:id.
+      expect((await owner.get(`/api/visual-outputs/${SOME_UUID}/file`)).status).toBe(404);
+    },
+    30_000
+  );
+
+  it(
+    'returns 404 for a failed row — no file was ever produced, and the row carries no fileUrl',
+    async () => {
+      const { layoutPlanId } = await createQaClearedLayoutPlan('Visual Gen File 404 Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      storageControl.failPut = true;
+      const res = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(res.status).toBe(201);
+
+      for (const output of res.body.data as Array<{ id: string; status: string; fileUrl?: string }>) {
+        expect(output.status).toBe('failed');
+        expect(output.fileUrl).toBeUndefined();
+        const fileRes = await owner.get(`/api/visual-outputs/${output.id}/file`);
+        expect(fileRes.status).toBe(404);
+        expect(fileRes.body.error).toBe('File not found');
+      }
+    },
+    30_000
+  );
+});
+
+describe('10. Workflow-engine coverage lives in workflows.test.ts', () => {
   it('run_visual_generation binding + generated_output gate are covered end to end there (§11)', () => {
     // workflows.test.ts §11 drives the visual-generation workflow through start ->
     // production gate -> run_visual_generation -> route_generation -> user_approval

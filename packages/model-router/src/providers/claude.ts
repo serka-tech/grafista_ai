@@ -1,10 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ProviderAdapter, AIRequest, AIResponse } from '../types.js';
+import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
 
 const DEFAULT_MODEL = 'claude-opus-4-8';
 
 export class ClaudeAdapter implements ProviderAdapter {
   name = 'claude' as const;
+  // complete() sends text-only messages (request.images is ignored — no image
+  // content blocks are built), so this adapter is text-only today.
+  capabilities: AICapability[] = ['text'];
   private apiKey: string | undefined;
   private client: Anthropic | undefined;
 

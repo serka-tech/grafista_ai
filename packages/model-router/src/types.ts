@@ -74,6 +74,12 @@ export interface AIResponse {
 
 export interface ProviderAdapter {
   name: AIProvider;
+  /**
+   * Capabilities this adapter's complete() ACTUALLY implements today — not what
+   * the provider's platform could theoretically do. The router only selects an
+   * adapter for a task when it covers the task's requiredCapabilities.
+   */
+  capabilities: AICapability[];
   isAvailable(): boolean;
   complete(request: AIRequest): Promise<AIResponse>;
 }

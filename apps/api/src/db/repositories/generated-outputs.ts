@@ -87,6 +87,7 @@ export const generatedOutputsRepo = {
     alternativeIndex?: number;
     status: GeneratedOutputStatus;
     errorMessage?: string;
+    fileUrl?: string;
     mimeType?: string;
     fileSizeBytes?: number;
     storageProvider?: string;
@@ -104,11 +105,11 @@ export const generatedOutputsRepo = {
       `INSERT INTO generated_outputs (
          id, client_id, design_brief_id, layout_plan_id, creative_qa_report_id,
          type, name, description, alternative_index, status, error_message,
-         mime_type, file_size_bytes, storage_provider, storage_bucket, storage_key,
+         file_url, mime_type, file_size_bytes, storage_provider, storage_bucket, storage_key,
          dimensions, generation_method, provider, ai_model, generation_time_ms,
          prompt_snapshot, created_by
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
        RETURNING *`,
       [
         data.id,
@@ -122,6 +123,7 @@ export const generatedOutputsRepo = {
         data.alternativeIndex ?? null,
         data.status,
         data.errorMessage ?? null,
+        data.fileUrl ?? null,
         data.mimeType ?? null,
         data.fileSizeBytes ?? null,
         data.storageProvider ?? null,
