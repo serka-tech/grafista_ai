@@ -498,7 +498,9 @@ describe('4. Happy path — CREATIVE_DIRECTOR sends a generated visual to produc
       const storedBytes = await local.getObjectBuffer({ key: row.package_storage_key as string });
       expect(storedBytes.length).toBe(Number(row.package_size_bytes));
       const storedManifest = JSON.parse(storedBytes.toString());
-      expect(storedManifest.manifestVersion).toBe(1);
+      // Step 8C — manifestVersion bumped 1 -> 2 (the one intentional break flagged
+      // in the Step 8C handoff report). Everything else on this manifest is additive.
+      expect(storedManifest.manifestVersion).toBe(2);
       expect(storedManifest.productionJobId).toBe(job.id);
       expect(storedManifest.clientId).toBe(clientId);
       expect(storedManifest.generatedOutput.id).toBe(outputs[0].id);
@@ -901,6 +903,295 @@ describe('9. Immutability (Step 8B) — approved/rejected are terminal, never re
       expect(rows[0].status).toBe('rejected');
       expect(rows[0].approved_by).toBeNull();
       expect(rows[0].approved_at).toBeNull();
+    },
+    30_000
+  );
+});
+
+// ─── Phase 2 Step 8C — Production Package Polish + Render-Ready Handoff ──
+//
+// manifestVersion/packageVersion bumped 1 -> 2 (fixed in describe block 4
+// above). Everything below is NEW coverage for the additive Step 8C fields:
+// job/relationships/selectedVisual/layoutSnapshot/creativeQASnapshot/
+// designDNASnapshot/canvasSource/qualityChecklist/manualHandoffNotes on the
+// manifest, the templateContract's orientation/aspectRatio/bleed/
+// backgroundPolicy/exportVariants/colorPalette/rendererCompatibilityHints,
+// the route-level packageSummary on GET :id and the list endpoint, canvas
+// resolution (layout_plan / output_dimensions / fallback_default), and the
+// assertOutputIsPackageable defensive guard.
+
+/** Inserts a generated_outputs row directly via SQL, bypassing the normal
+ * visual-generation pipeline entirely — used only to construct states that
+ * are unreachable through the real API (no layout plan, no dimensions; or a
+ * corrupted/empty name) so Step 8C's defensive canvas-fallback and
+ * assertOutputIsPackageable guards can actually be exercised. design_brief_id
+ * still needs to be a real row (FK), so this reuses createFullyReadyLayoutPlan
+ * purely for a valid clientId/briefId — the resulting output is intentionally
+ * NOT linked to that layout plan. */
+async function createBareGeneratedOutput(
+  clientName: string,
+  opts: { dimensions?: { width: number; height: number }; name?: string } = {}
+) {
+  const { clientId, briefId } = await createFullyReadyLayoutPlan(clientName);
+  const ownerId = await userIdByEmail(TEST_USERS.OWNER);
+  const { rows } = await pool.query(
+    `INSERT INTO generated_outputs (
+       client_id, design_brief_id, layout_plan_id, type, name, status,
+       mime_type, generation_method, created_by, dimensions
+     )
+     VALUES ($1,$2,NULL,'preview_image',$3,'generated','image/png','manual',$4,$5)
+     RETURNING id`,
+    [
+      clientId,
+      briefId,
+      opts.name ?? `${clientName} bare output`,
+      ownerId,
+      opts.dimensions ? JSON.stringify(opts.dimensions) : null,
+    ]
+  );
+  return { clientId, outputId: rows[0].id as string, ownerId };
+}
+
+describe('10. Step 8C — package manifest v2 additive sections (job/relationships/selectedVisual/aliases/checklist/notes)', () => {
+  it(
+    'the manifest carries the new Step 8C fields alongside their unchanged Step 8A/8B counterparts',
+    async () => {
+      const { clientId, layoutPlanId, outputs } = await createGeneratedOutputs('Production Manifest V2 Client');
+      const director = await loginAs(TEST_USERS.CREATIVE_DIRECTOR);
+      const directorId = await userIdByEmail(TEST_USERS.CREATIVE_DIRECTOR);
+
+      const createRes = await director.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      expect(createRes.status).toBe(201);
+      const job = createRes.body.data as Record<string, any>;
+      const manifest = job.packageManifestSnapshot as Record<string, any>;
+      expect(manifest).toBeTruthy();
+
+      // Versioning
+      expect(manifest.manifestVersion).toBe(2);
+      expect(manifest.packageVersion).toBe(2);
+
+      // job / relationships (new)
+      expect(manifest.job).toEqual({
+        id: job.id,
+        clientId,
+        generatedOutputId: outputs[0].id,
+        layoutPlanId,
+        requestedBy: directorId,
+        createdAt: job.createdAt,
+      });
+      expect(manifest.relationships).toEqual({
+        clientId,
+        generatedOutputId: outputs[0].id,
+        layoutPlanId,
+      });
+
+      // selectedVisual / layoutSnapshot / creativeQASnapshot / designDNASnapshot
+      // are aliases carrying IDENTICAL data to their Step 8A/8B counterparts.
+      expect(manifest.selectedVisual).toEqual(manifest.generatedOutput);
+      expect(manifest.layoutSnapshot).toEqual(manifest.layoutPlanSnapshot);
+      expect(manifest.creativeQASnapshot).toEqual(manifest.creativeQaSnapshot);
+      expect(manifest.designDNASnapshot).toEqual(manifest.brandSnapshot);
+      expect(manifest.manualHandoffNotes).toEqual(manifest.productionInstructions);
+
+      // canvasSource — a layout plan was available, so it must win.
+      expect(manifest.canvasSource).toBe('layout_plan');
+
+      // qualityChecklist — deterministic, everything present in the happy path.
+      expect(manifest.qualityChecklist).toEqual([
+        { item: 'Layout plan present', status: 'ok' },
+        { item: 'Creative QA report present', status: 'ok' },
+        { item: 'Brand/DesignDNA present', status: 'ok' },
+        { item: 'Font requirements resolved', status: 'ok' },
+      ]);
+
+      // manualHandoffNotes is non-empty and does NOT center Photoshop — the
+      // only Photoshop mention lives inside the "Optional Photoshop" section.
+      const notes = manifest.manualHandoffNotes as string;
+      expect(typeof notes).toBe('string');
+      expect(notes.length).toBeGreaterThan(0);
+      const heading = '## Optional Photoshop/PSD handoff notes';
+      const headingIndex = notes.indexOf(heading);
+      expect(headingIndex).toBeGreaterThan(0);
+      expect(notes.slice(0, headingIndex)).not.toContain('Photoshop');
+
+      // Template contract additions
+      const contract = manifest.templateContract as Record<string, any>;
+      expect(contract.orientation).toBe('square');
+      expect(contract.aspectRatio).toBe(1);
+      expect(contract.bleed).toBeNull();
+      expect(contract.backgroundPolicy).toBe('solid_color:#FFFFFF');
+      expect(contract.exportVariants).toEqual([{ format: 'png', quality: 90, scaleFactor: 1 }]);
+      expect(contract.colorPalette).toEqual(contract.brandColors);
+
+      expect(contract.rendererCompatibilityHints).toEqual(contract.futurePhotoshopAdapterHints);
+      expect(contract.rendererCompatibilityHints.layerDataLocation).toBe('manifest.layoutPlanSnapshot.layers');
+      expect(contract.rendererCompatibilityHints.canvasLocation).toBe('manifest.layoutPlanSnapshot.canvas');
+      expect(contract.rendererCompatibilityHints.layerCount).toBe(3);
+      expect(contract.rendererCompatibilityHints.layerTypesPresent.sort()).toEqual(
+        ['background', 'logo', 'text'].sort()
+      );
+      expect(typeof contract.rendererCompatibilityHints.note).toBe('string');
+      expect(contract.rendererCompatibilityHints.note.length).toBeGreaterThan(0);
+    },
+    30_000
+  );
+});
+
+describe('11. Step 8C — GET :id / list packageSummary (shape, correctness, graceful degradation)', () => {
+  it(
+    'GET /production-jobs/:id returns a correctly-shaped packageSummary for a package_ready job',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Summary Ready Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const createRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      expect(createRes.status).toBe(201);
+      const job = createRes.body.data as Record<string, any>;
+
+      const getRes = await owner.get(`/api/production-jobs/${job.id}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.packageSummary).toEqual({
+        packageVersion: 2,
+        targetFormats: ['instagram_post'],
+        // NOTE: when a layout plan is present, templateContract.canvas is the
+        // layout plan's canvas object AS-IS (pre-8C behavior, preserved) — it
+        // carries backgroundColor/dpi alongside width/height, not a bare tuple.
+        canvasSize: { width: 1080, height: 1080, backgroundColor: '#FFFFFF', dpi: 72 },
+        packageReady: true,
+        packageSizeBytes: job.packageSizeBytes,
+        reviewStatus: 'package_ready',
+      });
+    },
+    30_000
+  );
+
+  it(
+    'GET /generated-outputs/:id/production-jobs attaches packageSummary to every item in data[]',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Summary List Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const createRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      expect(createRes.status).toBe(201);
+
+      const listRes = await owner.get(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data.length).toBe(1);
+      expect(listRes.body.data[0].packageSummary).toEqual({
+        packageVersion: 2,
+        targetFormats: ['instagram_post'],
+        // NOTE: when a layout plan is present, templateContract.canvas is the
+        // layout plan's canvas object AS-IS (pre-8C behavior, preserved) — it
+        // carries backgroundColor/dpi alongside width/height, not a bare tuple.
+        canvasSize: { width: 1080, height: 1080, backgroundColor: '#FFFFFF', dpi: 72 },
+        packageReady: true,
+        packageSizeBytes: listRes.body.data[0].packageSizeBytes,
+        reviewStatus: 'package_ready',
+      });
+    },
+    30_000
+  );
+
+  it(
+    'packageSummary degrades to null/[] fields (never throws) for a job that has not reached package_ready yet',
+    async () => {
+      // buildProductionPackage runs synchronously end-to-end within one request
+      // (pending -> packaging -> package_ready all happen before the response is
+      // sent), so there is no reliable in-flight window to observe via the real
+      // pipeline. Instead, insert a 'pending' row directly — the exact same shape
+      // a real in-flight job would have (no packageManifestSnapshot yet) — and
+      // confirm the route-level buildPackageSummary() helper degrades cleanly.
+      const { clientId, outputId } = await createBareGeneratedOutput('Production Summary Pending Client', {
+        dimensions: { width: 1080, height: 1080 },
+      });
+      const ownerId = await userIdByEmail(TEST_USERS.OWNER);
+      const { rows } = await pool.query(
+        `INSERT INTO production_jobs (client_id, generated_output_id, requested_by, status)
+         VALUES ($1,$2,$3,'pending') RETURNING id`,
+        [clientId, outputId, ownerId]
+      );
+      const jobId = rows[0].id as string;
+
+      const owner = await loginAs(TEST_USERS.OWNER);
+      const getRes = await owner.get(`/api/production-jobs/${jobId}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.packageSummary).toEqual({
+        packageVersion: null,
+        targetFormats: [],
+        canvasSize: null,
+        packageReady: false,
+        packageSizeBytes: null,
+        reviewStatus: 'pending',
+      });
+    },
+    30_000
+  );
+});
+
+describe('12. Step 8C — canvas resolution (layout_plan / output_dimensions / fallback_default)', () => {
+  it(
+    'falls back to the documented 1080x1080 default and records canvasSource when neither a layout plan nor output dimensions are available',
+    async () => {
+      const { outputId, ownerId } = await createBareGeneratedOutput('Production Canvas Fallback Client');
+      const { buildProductionPackage } = await import('../services/production-package-builder.js');
+
+      const job = await buildProductionPackage(outputId, ownerId);
+      expect(job.status).toBe('package_ready');
+      const manifest = job.packageManifestSnapshot as Record<string, any>;
+      expect(manifest.canvasSource).toBe('fallback_default');
+      const contract = manifest.templateContract as Record<string, any>;
+      expect(contract.canvas).toEqual({ width: 1080, height: 1080 });
+      expect(contract.orientation).toBe('square');
+      expect(contract.aspectRatio).toBe(1);
+    },
+    30_000
+  );
+
+  it(
+    'uses the generated output\'s own dimensions and records canvasSource "output_dimensions" when no layout plan is linked',
+    async () => {
+      const { outputId, ownerId } = await createBareGeneratedOutput('Production Canvas OutputDims Client', {
+        dimensions: { width: 800, height: 600 },
+      });
+      const { buildProductionPackage } = await import('../services/production-package-builder.js');
+
+      const job = await buildProductionPackage(outputId, ownerId);
+      expect(job.status).toBe('package_ready');
+      const manifest = job.packageManifestSnapshot as Record<string, any>;
+      expect(manifest.canvasSource).toBe('output_dimensions');
+      const contract = manifest.templateContract as Record<string, any>;
+      expect(contract.canvas).toEqual({ width: 800, height: 600 });
+      expect(contract.orientation).toBe('landscape');
+      expect(contract.aspectRatio).toBeCloseTo(800 / 600, 4);
+    },
+    30_000
+  );
+});
+
+describe('13. Step 8C — assertOutputIsPackageable defensive guard', () => {
+  it(
+    'marks the job failed with a descriptive error when the generated output is missing its identifying name ' +
+      '(id/name are non-optional on the schema, so this is only reachable via direct data corruption, simulated here via SQL)',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Missing Name Client');
+      await pool.query("UPDATE generated_outputs SET name = '' WHERE id = $1", [outputs[0].id]);
+
+      const ownerId = await userIdByEmail(TEST_USERS.OWNER);
+      const { buildProductionPackage } = await import('../services/production-package-builder.js');
+
+      await expect(buildProductionPackage(outputs[0].id, ownerId)).rejects.toThrow(
+        /missing required identifying fields/
+      );
+
+      const { rows } = await pool.query(
+        'SELECT status, error_message, package_storage_key, package_manifest_snapshot FROM production_jobs WHERE generated_output_id = $1',
+        [outputs[0].id]
+      );
+      expect(rows.length).toBe(1);
+      expect(rows[0].status).toBe('failed');
+      expect(rows[0].error_message).toMatch(/missing required identifying fields/);
+      expect(rows[0].package_storage_key).toBeNull();
+      expect(rows[0].package_manifest_snapshot).toBeNull();
     },
     30_000
   );

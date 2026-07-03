@@ -5,8 +5,48 @@ import { asyncHandler } from '../middleware/async-handler.js';
 import { buildProductionPackage } from '../services/production-package-builder.js';
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
+import type { ProductionJob } from '@grafista/schemas';
 
 const PACKAGE_DOWNLOAD_FILENAME = 'production-package.json';
+
+// Step 8C — small, read-only summary of a production job's package derived
+// PURELY from data already on the row (packageManifestSnapshot, the DB
+// snapshot written at 'package_ready' time — see production-package-builder.ts)
+// and the job's own status/packageSizeBytes. No storage round-trip, no new
+// fields on the job row itself — this is a view built at response time.
+// Safe before packaging finishes: packageManifestSnapshot is null/undefined
+// for 'pending'/'packaging'/'failed' jobs, in which case packageVersion/
+// targetFormats/canvasSize degrade to null/[]/null rather than throwing.
+type PackageSummary = {
+  packageVersion: number | null;
+  targetFormats: unknown[];
+  canvasSize: { width: number; height: number } | null;
+  packageReady: boolean;
+  packageSizeBytes: number | null;
+  reviewStatus: ProductionJob['status'];
+};
+
+function buildPackageSummary(
+  job: Pick<ProductionJob, 'status' | 'packageSizeBytes' | 'packageManifestSnapshot'>
+): PackageSummary {
+  const manifest = job.packageManifestSnapshot;
+  const templateContract = manifest?.templateContract as Record<string, unknown> | undefined;
+  const targetFormats = Array.isArray(templateContract?.targetFormats)
+    ? (templateContract!.targetFormats as unknown[])
+    : [];
+  const canvasSize = (templateContract?.canvas as { width: number; height: number } | undefined) ?? null;
+  const packageVersion =
+    (manifest?.packageVersion as number | undefined) ?? (manifest?.manifestVersion as number | undefined) ?? null;
+
+  return {
+    packageVersion,
+    targetFormats,
+    canvasSize,
+    packageReady: job.status === 'package_ready' || job.status === 'approved',
+    packageSizeBytes: job.packageSizeBytes ?? null,
+    reviewStatus: job.status,
+  };
+}
 
 // Mounted at /api — a generated-output-scoped create route plus standalone
 // /production-jobs/:id routes (mirrors how visualGenerationRouter pairs its
@@ -49,7 +89,11 @@ productionJobsRouter.get(
   requirePermission('production_jobs:read'),
   asyncHandler(async (req: Request, res: Response) => {
     const jobs = await store.productionJobs.listByGeneratedOutput(req.params.generatedOutputId);
-    res.json({ data: jobs, total: jobs.length });
+    // Step 8C — packageSummary attached per-item (additive field on each job
+    // object) rather than as a separate parallel array, so consumers that
+    // already iterate `data` (e.g. the dashboard's listProductionJobs call)
+    // get it for free without an index-correlation step.
+    res.json({ data: jobs.map((job) => ({ ...job, packageSummary: buildPackageSummary(job) })), total: jobs.length });
   })
 );
 
@@ -61,7 +105,9 @@ productionJobsRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const job = await store.productionJobs.getById(req.params.id);
     if (!job) return res.status(404).json({ error: 'Production job not found' });
-    res.json({ data: job });
+    // Step 8C — packageSummary is purely additive alongside the existing
+    // `data: job` shape; nothing already reading `data` is affected.
+    res.json({ data: job, packageSummary: buildPackageSummary(job) });
   })
 );
 

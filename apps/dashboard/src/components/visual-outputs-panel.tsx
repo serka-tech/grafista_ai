@@ -380,6 +380,24 @@ function OutputCard({
           >
             {(PRODUCTION_JOB_STATUS_BADGES[productionJob.status] ?? { label: productionJob.status }).label}
           </span>
+          {productionJob.packageSummary && (
+            // Step 8C — compact, unobtrusive package summary line (version,
+            // canvas size, target format(s), ready indicator). Derived from
+            // `listProductionJobs`'s per-item packageSummary (see api.ts /
+            // production-jobs.ts) — no extra fetch needed.
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+              {productionJob.packageSummary.packageVersion != null && `v${productionJob.packageSummary.packageVersion}`}
+              {productionJob.packageSummary.canvasSize &&
+                ` · ${productionJob.packageSummary.canvasSize.width}×${productionJob.packageSummary.canvasSize.height}`}
+              {productionJob.packageSummary.targetFormats?.length > 0 &&
+                ` · ${productionJob.packageSummary.targetFormats.join(', ')}`}
+              {' · '}
+              <span className={`badge ${productionJob.packageSummary.packageReady ? 'badge-success' : 'badge-neutral'}`}>
+                {productionJob.packageSummary.packageReady ? 'Paket Hazır' : 'Paket Bekliyor'}
+              </span>
+            </span>
+          )}
+
           {(productionJob.status === 'package_ready' || productionJob.status === 'approved') && (
             // Same API-origin resolution as the preview image above: the
             // package route is API-relative and protected by the session cookie.
