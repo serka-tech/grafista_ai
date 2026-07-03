@@ -695,3 +695,213 @@ describe('7. Packaging storage failure — failures are persisted, never swallow
     30_000
   );
 });
+
+// ─── Phase 2 Step 8B — Production QA + Artifact Lifecycle ────────────────
+//
+// Step 8A's suite above already exercises approvedBy/approvedAt (describe
+// block 6, "approve and reject only work from package_ready..."), so that
+// coverage is NOT duplicated here. What's new in Step 8B: the reject-side
+// audit trail (rejected_by/rejected_at/rejection_reason) and — the core new
+// requirement — regression coverage proving the guarded-WHERE UPDATE idiom
+// really does make 'approved'/'rejected' terminal (no silent field
+// overwrites, no state flip-backs).
+//
+// Cross-client access: checked routes/production-jobs.ts's GET handlers —
+// the file's own top-of-router comment confirms this codebase has no
+// per-client access model at all (UserWithAccess carries only global
+// roles/permissions; no existing read route filters by client membership).
+// production_jobs:read is a global permission, not a per-client one, so no
+// "job belonging to client A is invisible/unusable via client B" test is
+// added here — there is no such behavior in this codebase to assert.
+
+describe('8. Reject reason (Step 8B) — persisted to the row and returned by the API', () => {
+  it(
+    'persists the reason when provided in the request body, both in the response and directly in Postgres',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Reject Reason Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+      const ownerId = await userIdByEmail(TEST_USERS.OWNER);
+
+      const jobRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      expect(jobRes.status).toBe(201);
+      const jobId = jobRes.body.data.id as string;
+
+      const reason = 'Logo placement violates the safe zone; please redo with corrected margins.';
+      const rejectRes = await owner.post(`/api/production-jobs/${jobId}/reject`).send({ reason });
+      expect(rejectRes.status).toBe(200);
+      expect(rejectRes.body.data.status).toBe('rejected');
+      expect(rejectRes.body.data.rejectionReason).toBe(reason);
+      expect(rejectRes.body.data.rejectedBy).toBe(ownerId);
+      expect(rejectRes.body.data.rejectedAt).toBeTruthy();
+
+      const { rows } = await pool.query(
+        'SELECT rejected_by, rejected_at, rejection_reason FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      expect(rows[0].rejected_by).toBe(ownerId);
+      expect(rows[0].rejected_at).toBeTruthy();
+      expect(rows[0].rejection_reason).toBe(reason);
+    },
+    30_000
+  );
+
+  it(
+    'rejecting WITHOUT a reason still succeeds — rejectionReason stays unset, no error',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Reject No Reason Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const jobRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      expect(jobRes.status).toBe(201);
+      const jobId = jobRes.body.data.id as string;
+
+      const rejectRes = await owner.post(`/api/production-jobs/${jobId}/reject`);
+      expect(rejectRes.status).toBe(200);
+      expect(rejectRes.body.data.status).toBe('rejected');
+      expect(rejectRes.body.data.rejectionReason).toBeUndefined();
+      expect(rejectRes.body.data.rejectedBy).toBeTruthy();
+      expect(rejectRes.body.data.rejectedAt).toBeTruthy();
+
+      const { rows } = await pool.query(
+        'SELECT rejected_by, rejected_at, rejection_reason FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      expect(rows[0].rejected_by).toBeTruthy();
+      expect(rows[0].rejected_at).toBeTruthy();
+      expect(rows[0].rejection_reason).toBeNull();
+    },
+    30_000
+  );
+});
+
+describe('9. Immutability (Step 8B) — approved/rejected are terminal, never re-flip or silently overwrite', () => {
+  it(
+    're-approving an already-approved job is 409 and approved_at does NOT change',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Immutable ReApprove Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const jobRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      const jobId = jobRes.body.data.id as string;
+
+      const approveRes = await owner.post(`/api/production-jobs/${jobId}/approve`);
+      expect(approveRes.status).toBe(200);
+
+      const { rows: firstRows } = await pool.query(
+        'SELECT approved_at FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      const firstApprovedAt = firstRows[0].approved_at as Date;
+      expect(firstApprovedAt).toBeTruthy();
+
+      // Small delay so a silent overwrite (if the guard were broken) would
+      // produce a detectably different NOW() timestamp.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const reApproveRes = await owner.post(`/api/production-jobs/${jobId}/approve`);
+      expect(reApproveRes.status).toBe(409);
+      expect(reApproveRes.body.status).toBe('approved');
+
+      const { rows: secondRows } = await pool.query(
+        'SELECT status, approved_at FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      expect(secondRows[0].status).toBe('approved');
+      expect((secondRows[0].approved_at as Date).toISOString()).toBe(firstApprovedAt.toISOString());
+    },
+    30_000
+  );
+
+  it(
+    'rejecting an already-approved job is 409 and writes NO rejection fields (status stays approved)',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Immutable ApproveThenReject Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const jobRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      const jobId = jobRes.body.data.id as string;
+
+      const approveRes = await owner.post(`/api/production-jobs/${jobId}/approve`);
+      expect(approveRes.status).toBe(200);
+
+      const rejectRes = await owner.post(`/api/production-jobs/${jobId}/reject`).send({ reason: 'too late' });
+      expect(rejectRes.status).toBe(409);
+      expect(rejectRes.body.status).toBe('approved');
+
+      const { rows } = await pool.query(
+        'SELECT status, rejected_by, rejected_at, rejection_reason FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      expect(rows[0].status).toBe('approved');
+      expect(rows[0].rejected_by).toBeNull();
+      expect(rows[0].rejected_at).toBeNull();
+      expect(rows[0].rejection_reason).toBeNull();
+    },
+    30_000
+  );
+
+  it(
+    're-rejecting an already-rejected job is 409 and rejected_at/rejection_reason do NOT change',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Immutable ReReject Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const jobRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      const jobId = jobRes.body.data.id as string;
+
+      const rejectRes = await owner.post(`/api/production-jobs/${jobId}/reject`).send({ reason: 'first reason' });
+      expect(rejectRes.status).toBe(200);
+
+      const { rows: firstRows } = await pool.query(
+        'SELECT rejected_at, rejection_reason FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      const firstRejectedAt = firstRows[0].rejected_at as Date;
+      expect(firstRejectedAt).toBeTruthy();
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const reRejectRes = await owner
+        .post(`/api/production-jobs/${jobId}/reject`)
+        .send({ reason: 'second reason should never stick' });
+      expect(reRejectRes.status).toBe(409);
+      expect(reRejectRes.body.status).toBe('rejected');
+
+      const { rows: secondRows } = await pool.query(
+        'SELECT status, rejected_at, rejection_reason FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      expect(secondRows[0].status).toBe('rejected');
+      expect((secondRows[0].rejected_at as Date).toISOString()).toBe(firstRejectedAt.toISOString());
+      expect(secondRows[0].rejection_reason).toBe('first reason');
+    },
+    30_000
+  );
+
+  it(
+    'approving an already-rejected job is 409 and writes NO approval fields (status stays rejected)',
+    async () => {
+      const { outputs } = await createGeneratedOutputs('Production Immutable RejectThenApprove Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const jobRes = await owner.post(`/api/generated-outputs/${outputs[0].id}/production-jobs`);
+      const jobId = jobRes.body.data.id as string;
+
+      const rejectRes = await owner.post(`/api/production-jobs/${jobId}/reject`);
+      expect(rejectRes.status).toBe(200);
+
+      const approveRes = await owner.post(`/api/production-jobs/${jobId}/approve`);
+      expect(approveRes.status).toBe(409);
+      expect(approveRes.body.status).toBe('rejected');
+
+      const { rows } = await pool.query(
+        'SELECT status, approved_by, approved_at FROM production_jobs WHERE id = $1',
+        [jobId]
+      );
+      expect(rows[0].status).toBe('rejected');
+      expect(rows[0].approved_by).toBeNull();
+      expect(rows[0].approved_at).toBeNull();
+    },
+    30_000
+  );
+});

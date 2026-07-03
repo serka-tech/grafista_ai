@@ -108,7 +108,9 @@ productionJobsRouter.get(
 // POST /api/production-jobs/:id/approve — human sign-off on the built package.
 // The repo guard only matches status = 'package_ready' rows, so approving a
 // 'pending'/'packaging'/'failed' job or re-approving is a 409 (mirrors
-// visual-generation.ts's approve route).
+// visual-generation.ts's approve route). Records approved_by/approved_at;
+// see the reject route below for the equivalent reject-side audit trail
+// added in Phase 2 Step 8B.
 productionJobsRouter.post(
   '/production-jobs/:id/approve',
   requireAuth,
@@ -129,9 +131,14 @@ productionJobsRouter.post(
 );
 
 // POST /api/production-jobs/:id/reject — same 'package_ready'-only guard as
-// approve. No body fields: productionJobsRepo.reject takes no notes/reason (a
-// rejected job is terminal — a new job is created instead of a revision loop),
-// so unlike visual-outputs/:id/reject there is no notes -> revision mapping.
+// approve. Optional body { reason?: string }: a rejected job is still
+// terminal (no revision_requested state — a new job is created instead of a
+// revision loop), but Phase 2 Step 8B adds an audit trail (rejected_by/
+// rejected_at/rejection_reason, see 018_production_jobs_review_audit.sql) so
+// the reason for sending a package back is not lost. Body parsing mirrors
+// visual-generation.ts's / creative-qa.ts's reject routes' `notes` idiom —
+// no length cap or 400 here either, matching that existing convention (the
+// schema layer caps rejectionReason at 2000 chars).
 productionJobsRouter.post(
   '/production-jobs/:id/reject',
   requireAuth,
@@ -140,7 +147,8 @@ productionJobsRouter.post(
     const existing = await store.productionJobs.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Production job not found' });
 
-    const rejected = await store.productionJobs.reject(existing.id);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+    const rejected = await store.productionJobs.reject(existing.id, req.user!.id, reason);
     if (!rejected) {
       return res.status(409).json({
         error: 'Production job is not in a rejectable state',

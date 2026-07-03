@@ -44,6 +44,9 @@ function mapRow(row: Record<string, unknown>): ProductionJob {
     requestedBy: row.requested_by as string,
     approvedBy: (row.approved_by as string) ?? undefined,
     approvedAt: row.approved_at ? (row.approved_at as Date).toISOString() : undefined,
+    rejectedBy: (row.rejected_by as string) ?? undefined,
+    rejectedAt: row.rejected_at ? (row.rejected_at as Date).toISOString() : undefined,
+    rejectionReason: (row.rejection_reason as string) ?? undefined,
 
     createdAt: (row.created_at as Date).toISOString(),
     updatedAt: (row.updated_at as Date).toISOString(),
@@ -199,16 +202,19 @@ export const productionJobsRepo = {
   /**
    * Rejects the given job — only from 'package_ready' (the same prior-status
    * guard as approve(); there is no revision_requested state for jobs, a
-   * rejected job is terminal and a new job can be created instead). Returns
-   * undefined (-> 409 in the route) if no row matched.
+   * rejected job is terminal and a new job can be created instead). Records
+   * the same audit trail approve() does (rejected_by/rejected_at), plus an
+   * optional free-text reason for whoever creates the retry job (Phase 2
+   * Step 8B — 018_production_jobs_review_audit.sql). Returns undefined
+   * (-> 409 in the route) if no row matched.
    */
-  async reject(id: string): Promise<ProductionJob | undefined> {
+  async reject(id: string, rejectedBy: string, reason?: string): Promise<ProductionJob | undefined> {
     const { rows } = await pool.query(
       `UPDATE production_jobs
-       SET status = 'rejected'
+       SET status = 'rejected', rejected_by = $2, rejected_at = NOW(), rejection_reason = $3
        WHERE id = $1 AND status = 'package_ready'
        RETURNING *`,
-      [id]
+      [id, rejectedBy, reason ?? null]
     );
     return rows[0] ? mapRow(rows[0]) : undefined;
   },

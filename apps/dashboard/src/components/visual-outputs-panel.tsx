@@ -62,6 +62,14 @@ type OutputActionState = {
   notes: string;
   sendingToProduction: boolean;
   sendToProductionError: string | null;
+  // Production job approve/reject (Phase 2 Step 8B) — mirrors the visual
+  // output's own approving/rejecting/showRejectInput/notes fields above.
+  approvingProductionJob: boolean;
+  approveProductionJobError: string | null;
+  rejectingProductionJob: boolean;
+  rejectProductionJobError: string | null;
+  showProductionRejectInput: boolean;
+  productionRejectReason: string;
 };
 
 function emptyOutputActionState(): OutputActionState {
@@ -74,6 +82,12 @@ function emptyOutputActionState(): OutputActionState {
     notes: '',
     sendingToProduction: false,
     sendToProductionError: null,
+    approvingProductionJob: false,
+    approveProductionJobError: null,
+    rejectingProductionJob: false,
+    rejectProductionJobError: null,
+    showProductionRejectInput: false,
+    productionRejectReason: '',
   };
 }
 
@@ -97,6 +111,8 @@ function OutputCard({
   const canApprove = permissions.includes('visual_generation:approve');
   const canReject = permissions.includes('visual_generation:reject');
   const canSendToProduction = permissions.includes('production_jobs:create');
+  const canApproveProductionJob = permissions.includes('production_jobs:approve');
+  const canRejectProductionJob = permissions.includes('production_jobs:reject');
 
   useEffect(() => {
     // Jobs only ever exist for successfully generated outputs; skip the
@@ -188,6 +204,55 @@ function OutputCard({
       patch({ rejectError: err.message ?? 'Reddetme işlemi başarısız oldu.' });
     } finally {
       patch({ rejecting: false });
+    }
+  }
+
+  // Production job approve/reject (Phase 2 Step 8B). Only a job in
+  // `package_ready` can be actioned; once approved/rejected it is terminal
+  // (the server 409s a repeat action, this is just a UX pre-warning via title).
+  const canActOnProductionJob = productionJob?.status === 'package_ready';
+  const productionJobTerminal = productionJob?.status === 'approved' || productionJob?.status === 'rejected';
+
+  const approveProductionJobTitle = !canApproveProductionJob
+    ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+    : productionJobTerminal
+      ? 'Bu üretim işi zaten sonuçlandırıldı'
+      : !canActOnProductionJob
+        ? 'Bu üretim işi şu an onaylanabilir durumda değil'
+        : 'Bu üretim işini onayla';
+
+  const rejectProductionJobTitle = !canRejectProductionJob
+    ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+    : productionJobTerminal
+      ? 'Bu üretim işi zaten sonuçlandırıldı'
+      : !canActOnProductionJob
+        ? 'Bu üretim işi şu an reddedilebilir durumda değil'
+        : 'Bu üretim işini reddet';
+
+  async function handleApproveProductionJob() {
+    if (!productionJob) return;
+    patch({ approvingProductionJob: true, approveProductionJobError: null });
+    try {
+      const res = await api.approveProductionJob(productionJob.id);
+      setProductionJob(res.data);
+    } catch (err: any) {
+      patch({ approveProductionJobError: err.message ?? 'Onaylama başarısız oldu.' });
+    } finally {
+      patch({ approvingProductionJob: false });
+    }
+  }
+
+  async function handleRejectProductionJob() {
+    if (!productionJob) return;
+    patch({ rejectingProductionJob: true, rejectProductionJobError: null });
+    try {
+      const res = await api.rejectProductionJob(productionJob.id, state.productionRejectReason.trim() || undefined);
+      patch({ productionRejectReason: '', showProductionRejectInput: false });
+      setProductionJob(res.data);
+    } catch (err: any) {
+      patch({ rejectProductionJobError: err.message ?? 'Reddetme işlemi başarısız oldu.' });
+    } finally {
+      patch({ rejectingProductionJob: false });
     }
   }
 
@@ -327,7 +392,63 @@ function OutputCard({
               ⬇ Paketi İndir
             </a>
           )}
+
+          {/* Approve/reject are always rendered (never hidden), disabled + titled
+              once the job is no longer package_ready — same idiom as every
+              other action button in this file. */}
+          <button
+            className="btn btn-success btn-sm"
+            disabled={!canApproveProductionJob || !canActOnProductionJob || state.approvingProductionJob}
+            title={approveProductionJobTitle}
+            onClick={handleApproveProductionJob}
+          >
+            {state.approvingProductionJob ? '⏳ Onaylanıyor...' : '✓ Onayla'}
+          </button>
+
+          {!state.showProductionRejectInput ? (
+            <button
+              className="btn btn-danger btn-sm"
+              disabled={!canRejectProductionJob || !canActOnProductionJob || state.rejectingProductionJob}
+              title={rejectProductionJobTitle}
+              onClick={() => patch({ showProductionRejectInput: true })}
+            >
+              ✕ Reddet
+            </button>
+          ) : (
+            <>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Red gerekçesi (opsiyonel)"
+                value={state.productionRejectReason}
+                onChange={(e) => patch({ productionRejectReason: e.target.value })}
+                style={{ width: '200px' }}
+                disabled={state.rejectingProductionJob}
+              />
+              <button
+                className="btn btn-danger btn-sm"
+                disabled={!canRejectProductionJob || !canActOnProductionJob || state.rejectingProductionJob}
+                title={rejectProductionJobTitle}
+                onClick={handleRejectProductionJob}
+              >
+                {state.rejectingProductionJob ? '⏳ Gönderiliyor...' : 'Gönder'}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={state.rejectingProductionJob}
+                onClick={() => patch({ showProductionRejectInput: false, productionRejectReason: '' })}
+              >
+                Vazgeç
+              </button>
+            </>
+          )}
         </div>
+      )}
+
+      {productionJob?.status === 'rejected' && productionJob.rejectionReason && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+          Red gerekçesi: {productionJob.rejectionReason}
+        </p>
       )}
 
       {productionJob?.status === 'failed' && (
@@ -336,6 +457,8 @@ function OutputCard({
       <ErrorNote message={state.sendToProductionError} />
       <ErrorNote message={state.approveError} />
       <ErrorNote message={state.rejectError} />
+      <ErrorNote message={state.approveProductionJobError} />
+      <ErrorNote message={state.rejectProductionJobError} />
     </div>
   );
 }

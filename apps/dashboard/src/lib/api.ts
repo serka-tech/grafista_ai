@@ -154,8 +154,8 @@ export const api = {
   getProductionJob: (id: string) => fetchAPI<{ data: any }>(`/api/production-jobs/${id}`),
   approveProductionJob: (id: string) =>
     fetchAPI<{ data: any }>(`/api/production-jobs/${id}/approve`, { method: 'POST' }),
-  rejectProductionJob: (id: string) =>
-    fetchAPI<{ data: any }>(`/api/production-jobs/${id}/reject`, { method: 'POST' }),
+  rejectProductionJob: (id: string, reason?: string) =>
+    fetchAPI<{ data: any }>(`/api/production-jobs/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),

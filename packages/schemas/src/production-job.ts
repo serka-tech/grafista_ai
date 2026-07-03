@@ -55,6 +55,13 @@ export const ProductionJobSchema = z.object({
   approvedBy: z.string().uuid().optional(),
   approvedAt: z.string().datetime().optional(),
 
+  // Reject-side parity with approve's audit fields (Phase 2 Step 8B) — reject
+  // previously recorded only the status flip with no who/when/why. reason is
+  // free text the reviewer leaves for whoever creates the retry job.
+  rejectedBy: z.string().uuid().optional(),
+  rejectedAt: z.string().datetime().optional(),
+  rejectionReason: z.string().max(2000).optional(),
+
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
