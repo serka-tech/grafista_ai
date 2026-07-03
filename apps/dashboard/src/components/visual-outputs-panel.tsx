@@ -32,6 +32,18 @@ const APPROVAL_STATUS_BADGES: Record<string, { class: string; label: string }> =
   revision_requested: { class: 'badge-warning', label: 'Revizyon İstendi' },
 };
 
+// Production job lifecycle (Phase 2 Step 8A) — single linear status axis,
+// see packages/schemas/src/production-job.ts.
+const PRODUCTION_JOB_STATUS_BADGES: Record<string, { class: string; label: string }> = {
+  pending: { class: 'badge-warning', label: 'Sırada' },
+  packaging: { class: 'badge-info', label: 'Paketleniyor' },
+  package_ready: { class: 'badge-success', label: 'Paket Hazır' },
+  failed: { class: 'badge-danger', label: 'Başarısız' },
+  cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
+  approved: { class: 'badge-success', label: 'Onaylandı' },
+  rejected: { class: 'badge-danger', label: 'Reddedildi' },
+};
+
 function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
   return (
@@ -48,10 +60,21 @@ type OutputActionState = {
   rejectError: string | null;
   showRejectInput: boolean;
   notes: string;
+  sendingToProduction: boolean;
+  sendToProductionError: string | null;
 };
 
 function emptyOutputActionState(): OutputActionState {
-  return { approving: false, approveError: null, rejecting: false, rejectError: null, showRejectInput: false, notes: '' };
+  return {
+    approving: false,
+    approveError: null,
+    rejecting: false,
+    rejectError: null,
+    showRejectInput: false,
+    notes: '',
+    sendingToProduction: false,
+    sendToProductionError: null,
+  };
 }
 
 function OutputCard({
@@ -66,8 +89,36 @@ function OutputCard({
   const [state, setState] = useState<OutputActionState>(emptyOutputActionState());
   const patch = (p: Partial<OutputActionState>) => setState((prev) => ({ ...prev, ...p }));
 
+  // Latest production job for this output (Phase 2 Step 8A). Eagerly loaded on
+  // mount — same idiom as the panel's own loadOutputs effect — so the job
+  // status badge is visible without any user interaction.
+  const [productionJob, setProductionJob] = useState<any | null>(null);
+
   const canApprove = permissions.includes('visual_generation:approve');
   const canReject = permissions.includes('visual_generation:reject');
+  const canSendToProduction = permissions.includes('production_jobs:create');
+
+  useEffect(() => {
+    // Jobs only ever exist for successfully generated outputs; skip the
+    // round-trip for pending/failed cards.
+    if (output.status !== 'generated') return;
+    let active = true;
+    api
+      .listProductionJobs(output.id)
+      .then((res) => {
+        // History is ordered oldest-first — the last entry is the latest job.
+        const jobs = res.data ?? [];
+        if (active) setProductionJob(jobs.length > 0 ? jobs[jobs.length - 1] : null);
+      })
+      .catch(() => {
+        // A 403 (user lacks production_jobs:read) is an expected gating
+        // outcome, and a transient load failure should not break the card —
+        // mirror loadOutputs' silent handling and just show no job.
+      });
+    return () => {
+      active = false;
+    };
+  }, [output.id, output.status]);
 
   const statusInfo = OUTPUT_STATUS_BADGES[output.status] ?? { class: 'badge-neutral', label: output.status };
   const approvalInfo = APPROVAL_STATUS_BADGES[output.approvalStatus] ?? { class: 'badge-neutral', label: output.approvalStatus };
@@ -97,6 +148,33 @@ function OutputCard({
       patch({ approveError: err.message ?? 'Onaylama başarısız oldu.' });
     } finally {
       patch({ approving: false });
+    }
+  }
+
+  // Only a successfully generated output can be sent to production (backend
+  // returns 409 otherwise), and at most one active job can exist per output
+  // (the create route is idempotent and would just return it).
+  const hasActiveJob =
+    productionJob != null && !['failed', 'cancelled', 'rejected'].includes(productionJob.status);
+  const canSendThis = output.status === 'generated' && !hasActiveJob;
+
+  const sendToProductionTitle = !canSendToProduction
+    ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+    : hasActiveJob
+      ? 'Bu görsel için zaten aktif bir üretim işi var'
+      : output.status !== 'generated'
+        ? 'Sadece başarıyla üretilmiş görseller üretime gönderilebilir'
+        : 'Bu görseli üretim paketlemesine gönder';
+
+  async function handleSendToProduction() {
+    patch({ sendingToProduction: true, sendToProductionError: null });
+    try {
+      const res = await api.createProductionJob(output.id);
+      setProductionJob(res.data);
+    } catch (err: any) {
+      patch({ sendToProductionError: err.message ?? 'Üretime gönderme başarısız oldu.' });
+    } finally {
+      patch({ sendingToProduction: false });
     }
   }
 
@@ -218,8 +296,44 @@ function OutputCard({
             </button>
           </>
         )}
+
+        <button
+          className="btn btn-primary btn-sm"
+          disabled={!canSendToProduction || !canSendThis || state.sendingToProduction}
+          title={sendToProductionTitle}
+          onClick={handleSendToProduction}
+        >
+          {state.sendingToProduction ? '⏳ Gönderiliyor...' : '🏭 Üretime Gönder'}
+        </button>
       </div>
 
+      {productionJob && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Üretim işi:</span>
+          <span
+            className={`badge ${(PRODUCTION_JOB_STATUS_BADGES[productionJob.status] ?? { class: 'badge-neutral' }).class}`}
+          >
+            {(PRODUCTION_JOB_STATUS_BADGES[productionJob.status] ?? { label: productionJob.status }).label}
+          </span>
+          {(productionJob.status === 'package_ready' || productionJob.status === 'approved') && (
+            // Same API-origin resolution as the preview image above: the
+            // package route is API-relative and protected by the session cookie.
+            <a
+              className="btn btn-secondary btn-sm"
+              href={resolveApiFileUrl(`/api/production-jobs/${productionJob.id}/package`)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              ⬇ Paketi İndir
+            </a>
+          )}
+        </div>
+      )}
+
+      {productionJob?.status === 'failed' && (
+        <ErrorNote message={productionJob.errorMessage ?? 'Üretim paketleme başarısız oldu.'} />
+      )}
+      <ErrorNote message={state.sendToProductionError} />
       <ErrorNote message={state.approveError} />
       <ErrorNote message={state.rejectError} />
     </div>

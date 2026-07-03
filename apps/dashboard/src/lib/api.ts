@@ -146,6 +146,17 @@ export const api = {
   rejectVisualOutput: (id: string, notes?: string) =>
     fetchAPI<{ data: any }>(`/api/visual-outputs/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
+  // Production Jobs (Phase 2 Step 8A)
+  createProductionJob: (generatedOutputId: string) =>
+    fetchAPI<{ data: any }>(`/api/generated-outputs/${generatedOutputId}/production-jobs`, { method: 'POST' }),
+  listProductionJobs: (generatedOutputId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/generated-outputs/${generatedOutputId}/production-jobs`),
+  getProductionJob: (id: string) => fetchAPI<{ data: any }>(`/api/production-jobs/${id}`),
+  approveProductionJob: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/production-jobs/${id}/approve`, { method: 'POST' }),
+  rejectProductionJob: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/production-jobs/${id}/reject`, { method: 'POST' }),
+
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),
 

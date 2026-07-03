@@ -42,6 +42,10 @@ export const PERMISSIONS = [
   'visual_generation:read',
   'visual_generation:approve',
   'visual_generation:reject',
+  'production_jobs:create',
+  'production_jobs:read',
+  'production_jobs:approve',
+  'production_jobs:reject',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

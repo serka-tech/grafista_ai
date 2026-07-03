@@ -21,6 +21,7 @@ import { designAnalysisRepo, designDnaRepo } from '../db/repositories/design-dna
 import { layoutPlansRepo } from '../db/repositories/layout-plans.js';
 import { creativeQaReportsRepo } from '../db/repositories/creative-qa.js';
 import { generatedOutputsRepo } from '../db/repositories/generated-outputs.js';
+import { productionJobsRepo } from '../db/repositories/production-jobs.js';
 import { workflowRunsRepo } from '../db/repositories/workflow-runs.js';
 import { workflowStepsRepo } from '../db/repositories/workflow-steps.js';
 import { workflowStepOutputsRepo } from '../db/repositories/workflow-step-outputs.js';
@@ -38,6 +39,7 @@ export const store = {
   layoutPlans: layoutPlansRepo,
   creativeQaReports: creativeQaReportsRepo,
   generatedOutputs: generatedOutputsRepo,
+  productionJobs: productionJobsRepo,
   workflowRuns: workflowRunsRepo,
   workflowSteps: workflowStepsRepo,
   workflowStepOutputs: workflowStepOutputsRepo,

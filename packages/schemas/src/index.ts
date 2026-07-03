@@ -12,3 +12,4 @@ export * from './qa.js';
 export * from './revision.js';
 export * from './generated-output.js';
 export * from './workflow.js';
+export * from './production-job.js';
