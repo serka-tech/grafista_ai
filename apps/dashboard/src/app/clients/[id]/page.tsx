@@ -66,17 +66,12 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
             { id: 'monthly-content-calendar', icon: '📅', label: 'Aylık Takvim' },
             { id: 'creative-qa', icon: '✅', label: 'Kalite Kontrolü' },
           ].map(wf => (
-            <button
-              key={wf.id}
-              className="btn btn-secondary"
-              onClick={() => {
-                api.startWorkflow(wf.id, params.id).then(() => {
-                  window.location.href = '/workflows';
-                }).catch(console.error);
-              }}
-            >
+            // Bu iş akışlarının zorunlu girdileri var (kampanya hedefi, tasarım dosyaları,
+            // ay, brief/layout ID'leri) — o yüzden burada doğrudan başlatmıyoruz, girdilerin
+            // toplandığı /workflows/[id] sayfasına yönlendiriyoruz.
+            <a key={wf.id} href={`/workflows/${wf.id}`} className="btn btn-secondary" style={{ textDecoration: 'none' }}>
               {wf.icon} {wf.label}
-            </button>
+            </a>
           ))}
         </div>
       </div>

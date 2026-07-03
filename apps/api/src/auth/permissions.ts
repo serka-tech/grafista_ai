@@ -33,6 +33,11 @@ export const PERMISSIONS = [
   'creative_qa:read',
   'creative_qa:approve',
   'creative_qa:reject',
+  'workflows:read',
+  'workflows:start',
+  'workflows:advance',
+  'workflows:approve',
+  'workflows:cancel',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

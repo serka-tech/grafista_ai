@@ -20,7 +20,7 @@
     { "step_id": "learn_from_edits", "order": 7, "action": "Learn from any calendar edits or rejections", "type": "ai_task", "inputs": ["rejected_items", "revision_notes"], "outputs": ["learned_calendar_preferences"], "skill": "revision-learning", "condition": "rejected_items.length > 0", "approval_required": false },
     { "step_id": "create_production_queue", "order": 8, "action": "Move approved items into production queue as content ideas", "type": "system", "inputs": ["approved_items", "client_id"], "outputs": ["content_idea_ids", "production_queue"], "skill": null, "approval_required": false, "condition": "approval_status === 'approved'" }
   ],
-  "skills_used": ["content-strategy", "approval-gate", "design-brief-generator", "revision-learning"],
+  "skills_used": ["content-strategy", "approval-gate", "design-brief-generator", "revision-learning", "model-routing"],
   "approval_required": true,
   "outputs": {
     "monthly_calendar": { "type": "json", "description": "Full month calendar with daily content assignments" },

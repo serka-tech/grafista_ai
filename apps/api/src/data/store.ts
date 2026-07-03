@@ -20,6 +20,10 @@ import { designBriefsRepo } from '../db/repositories/design-briefs.js';
 import { designAnalysisRepo, designDnaRepo } from '../db/repositories/design-dna.js';
 import { layoutPlansRepo } from '../db/repositories/layout-plans.js';
 import { creativeQaReportsRepo } from '../db/repositories/creative-qa.js';
+import { workflowRunsRepo } from '../db/repositories/workflow-runs.js';
+import { workflowStepsRepo } from '../db/repositories/workflow-steps.js';
+import { workflowStepOutputsRepo } from '../db/repositories/workflow-step-outputs.js';
+import { workflowApprovalsRepo } from '../db/repositories/workflow-approvals.js';
 
 export const store = {
   clients: clientsRepo,
@@ -32,4 +36,8 @@ export const store = {
   designDna: designDnaRepo,
   layoutPlans: layoutPlansRepo,
   creativeQaReports: creativeQaReportsRepo,
+  workflowRuns: workflowRunsRepo,
+  workflowSteps: workflowStepsRepo,
+  workflowStepOutputs: workflowStepOutputsRepo,
+  workflowApprovals: workflowApprovalsRepo,
 };

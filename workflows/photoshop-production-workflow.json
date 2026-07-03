@@ -17,7 +17,7 @@
     { "step_id": "qa_check", "order": 6, "action": "Run full creative QA on generated PSD preview", "type": "ai_task", "inputs": ["preview_url", "design_brief_id"], "outputs": ["qa_report"], "skill": "creative-director-qa", "ai_provider_routing": "model-routing", "approval_required": false },
     { "step_id": "user_approval", "order": 7, "action": "Present PSD preview and QA report for final approval", "type": "approval_gate", "inputs": ["preview_url", "psd_file_url", "qa_report"], "outputs": ["approval_status"], "skill": "approval-gate", "approval_required": true, "on_reject": "return_to_step_2_with_revisions" }
   ],
-  "skills_used": ["photoshop-automation", "creative-director-qa", "approval-gate"],
+  "skills_used": ["photoshop-automation", "creative-director-qa", "approval-gate", "model-routing"],
   "approval_required": true,
   "outputs": {
     "editable_psd": { "type": "file", "format": "psd", "stored_in": "generated_outputs" },

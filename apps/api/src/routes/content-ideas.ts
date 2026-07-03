@@ -1,17 +1,16 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
-import { ModelRouter } from '@grafista/model-router';
-import { createPromptBuilder, contentIdeationTemplate } from '@grafista/prompt-engine';
-import { GenerateContentRequestSchema } from '@grafista/schemas';
-import { env } from '../config/env.js';
+import {
+  runContentIdeation,
+  ContentIdeationRequestSchema,
+  type AiErrorKind,
+} from '../services/content-ideation.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 
 export const contentIdeasRouter: Router = Router();
 
-const modelRouter = new ModelRouter();
-const BodySchema = GenerateContentRequestSchema.omit({ clientId: true });
+const BodySchema = ContentIdeationRequestSchema;
 
 // GET /api/clients/:clientId/content-ideas
 contentIdeasRouter.get(
@@ -26,6 +25,8 @@ contentIdeasRouter.get(
 );
 
 // POST /api/clients/:clientId/content-ideas — generate ideas via a real AI provider call
+// (logic extracted into services/content-ideation.ts for the workflow engine; the
+// response contract here — including the bespoke 502 bodies — is unchanged).
 contentIdeasRouter.post(
   '/:clientId/content-ideas',
   requireAuth,
@@ -38,89 +39,27 @@ contentIdeasRouter.post(
   if (!parsedBody.success) {
     return res.status(400).json({ error: 'Invalid request body', issues: parsedBody.error.issues });
   }
-  const { platform, format, topic, optionCount, campaignName, mood, additionalNotes } = parsedBody.data;
 
-  const designDNA = await store.designDna.getApprovedByClientId(client.id);
-  const approvedIdeas = await store.contentIdeas.listApprovedByClient(client.id);
-  const previousApproved = approvedIdeas.map((i) => `- ${i.title}: ${i.description}`).join('\n');
-
-  const prompt = createPromptBuilder(contentIdeationTemplate)
-    .setVariables({
-      clientName: client.name,
-      platform,
-      optionCount: String(optionCount),
-      format: format ?? 'single_image',
-      topic: topic ?? '',
-      mood: mood ?? '',
-      additionalNotes: additionalNotes ?? '',
-      designDNA: designDNA ? JSON.stringify(designDNA, null, 2) : 'No Design DNA generated yet.',
-      brandProfile: `Industry: ${client.industry ?? 'unknown'}. Notes: ${client.notes ?? 'none'}.`,
-      previousContent: previousApproved || 'None yet.',
-      revisionMemory: 'None yet.',
-    })
-    .build();
-
-  const aiResponse = await modelRouter.complete({
-    taskType: 'content_ideation',
-    provider: env.AI_DEFAULT_PROVIDER,
-    systemPrompt: prompt.system,
-    userPrompt: prompt.user,
-    outputFormat: 'json',
-    maxTokens: prompt.metadata.maxTokens,
-    temperature: prompt.metadata.temperature,
-  });
-
-  if (!aiResponse.success) {
-    return res.status(502).json({
-      error: 'AI provider error',
-      provider: aiResponse.provider,
-      message: aiResponse.error ?? 'Unknown provider error',
-    });
-  }
-
-  let rawIdeas: Array<Record<string, unknown>>;
   try {
-    rawIdeas = parseIdeasFromModelOutput(aiResponse.content);
+    const result = await runContentIdeation(client.id, req.user!.id, parsedBody.data);
+    return res.status(201).json({ data: result.ideas, total: result.ideas.length, provider: result.provider, model: result.model });
   } catch (err) {
-    return res.status(502).json({
-      error: 'AI response parsing error',
-      provider: aiResponse.provider,
-      message: err instanceof Error ? err.message : String(err),
-    });
+    const aiErr = err as Error & { aiErrorKind?: AiErrorKind; aiProvider?: string };
+    if (aiErr.aiErrorKind === 'provider') {
+      return res.status(502).json({
+        error: 'AI provider error',
+        provider: aiErr.aiProvider,
+        message: aiErr.message,
+      });
+    }
+    if (aiErr.aiErrorKind === 'parsing') {
+      return res.status(502).json({
+        error: 'AI response parsing error',
+        provider: aiErr.aiProvider,
+        message: aiErr.message,
+      });
+    }
+    throw err;
   }
-
-  const ideas = [];
-  for (const [i, raw] of rawIdeas.slice(0, optionCount).entries()) {
-    const idea = await store.contentIdeas.create({
-      id: uuid(),
-      clientId: client.id,
-      campaignName,
-      title: typeof raw.title === 'string' ? raw.title : `${topic || 'Content'} — Option ${i + 1}`,
-      description: typeof raw.description === 'string' ? raw.description : '',
-      platform,
-      format: (typeof raw.format === 'string' ? raw.format : format) ?? 'single_image',
-      hook: typeof raw.hook === 'string' ? raw.hook : undefined,
-      caption: typeof raw.caption === 'string' ? raw.caption : undefined,
-      hashtags: Array.isArray(raw.hashtags) ? raw.hashtags.filter((h): h is string => typeof h === 'string') : [],
-      callToAction: typeof raw.callToAction === 'string' ? raw.callToAction : undefined,
-      toneOfVoice: typeof raw.toneOfVoice === 'string' ? raw.toneOfVoice : undefined,
-      visualDirection: typeof raw.visualDirection === 'string' ? raw.visualDirection : undefined,
-      status: 'pending_approval',
-      generatedBy: 'ai',
-    });
-    ideas.push(idea);
-  }
-
-  res.status(201).json({ data: ideas, total: ideas.length, provider: aiResponse.provider, model: aiResponse.model });
   })
 );
-
-/** Parses the model's JSON output into an array of raw idea objects, tolerating markdown code fences. */
-function parseIdeasFromModelOutput(content: string): Array<Record<string, unknown>> {
-  const cleaned = content.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  const parsed = JSON.parse(cleaned);
-  if (Array.isArray(parsed)) return parsed;
-  if (parsed && Array.isArray(parsed.ideas)) return parsed.ideas;
-  if (parsed && Array.isArray(parsed.options)) return parsed.options;
-  throw new Error('Model did not return a JSON array of content ideas');
-}

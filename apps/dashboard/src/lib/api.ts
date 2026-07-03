@@ -135,16 +135,27 @@ export const api = {
   // Health
   health: () => fetchAPI<any>('/api/health'),
 
-  // Workflows
-  getWorkflows: () => fetchAPI<{ data: any[] }>('/api/workflows'),
+  // Workflows (Phase 2 Step 6 — kalıcı workflow çalıştırmaları)
+  getWorkflows: () => fetchAPI<{ data: any[]; total: number }>('/api/workflows'),
   getWorkflow: (id: string) => fetchAPI<{ data: any }>(`/api/workflows/${id}`),
-  startWorkflow: (workflowId: string, clientId: string, inputs?: any) =>
-    fetchAPI<{ data: any }>(`/api/workflows/${workflowId}/start`, { method: 'POST', body: JSON.stringify({ clientId, inputs }) }),
-  getWorkflowInstances: (clientId?: string) =>
-    fetchAPI<{ data: any[] }>(`/api/workflows/instances/list${clientId ? `?clientId=${clientId}` : ''}`),
-  getWorkflowInstance: (id: string) => fetchAPI<{ data: any }>(`/api/workflows/instances/${id}`),
-  advanceWorkflow: (id: string, data: any) =>
-    fetchAPI<{ data: any }>(`/api/workflows/instances/${id}/advance`, { method: 'POST', body: JSON.stringify(data) }),
-  failWorkflow: (id: string, reason: string) =>
-    fetchAPI<{ data: any }>(`/api/workflows/instances/${id}/fail`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  startWorkflow: (workflowId: string, clientId: string, input?: Record<string, unknown>) =>
+    fetchAPI<{ data: any }>(`/api/workflows/${workflowId}/start`, { method: 'POST', body: JSON.stringify({ clientId, input }) }),
+  getWorkflowRuns: (params?: { clientId?: string; workflowId?: string; status?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.clientId) query.set('clientId', params.clientId);
+    if (params?.workflowId) query.set('workflowId', params.workflowId);
+    if (params?.status) query.set('status', params.status);
+    const qs = query.toString();
+    return fetchAPI<{ data: any[]; total: number }>(`/api/workflow-runs${qs ? `?${qs}` : ''}`);
+  },
+  getWorkflowRun: (id: string) => fetchAPI<{ data: any }>(`/api/workflow-runs/${id}`),
+  getWorkflowRunSteps: (id: string) => fetchAPI<{ data: any[]; total: number }>(`/api/workflow-runs/${id}/steps`),
+  advanceWorkflowRun: (id: string, input?: Record<string, unknown>) =>
+    fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/advance`, { method: 'POST', body: JSON.stringify({ input }) }),
+  approveWorkflowStep: (id: string, body?: { contentIdeaId?: string; layoutPlanId?: string; notes?: string }) =>
+    fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/approve-step`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  rejectWorkflowStep: (id: string, body?: { contentIdeaId?: string; layoutPlanId?: string; notes?: string }) =>
+    fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/reject-step`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  cancelWorkflowRun: (id: string) =>
+    fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/cancel`, { method: 'POST' }),
 };

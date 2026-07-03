@@ -98,8 +98,8 @@ describe('POST /api/design-briefs — approval gate', () => {
 });
 
 describe('GET /api/workflows', () => {
-  it('lists workflow definitions (public, no auth required)', async () => {
-    const res = await request(app).get('/api/workflows');
+  it('lists workflow definitions (authenticated — requires workflows:read since Phase 2 Step 6)', async () => {
+    const res = await owner.get('/api/workflows');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
   });

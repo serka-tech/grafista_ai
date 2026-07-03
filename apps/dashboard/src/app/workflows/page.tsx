@@ -1,28 +1,30 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 
-interface WorkflowDef {
-  workflow_id: string;
+interface WorkflowSummary {
+  workflowId: string;
   name: string;
   icon: string;
   purpose: string;
-  skills: string[];
-  next: string | null;
+  trigger: string;
+  nextWorkflow: string | null;
+  stepCount: number;
+  approvalRequired: boolean;
+  skillsUsed: string[];
+  executable: { supported: boolean; futureSteps: string[]; gateSteps: string[] };
 }
 
-interface WorkflowInstance {
+interface WorkflowRunItem {
   id: string;
   workflowId: string;
   clientId: string;
   clientName?: string;
   workflowName?: string;
-  workflowIcon?: string;
   status: string;
-  currentStep: number;
-  totalSteps: number;
-  startedAt: string;
+  currentStepId?: string;
+  createdAt: string;
   updatedAt: string;
   completedAt?: string;
 }
@@ -34,53 +36,158 @@ const STATUS_BADGES: Record<string, { class: string; label: string }> = {
   in_progress: { class: 'badge-info', label: 'Devam Ediyor' },
   qa_failed: { class: 'badge-danger', label: 'KK Başarısız' },
   completed: { class: 'badge-success', label: 'Tamamlandı' },
+  cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
+  failed: { class: 'badge-danger', label: 'Başarısız' },
+  blocked_future_feature: { class: 'badge-warning', label: 'Gelecek Özellik Bekliyor' },
 };
 
+// packages/schemas/src/content.ts PlatformEnum değerleri (dashboard'ın schemas
+// bağımlılığı yok — liste elle senkron tutulur).
+const PLATFORM_OPTIONS = [
+  'instagram_post', 'instagram_story', 'instagram_reel', 'instagram_carousel',
+  'facebook_post', 'facebook_story', 'twitter_post', 'linkedin_post', 'tiktok',
+  'youtube_thumbnail', 'youtube_short', 'pinterest', 'email_header', 'web_banner', 'other',
+];
+
+type StartField = {
+  key: string;
+  label: string;
+  required: boolean;
+  kind: 'text' | 'platform';
+  placeholder?: string;
+};
+
+// Başlatırken client_id dışında hangi girdiler gerekiyor — kaynak:
+// workflows/*.json required_inputs + engine'in start doğrulaması.
+const START_FIELDS: Record<string, StartField[]> = {
+  'style-library-ingestion': [
+    { key: 'design_files', label: 'Tasarım dosyaları', required: true, kind: 'text', placeholder: 'Yüklenen referans dosya adları (virgülle)' },
+  ],
+  'content-generation': [
+    { key: 'campaign_goal', label: 'Kampanya hedefi', required: true, kind: 'text', placeholder: 'Örn: Yaz koleksiyonu lansmanı' },
+    { key: 'platform', label: 'Platform', required: true, kind: 'platform' },
+  ],
+  'design-brief': [
+    { key: 'content_idea_id', label: 'İçerik fikri ID', required: true, kind: 'text', placeholder: 'Onaylı içerik fikri UUID' },
+  ],
+  'layout-generation': [
+    { key: 'design_brief_id', label: 'Tasarım brifi ID', required: true, kind: 'text', placeholder: 'Onaylı tasarım brifi UUID' },
+  ],
+  'visual-generation': [
+    { key: 'design_brief_id', label: 'Tasarım brifi ID', required: true, kind: 'text', placeholder: 'Onaylı tasarım brifi UUID' },
+    { key: 'layout_plan_id', label: 'Yerleşim planı ID', required: false, kind: 'text', placeholder: 'Onaylı yerleşim planı UUID (üretim kapısı için gerekli)' },
+  ],
+  'photoshop-production': [
+    { key: 'layout_plan_id', label: 'Yerleşim planı ID', required: true, kind: 'text', placeholder: 'Onaylı yerleşim planı UUID' },
+    { key: 'design_brief_id', label: 'Tasarım brifi ID', required: true, kind: 'text', placeholder: 'Onaylı tasarım brifi UUID' },
+  ],
+  'creative-qa': [
+    { key: 'design_brief_id', label: 'Tasarım brifi ID', required: true, kind: 'text', placeholder: 'Onaylı tasarım brifi UUID' },
+    { key: 'layout_plan_id', label: 'Yerleşim planı ID', required: true, kind: 'text', placeholder: 'Onaylı yerleşim planı UUID' },
+  ],
+  'revision-learning': [
+    { key: 'feedback_entries', label: 'Geri bildirim girdileri', required: true, kind: 'text', placeholder: 'Revizyon geri bildirim notları' },
+  ],
+  'monthly-content-calendar': [
+    { key: 'month', label: 'Ay', required: true, kind: 'text', placeholder: 'YYYY-MM' },
+  ],
+};
+
+function ErrorNote({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <p style={{ color: 'var(--color-danger, #f87171)', fontSize: '0.85rem', marginTop: '8px' }}>
+      ⚠ {message}
+    </p>
+  );
+}
+
 export default function WorkflowsPage() {
-  const [workflows, setWorkflows] = useState<WorkflowDef[]>([]);
-  const [instances, setInstances] = useState<WorkflowInstance[]>([]);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
+  const [runs, setRuns] = useState<WorkflowRunItem[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string>('');
+
+  const [startOpen, setStartOpen] = useState<string | null>(null);
+  const [startValues, setStartValues] = useState<Record<string, string>>({});
+  const [startErrors, setStartErrors] = useState<Record<string, string | null>>({});
   const [startingWorkflow, setStartingWorkflow] = useState<string | null>(null);
 
-  useEffect(() => {
-    Promise.all([
+  const loadAll = useCallback(async () => {
+    const [userResult, wfResult, runsResult, clientsResult] = await Promise.allSettled([
+      api.getCurrentUser(),
       api.getWorkflows(),
-      api.getWorkflowInstances(),
+      api.getWorkflowRuns(),
       api.getClients(),
-    ]).then(([wfRes, instRes, clientRes]) => {
-      setWorkflows(wfRes.data);
-      setInstances(instRes.data);
-      setClients(clientRes.data);
-    }).catch(console.error).finally(() => setLoading(false));
+    ]);
+
+    setPermissions(userResult.status === 'fulfilled' ? (userResult.value.data.user?.permissions ?? []) : []);
+    setClients(clientsResult.status === 'fulfilled' ? (clientsResult.value.data ?? []) : []);
+    setRuns(runsResult.status === 'fulfilled' ? (runsResult.value.data ?? []) : []);
+
+    if (wfResult.status === 'fulfilled') {
+      setWorkflows(wfResult.value.data ?? []);
+      setLoadError(null);
+    } else {
+      setWorkflows([]);
+      setLoadError(wfResult.reason?.message ?? 'İş akışları yüklenirken hata oluştu.');
+    }
   }, []);
 
-  const handleStartWorkflow = async (workflowId: string) => {
-    if (!selectedClient) return;
-    setStartingWorkflow(workflowId);
-    try {
-      const res = await api.startWorkflow(workflowId, selectedClient);
-      setInstances([res.data, ...instances]);
-    } catch (err) {
-      console.error(err);
+  useEffect(() => {
+    setLoading(true);
+    loadAll().finally(() => setLoading(false));
+  }, [loadAll]);
+
+  const setStartError = (workflowId: string, message: string | null) =>
+    setStartErrors((prev) => ({ ...prev, [workflowId]: message }));
+
+  function handleStartClick(wf: WorkflowSummary) {
+    const fields = START_FIELDS[wf.workflowId] ?? [];
+    if (fields.length > 0 && startOpen !== wf.workflowId) {
+      setStartOpen(wf.workflowId);
+      setStartValues({});
+      setStartError(wf.workflowId, null);
+      return;
     }
-    setStartingWorkflow(null);
-  };
+    doStart(wf);
+  }
 
-  if (loading) return <div className="empty-state" style={{ animation: 'pulse 1.5s infinite' }}>🔄 İş akışları yükleniyor...</div>;
+  async function doStart(wf: WorkflowSummary) {
+    if (!selectedClient) return;
+    const fields = START_FIELDS[wf.workflowId] ?? [];
+    const missing = fields.filter((f) => f.required && !(startValues[f.key] ?? '').trim()).map((f) => f.label);
+    if (missing.length > 0) {
+      setStartError(wf.workflowId, `Zorunlu alanlar eksik: ${missing.join(', ')}`);
+      return;
+    }
+    const input: Record<string, unknown> = {};
+    for (const f of fields) {
+      const value = (startValues[f.key] ?? '').trim();
+      if (value) input[f.key] = value;
+    }
 
-  // Group workflows by pipeline order
-  const pipelineOrder = [
-    'client-onboarding', 'style-library-ingestion', 'content-generation',
-    'design-brief', 'layout-generation', 'visual-generation',
-    'photoshop-production', 'creative-qa', 'revision-learning',
-    'monthly-content-calendar',
-  ];
+    setStartingWorkflow(wf.workflowId);
+    setStartError(wf.workflowId, null);
+    try {
+      const res = await api.startWorkflow(wf.workflowId, selectedClient, input);
+      window.location.href = `/workflow-runs/${res.data.run.id}`;
+    } catch (err: any) {
+      setStartError(wf.workflowId, err.message ?? 'İş akışı başlatılamadı.');
+      setStartingWorkflow(null);
+    }
+  }
 
-  const orderedWorkflows = pipelineOrder
-    .map(id => workflows.find(w => w.workflow_id === id))
-    .filter(Boolean) as WorkflowDef[];
+  if (loading) {
+    return <div className="empty-state" style={{ animation: 'pulse 1.5s infinite' }}>🔄 İş akışları yükleniyor...</div>;
+  }
+
+  const canStart = permissions.includes('workflows:start');
+  const iconByWorkflowId: Record<string, string> = {};
+  workflows.forEach((w) => { iconByWorkflowId[w.workflowId] = w.icon; });
 
   return (
     <div className="animate-fade-in">
@@ -88,6 +195,8 @@ export default function WorkflowsPage() {
         <h2>🔄 İş Akışı Stüdyosu</h2>
         <p>Kreatif üretim hattı — bir müşteri seçin ve iş akışlarını çalıştırın</p>
       </div>
+
+      <ErrorNote message={loadError} />
 
       {/* Client Selection */}
       <div className="card" style={{ marginBottom: '32px' }}>
@@ -114,94 +223,159 @@ export default function WorkflowsPage() {
           🎯 Üretim Hattı
         </h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          {orderedWorkflows.map((wf, idx) => (
-            <div key={wf.workflow_id} style={{ display: 'flex', alignItems: 'stretch', gap: '0' }}>
-              {/* Pipeline connector */}
-              <div style={{
-                width: '48px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                position: 'relative',
-              }}>
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: 'var(--radius-full)',
-                  background: 'var(--gradient-primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'white',
-                  zIndex: 2,
-                  marginTop: '16px',
-                }}>
-                  {idx + 1}
-                </div>
-                {idx < orderedWorkflows.length - 1 && (
-                  <div style={{
-                    width: '2px',
-                    flex: 1,
-                    background: 'var(--color-border)',
-                    marginTop: '4px',
-                  }} />
-                )}
-              </div>
+          {workflows.map((wf, idx) => {
+            const fields = START_FIELDS[wf.workflowId] ?? [];
+            const isStarting = startingWorkflow === wf.workflowId;
+            const startTitle = !canStart
+              ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+              : !selectedClient
+                ? 'Önce bir müşteri seçin'
+                : 'Bu iş akışını seçili müşteri için başlat';
 
-              {/* Workflow card */}
-              <div className="card" style={{
-                flex: 1,
-                marginBottom: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '16px 20px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-                  <span style={{ fontSize: '1.5rem' }}>{wf.icon}</span>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{wf.name}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                      {wf.purpose}
+            return (
+              <div key={wf.workflowId} style={{ display: 'flex', alignItems: 'stretch', gap: '0' }}>
+                {/* Pipeline connector */}
+                <div style={{
+                  width: '48px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  position: 'relative',
+                }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: 'var(--radius-full)',
+                    background: 'var(--gradient-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    color: 'white',
+                    zIndex: 2,
+                    marginTop: '16px',
+                  }}>
+                    {idx + 1}
+                  </div>
+                  {idx < workflows.length - 1 && (
+                    <div style={{
+                      width: '2px',
+                      flex: 1,
+                      background: 'var(--color-border)',
+                      marginTop: '4px',
+                    }} />
+                  )}
+                </div>
+
+                {/* Workflow card */}
+                <div className="card" style={{ flex: 1, marginBottom: '8px', padding: '16px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                      <span style={{ fontSize: '1.5rem' }}>{wf.icon}</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
+                          <a href={`/workflows/${wf.workflowId}`} style={{ color: 'inherit' }}>{wf.name}</a>
+                          {!wf.executable.supported && (
+                            <span className="badge badge-warning" style={{ marginLeft: '8px' }}>🔮 Gelecek özellik içerir</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          {wf.purpose}
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }}>
+                          {wf.skillsUsed.map((s) => (
+                            <span key={s} className="tag" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>{s}</span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }}>
-                      {wf.skills.map(s => (
-                        <span key={s} className="tag" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>{s}</span>
-                      ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{wf.stepCount} adım</span>
+                      {wf.nextWorkflow && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                          → {wf.nextWorkflow}
+                        </span>
+                      )}
+                      <a href={`/workflows/${wf.workflowId}`} style={{ fontSize: '0.8rem', color: 'var(--color-text-accent)' }}>
+                        Detay →
+                      </a>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={!canStart || !selectedClient || isStarting}
+                        title={startTitle}
+                        onClick={() => handleStartClick(wf)}
+                      >
+                        {isStarting ? '⏳ Başlatılıyor...' : '▶ Başlat'}
+                      </button>
                     </div>
                   </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {wf.next && (
-                    <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                      → {wf.next}
-                    </span>
+
+                  {/* Inline start inputs (workflow ek girdi istiyorsa) */}
+                  {startOpen === wf.workflowId && fields.length > 0 && (
+                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border)', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'end' }}>
+                      {fields.map((field) => (
+                        <div key={field.key} className="form-group" style={{ margin: 0, minWidth: '220px' }}>
+                          <label className="form-label">
+                            {field.label} {field.required ? '' : '(opsiyonel)'}
+                          </label>
+                          {field.kind === 'platform' ? (
+                            <select
+                              className="form-select"
+                              value={startValues[field.key] ?? ''}
+                              onChange={(e) => setStartValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                            >
+                              <option value="">— Platform seçin —</option>
+                              {PLATFORM_OPTIONS.map((p) => (
+                                <option key={p} value={p}>{p.replace(/_/g, ' ')}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder={field.placeholder}
+                              value={startValues[field.key] ?? ''}
+                              onChange={(e) => setStartValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                            />
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={!canStart || !selectedClient || isStarting}
+                        title={startTitle}
+                        onClick={() => doStart(wf)}
+                      >
+                        {isStarting ? '⏳ Başlatılıyor...' : '▶ Çalıştır'}
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={isStarting}
+                        onClick={() => { setStartOpen(null); setStartError(wf.workflowId, null); }}
+                      >
+                        Vazgeç
+                      </button>
+                    </div>
                   )}
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={!selectedClient || startingWorkflow === wf.workflow_id}
-                    onClick={() => handleStartWorkflow(wf.workflow_id)}
-                  >
-                    {startingWorkflow === wf.workflow_id ? '⏳' : '▶'} Başlat
-                  </button>
+
+                  <ErrorNote message={startErrors[wf.workflowId] ?? null} />
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
-      {/* Active Workflow Instances */}
+      {/* Workflow Runs */}
       <div>
         <h3 style={{ fontFamily: 'Outfit', fontSize: '1.1rem', color: 'var(--color-text-accent)', marginBottom: '16px' }}>
-          📊 Aktif İş Akışları
+          📊 İş Akışı Çalıştırmaları
         </h3>
 
-        {instances.length === 0 ? (
+        {runs.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>
-            Henüz aktif iş akışı yok. Yukarıdan bir müşteri seçin ve iş akışı başlatın.
+            Henüz iş akışı çalıştırması yok. Yukarıdan bir müşteri seçin ve iş akışı başlatın.
           </div>
         ) : (
           <div className="table-container">
@@ -211,73 +385,34 @@ export default function WorkflowsPage() {
                   <th>İş Akışı</th>
                   <th>Müşteri</th>
                   <th>Durum</th>
-                  <th>İlerleme</th>
-                  <th>Başlangıç</th>
+                  <th>Güncel Adım</th>
+                  <th>Güncelleme</th>
                   <th>İşlemler</th>
                 </tr>
               </thead>
               <tbody>
-                {instances.map((inst) => {
-                  const statusInfo = STATUS_BADGES[inst.status] ?? { class: 'badge-neutral', label: inst.status };
+                {runs.map((run) => {
+                  const statusInfo = STATUS_BADGES[run.status] ?? { class: 'badge-neutral', label: run.status };
                   return (
-                    <tr key={inst.id}>
+                    <tr key={run.id}>
                       <td>
-                        <span style={{ marginRight: '6px' }}>{inst.workflowIcon}</span>
-                        <strong>{inst.workflowName}</strong>
+                        <span style={{ marginRight: '6px' }}>{iconByWorkflowId[run.workflowId] ?? '⚙️'}</span>
+                        <strong>{run.workflowName ?? run.workflowId}</strong>
                       </td>
-                      <td>{inst.clientName}</td>
+                      <td>{run.clientName ?? '—'}</td>
                       <td>
                         <span className={`badge ${statusInfo.class}`}>{statusInfo.label}</span>
                       </td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{
-                            width: '80px',
-                            height: '6px',
-                            background: 'var(--color-bg-glass)',
-                            borderRadius: 'var(--radius-full)',
-                            overflow: 'hidden',
-                          }}>
-                            <div style={{
-                              width: `${(inst.currentStep / inst.totalSteps) * 100}%`,
-                              height: '100%',
-                              background: inst.status === 'completed' ? 'var(--gradient-success)' : 'var(--gradient-primary)',
-                              borderRadius: 'var(--radius-full)',
-                              transition: 'width var(--transition-base)',
-                            }} />
-                          </div>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                            {inst.currentStep}/{inst.totalSteps}
-                          </span>
-                        </div>
+                      <td style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                        {run.currentStepId ?? '—'}
                       </td>
                       <td style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                        {new Date(inst.startedAt).toLocaleDateString()}
+                        {new Date(run.updatedAt).toLocaleString()}
                       </td>
                       <td>
-                        {inst.status === 'waiting_for_approval' && (
-                          <button
-                            className="btn btn-success btn-sm"
-                            onClick={() => api.advanceWorkflow(inst.id, { approval: 'approved' }).then(res => {
-                              setInstances(instances.map(i => i.id === inst.id ? res.data : i));
-                            })}
-                          >
-                            ✓ Onayla
-                          </button>
-                        )}
-                        {inst.status === 'in_progress' && (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => api.advanceWorkflow(inst.id, { stepResult: 'completed' }).then(res => {
-                              setInstances(instances.map(i => i.id === inst.id ? res.data : i));
-                            })}
-                          >
-                            → Sonraki Adım
-                          </button>
-                        )}
-                        {inst.status === 'completed' && (
-                          <span style={{ fontSize: '0.8rem', color: '#34d399' }}>✓ Tamamlandı</span>
-                        )}
+                        <a href={`/workflow-runs/${run.id}`} style={{ color: 'var(--color-text-accent)', fontSize: '0.85rem' }}>
+                          Detay →
+                        </a>
                       </td>
                     </tr>
                   );
