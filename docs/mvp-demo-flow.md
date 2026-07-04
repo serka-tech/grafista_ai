@@ -80,6 +80,20 @@ pnpm run dev:api        # http://localhost:4000
 pnpm run dev:dashboard  # http://localhost:3000
 ```
 
+## Verifying the flow (tests)
+
+The executable twin of this runbook — `apps/api/src/__tests__/demo-flow.test.ts`
+— walks the whole chain below (happy path + the four demo failure paths)
+against the keyless configuration on every run:
+
+```bash
+cd apps/api && npx vitest run src/__tests__/demo-flow.test.ts   # demo chain only
+cd apps/api && npx vitest run --maxWorkers=2                    # full API suite (deterministic invocation)
+```
+
+Root-level equivalents: `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`,
+`pnpm run build` (`npx pnpm@9.1.0 run ...` when pnpm is not on PATH).
+
 ## Demo flow (dashboard, in order)
 
 1. **Login** (`/login`) with the `db:seed-admin` credentials.
@@ -120,7 +134,11 @@ the backend's actionable message.
 - The API test suite shares one embedded Postgres; on a loaded machine the
   full parallel run can flake one random test with a timeout/socket signature
   — `cd apps/api && npx vitest run --maxWorkers=2` is the deterministic
-  invocation, and any flaked file passes in isolation.
+  invocation, and any flaked file passes in isolation (known load
+  sensitivity, not a product bug).
+- Dashboard-side manual verification of this flow requires the full local dev
+  stack (a real Postgres + `pnpm run dev:api` + `pnpm run dev:dashboard`) —
+  the automated twin covers the API chain only.
 
 ## Out of scope (deliberate)
 
