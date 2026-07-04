@@ -140,14 +140,21 @@ function OutputCard({
   // status badge is visible without any user interaction.
   const [productionJob, setProductionJob] = useState<any | null>(null);
 
-  // Render job + its artifacts (Phase 2 Step 9A). MVP limitation: there is no
-  // "list render jobs for a production job" endpoint (only GET /render-jobs/:id),
-  // so unlike productionJob above this is NOT eagerly loaded on mount — it only
-  // ever reflects a render requested during the current session. A page reload
-  // loses this (the production job's own package/approve/reject status is the
-  // only part that survives a reload today).
+  // Render job + its artifacts (Phase 2 Step 9A). Hotfix: hydrated from
+  // persisted history — GET /production-jobs/:id/render-jobs — on mount and
+  // whenever the production job reaches package_ready/approved, so a page
+  // reload no longer loses it (previously this only ever reflected a render
+  // requested during the current browser session). renderJob always mirrors
+  // the LATEST entry of renderHistory below; see loadRenderHistory.
   const [renderJob, setRenderJob] = useState<any | null>(null);
   const [renderArtifacts, setRenderArtifacts] = useState<any[]>([]);
+
+  // Full render-job history for this production job, oldest-first (same
+  // order the backend returns) — this hotfix. Powers the compact "Önceki
+  // render işlemleri" list further down; renderJob/renderArtifacts above are
+  // just its last entry, kept as their own state since the Step 9A code
+  // (handleRenderExport, the JSX below) already reads them directly.
+  const [renderHistory, setRenderHistory] = useState<any[]>([]);
 
   const canApprove = permissions.includes('visual_generation:approve');
   const canReject = permissions.includes('visual_generation:reject');
@@ -155,7 +162,6 @@ function OutputCard({
   const canApproveProductionJob = permissions.includes('production_jobs:approve');
   const canRejectProductionJob = permissions.includes('production_jobs:reject');
   const canRender = permissions.includes('render_jobs:create');
-  const canReadArtifacts = permissions.includes('export_artifacts:read');
 
   useEffect(() => {
     // Jobs only ever exist for successfully generated outputs; skip the
@@ -178,6 +184,43 @@ function OutputCard({
       active = false;
     };
   }, [output.id, output.status]);
+
+  // Render history (this hotfix): fetches every render job for this
+  // production job and hydrates renderJob/renderArtifacts from the latest
+  // entry (oldest-first, so the last entry is the latest — same idiom as the
+  // productionJob effect above). Shared between the hydration effect below
+  // and handleRenderExport's post-render refresh, mirroring the panel-level
+  // loadOutputs reusable-useCallback idiom.
+  const loadRenderHistory = useCallback(async () => {
+    const productionJobId = productionJob?.id;
+    if (!productionJobId) return;
+    try {
+      const res = await api.listRenderJobsForProductionJob(productionJobId);
+      const jobs = res.data ?? [];
+      setRenderHistory(jobs);
+      if (jobs.length > 0) {
+        const latest = jobs[jobs.length - 1];
+        setRenderJob(latest);
+        setRenderArtifacts(latest.artifactSummaries ?? []);
+      }
+    } catch {
+      // A 403 (user lacks render_jobs:read) is an expected gating outcome,
+      // and a transient load failure should not break the card — mirror the
+      // productionJob effect's silent handling above.
+    }
+  }, [productionJob?.id]);
+
+  useEffect(() => {
+    // The render section only ever renders for package_ready/approved jobs
+    // (see the JSX gate further down), so only fetch history in those states.
+    const isRenderReady = productionJob?.status === 'package_ready' || productionJob?.status === 'approved';
+    if (!isRenderReady) return;
+    let active = true;
+    if (active) loadRenderHistory();
+    return () => {
+      active = false;
+    };
+  }, [productionJob?.id, productionJob?.status, loadRenderHistory]);
 
   const statusInfo = OUTPUT_STATUS_BADGES[output.status] ?? { class: 'badge-neutral', label: output.status };
   const approvalInfo = APPROVAL_STATUS_BADGES[output.approvalStatus] ?? { class: 'badge-neutral', label: output.approvalStatus };
@@ -313,15 +356,12 @@ function OutputCard({
       const res = await api.createRenderJob(productionJob.id, state.selectedPreset, state.selectedExportFormat);
       setRenderJob(res.data);
       setRenderArtifacts([]);
-      if (canReadArtifacts) {
-        try {
-          const artifactsRes = await api.listRenderJobArtifacts(res.data.id);
-          setRenderArtifacts(artifactsRes.data ?? []);
-        } catch {
-          // Artifact listing is a nice-to-have follow-up fetch — a failure here
-          // (e.g. a transient error) shouldn't mask the render job itself having
-          // succeeded; the download links just won't appear this session.
-        }
+      try {
+        await loadRenderHistory();
+      } catch {
+        // A transient history-refresh failure must not clobber the render
+        // job that just succeeded above — same forgiving reasoning as the
+        // artifact-listing follow-up fetch this replaces.
       }
     } catch (err: any) {
       patch({ renderError: err.message ?? 'Render işlemi başarısız oldu.' });
@@ -543,67 +583,125 @@ function OutputCard({
           absent (not a hidden button) for pending/packaging/failed/cancelled/
           rejected production jobs. */}
       {productionJob && (productionJob.status === 'package_ready' || productionJob.status === 'approved') && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Export:</span>
-          <select
-            className="form-select"
-            style={{ width: 'auto' }}
-            value={state.selectedPreset}
-            onChange={(e) => patch({ selectedPreset: e.target.value })}
-            disabled={state.rendering}
-          >
-            {RENDER_PRESETS.map((preset) => (
-              <option key={preset.value} value={preset.value}>
-                {preset.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="form-select"
-            style={{ width: 'auto' }}
-            value={state.selectedExportFormat}
-            onChange={(e) => patch({ selectedExportFormat: e.target.value })}
-            disabled={state.rendering}
-          >
-            {EXPORT_FORMATS.map((format) => (
-              <option key={format} value={format}>
-                {format.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={!canRender || state.rendering}
-            title={renderTitle}
-            onClick={handleRenderExport}
-          >
-            {state.rendering ? '⏳ Render Ediliyor...' : '🎨 Render / Export Oluştur'}
-          </button>
-
-          {renderJob && (
-            <span
-              className={`badge ${(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { class: 'badge-neutral' }).class}`}
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Export:</span>
+            <select
+              className="form-select"
+              style={{ width: 'auto' }}
+              value={state.selectedPreset}
+              onChange={(e) => patch({ selectedPreset: e.target.value })}
+              disabled={state.rendering}
             >
-              {(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { label: renderJob.status }).label}
-            </span>
-          )}
+              {RENDER_PRESETS.map((preset) => (
+                <option key={preset.value} value={preset.value}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className="form-select"
+              style={{ width: 'auto' }}
+              value={state.selectedExportFormat}
+              onChange={(e) => patch({ selectedExportFormat: e.target.value })}
+              disabled={state.rendering}
+            >
+              {EXPORT_FORMATS.map((format) => (
+                <option key={format} value={format}>
+                  {format.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={!canRender || state.rendering}
+              title={renderTitle}
+              onClick={handleRenderExport}
+            >
+              {state.rendering ? '⏳ Render Ediliyor...' : '🎨 Render / Export Oluştur'}
+            </button>
 
-          {renderJob?.status === 'rendered' &&
-            renderArtifacts.map((artifact) => (
-              // Same API-origin resolution as the package/preview links above —
-              // the export-artifacts file route is API-relative and protected
-              // by the session cookie.
-              <a
-                key={artifact.id}
-                className="btn btn-secondary btn-sm"
-                href={resolveApiFileUrl(`/api/export-artifacts/${artifact.id}/file`)}
-                target="_blank"
-                rel="noreferrer"
+            {renderJob && (
+              <span
+                className={`badge ${(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { class: 'badge-neutral' }).class}`}
               >
-                ⬇ {artifact.format.toUpperCase()} İndir
-              </a>
-            ))}
-        </div>
+                {(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { label: renderJob.status }).label}
+              </span>
+            )}
+
+            {renderJob?.status === 'rendered' &&
+              renderArtifacts.map((artifact) => (
+                // Same API-origin resolution as the package/preview links above —
+                // the export-artifacts file route is API-relative and protected
+                // by the session cookie. Prefer the summary's own fileUrl (this
+                // hotfix); fall back to the hand-built path if it's ever absent.
+                <a
+                  key={artifact.id}
+                  className="btn btn-secondary btn-sm"
+                  href={resolveApiFileUrl(artifact.fileUrl ?? `/api/export-artifacts/${artifact.id}/file`)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  ⬇ {artifact.format.toUpperCase()} İndir
+                </a>
+              ))}
+          </div>
+
+          {/* Render history (this hotfix) — compact, muted list of up to the
+              last 3 OLDER renders (the latest one is already shown in the row
+              above), newest-first. Hydrated by loadRenderHistory; see the
+              renderHistory state and its hydration effect above. Not a
+              redesign — same small/muted-text vocabulary as the other
+              secondary lines in this card. */}
+          {renderHistory.length > 1 && (
+            <div style={{ marginTop: '8px' }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                {'Önceki render işlemleri:'}
+              </p>
+              {renderHistory
+                .slice(0, -1)
+                .slice(-3)
+                .reverse()
+                .map((job) => {
+                  const historyBadge =
+                    RENDER_JOB_STATUS_BADGES[job.status] ?? { class: 'badge-neutral', label: job.status };
+                  return (
+                    <div
+                      key={job.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        flexWrap: 'wrap',
+                        fontSize: '0.75rem',
+                        color: 'var(--color-text-muted)',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <span>
+                        {job.requestedFormat?.preset} · {job.requestedFormat?.exportFormat?.toUpperCase()}
+                      </span>
+                      <span className={`badge ${historyBadge.class}`}>{historyBadge.label}</span>
+                      <span>{new Date(job.createdAt).toLocaleString()}</span>
+                      {(job.artifactSummaries ?? []).map((artifact: any) => (
+                        <a
+                          key={artifact.id}
+                          href={resolveApiFileUrl(artifact.fileUrl ?? `/api/export-artifacts/${artifact.id}/file`)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          ⬇ {artifact.format.toUpperCase()}
+                        </a>
+                      ))}
+                      {job.status === 'failed' && job.errorMessage && (
+                        <span style={{ color: 'var(--color-danger, #f87171)' }}>⚠ {job.errorMessage}</span>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </>
       )}
 
       {renderJob?.status === 'failed' && (

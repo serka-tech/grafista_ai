@@ -166,6 +166,8 @@ export const api = {
   getRenderJob: (id: string) => fetchAPI<{ data: any }>(`/api/render-jobs/${id}`),
   listRenderJobArtifacts: (renderJobId: string) =>
     fetchAPI<{ data: any[]; total: number }>(`/api/render-jobs/${renderJobId}/artifacts`),
+  listRenderJobsForProductionJob: (productionJobId: string) =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/production-jobs/${productionJobId}/render-jobs`),
 
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),

@@ -713,3 +713,133 @@ describe('7. Invalid request body — preset/exportFormat validation', () => {
     expect(rows[0].count).toBe(0);
   });
 });
+
+describe('8. Render history — GET /production-jobs/:id/render-jobs', () => {
+  it('rejects unauthenticated access with 401', async () => {
+    const res = await request(app).get(`/api/production-jobs/${SOME_UUID}/render-jobs`);
+    expect(res.status).toBe(401);
+  });
+
+  it('403 for CONTENT_MANAGER (no render_jobs:read)', async () => {
+    const contentManager = await loginAs(TEST_USERS.CONTENT_MANAGER);
+    const res = await contentManager.get(`/api/production-jobs/${SOME_UUID}/render-jobs`);
+    expect(res.status).toBe(403);
+    expect(res.body.requiredPermission).toBe('render_jobs:read');
+  });
+
+  it(
+    'DESIGNER (has render_jobs:read) gets 200',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Render History DESIGNER Client');
+      const designer = await loginAs(TEST_USERS.DESIGNER);
+
+      const res = await designer.get(`/api/production-jobs/${productionJob.id}/render-jobs`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+      expect(res.body.total).toBe(0);
+    },
+    30_000
+  );
+
+  it('returns 404 for an unknown production job id', async () => {
+    const owner = await loginAs(TEST_USERS.OWNER);
+    const res = await owner.get(`/api/production-jobs/${SOME_UUID}/render-jobs`);
+    expect(res.status).toBe(404);
+  });
+
+  it(
+    'a fresh package_ready production job with no renders yet returns 200 {data: [], total: 0}, not 404',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Render History Empty Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const res = await owner.get(`/api/production-jobs/${productionJob.id}/render-jobs`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+      expect(res.body.total).toBe(0);
+    },
+    30_000
+  );
+
+  it(
+    'two renders of the same production job come back oldest-first, each with a correct single-item artifactSummaries whose fileUrl is directly usable',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Render History Populated Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const firstRenderRes = await owner
+        .post(`/api/production-jobs/${productionJob.id}/render`)
+        .send({ preset: 'instagram_post', exportFormat: 'png' });
+      expect(firstRenderRes.status).toBe(201);
+
+      const secondRenderRes = await owner
+        .post(`/api/production-jobs/${productionJob.id}/render`)
+        .send({ preset: 'landscape', exportFormat: 'pdf' });
+      expect(secondRenderRes.status).toBe(201);
+
+      const historyRes = await owner.get(`/api/production-jobs/${productionJob.id}/render-jobs`);
+      expect(historyRes.status).toBe(200);
+      expect(historyRes.body.total).toBe(2);
+
+      const [first, second] = historyRes.body.data as Array<Record<string, any>>;
+      // Oldest first — the instagram_post/png render was requested before the landscape/pdf one.
+      expect(first.requestedFormat.preset).toBe('instagram_post');
+      expect(second.requestedFormat.preset).toBe('landscape');
+      expect(first.status).toBe('rendered');
+      expect(second.status).toBe('rendered');
+
+      expect(first.artifactSummaries.length).toBe(1);
+      const firstArtifact = first.artifactSummaries[0];
+      expect(firstArtifact.format).toBe('png');
+      expect(firstArtifact.width).toBe(1080);
+      expect(firstArtifact.height).toBe(1080);
+      expect(firstArtifact.mimeType).toBe('image/png');
+      expect(firstArtifact.sizeBytes).toBeGreaterThan(0);
+      expect(firstArtifact.fileUrl).toBe(`/api/export-artifacts/${firstArtifact.id}/file`);
+
+      expect(second.artifactSummaries.length).toBe(1);
+      const secondArtifact = second.artifactSummaries[0];
+      expect(secondArtifact.format).toBe('pdf');
+      expect(secondArtifact.width).toBe(1920);
+      expect(secondArtifact.height).toBe(1080);
+      expect(secondArtifact.mimeType).toBe('application/pdf');
+      expect(secondArtifact.sizeBytes).toBeGreaterThan(0);
+      expect(secondArtifact.fileUrl).toBe(`/api/export-artifacts/${secondArtifact.id}/file`);
+
+      // Prove the URL is directly usable: GET it and check the PNG magic header.
+      const fileRes = await owner.get(firstArtifact.fileUrl).responseType('blob');
+      expect(fileRes.status).toBe(200);
+      const bytes = Buffer.from(fileRes.body);
+      expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    },
+    30_000
+  );
+
+  it(
+    'a failed render appears in history with status failed, a non-empty errorMessage, and empty artifactSummaries',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Render History Failed Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      rendererControl.failRender = true;
+      try {
+        const failRes = await owner
+          .post(`/api/production-jobs/${productionJob.id}/render`)
+          .send({ preset: 'instagram_post', exportFormat: 'png' });
+        expect(failRes.status).toBe(502);
+      } finally {
+        rendererControl.failRender = false;
+      }
+
+      const historyRes = await owner.get(`/api/production-jobs/${productionJob.id}/render-jobs`);
+      expect(historyRes.status).toBe(200);
+      expect(historyRes.body.total).toBe(1);
+
+      const failedEntry = historyRes.body.data[0];
+      expect(failedEntry.status).toBe('failed');
+      expect(failedEntry.errorMessage).toBeTruthy();
+      expect(failedEntry.artifactSummaries).toEqual([]);
+    },
+    30_000
+  );
+});

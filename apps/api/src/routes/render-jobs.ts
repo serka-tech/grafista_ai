@@ -7,11 +7,14 @@ import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
 import { ExportFormatEnum, RenderPresetEnum } from '@grafista/schemas';
 
-// Mounted at /api — a production-job-scoped create route plus standalone
+// Mounted at /api — a production-job-scoped create route paired with its own
+// list route (render history, added as a hotfix — see the GET
+// /production-jobs/:id/render-jobs route below), plus standalone
 // /render-jobs/:id and /export-artifacts/:id routes (mirrors how
 // productionJobsRouter pairs its generated-output-scoped create route with
-// standalone /production-jobs/:id routes). Same "permission-only, no client
-// scoping" authorization note as production-jobs.ts applies here too.
+// its own list route, plus standalone /production-jobs/:id routes). Same
+// "permission-only, no client scoping" authorization note as
+// production-jobs.ts applies here too.
 export const renderJobsRouter: Router = Router();
 
 const VALID_PRESETS = new Set<string>(RenderPresetEnum.options);
@@ -51,6 +54,72 @@ renderJobsRouter.post(
       req.user!.id
     );
     res.status(201).json({ data: renderJob });
+  })
+);
+
+// GET /api/production-jobs/:id/render-jobs — full render-job history for one
+// production job, oldest first (mirrors production-jobs.ts's paired
+// create-route + list-route pattern: this GET is paired with the POST
+// /production-jobs/:id/render route above, the same way GET
+// /generated-outputs/:generatedOutputId/production-jobs is paired with its
+// own POST create route). Added as a hotfix: the dashboard's OutputCard
+// (visual-outputs-panel.tsx) previously only ever showed the render job
+// created during the current browser session because no persisted history
+// endpoint existed — a page reload lost it. renderJobsRepo.
+// listByProductionJob already existed (oldest-first) and just needed a route.
+//
+// (a) PERMISSION — render_jobs:read guards the whole list. Each render job's
+// embedded artifactSummaries are METADATA only (id/format/width/height/
+// mimeType/sizeBytes/fileUrl) — never file bytes — so gating the list on
+// render_jobs:read alone is not a privilege widening: for the four seeded
+// roles, render_jobs:read and export_artifacts:read are always granted
+// together (see permissions.ts), and the actual file bytes stay behind
+// export_artifacts:read on GET /export-artifacts/:id/file regardless of what
+// this route returns — fileUrl only ever points at that route, it never
+// serves bytes itself.
+//
+// (b) EXISTENCE + SCOPING — 404 when the production job itself doesn't
+// exist. Once confirmed, the real relationship guard lives at the data
+// layer: renderJobsRepo.listByProductionJob runs a parameterized
+// `WHERE production_job_id = $1` — this route can never leak another
+// production job's renders because the query itself is scoped to the id
+// that was just verified to exist, not to some looser/derived filter.
+//
+// (c) LIST CONVENTION — returns [] (200), not 404, once the production job
+// exists but has no renders yet (same convention as GET
+// /render-jobs/:id/artifacts below, and every other list route in this
+// codebase).
+renderJobsRouter.get(
+  '/production-jobs/:id/render-jobs',
+  requireAuth,
+  requirePermission('render_jobs:read'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const productionJob = await store.productionJobs.getById(req.params.id);
+    if (!productionJob) return res.status(404).json({ error: 'Production job not found' });
+
+    const jobs = await store.renderJobs.listByProductionJob(productionJob.id);
+
+    // N+1 (one export_artifacts query per render job) is acceptable at MVP
+    // scale — a production job realistically accumulates a handful of
+    // renders, not hundreds. Promise.all keeps the per-job fetches
+    // concurrent rather than serial.
+    const jobsWithSummaries = await Promise.all(
+      jobs.map(async (job) => {
+        const artifacts = await store.exportArtifacts.listByRenderJob(job.id);
+        const artifactSummaries = artifacts.map((artifact) => ({
+          id: artifact.id,
+          format: artifact.format,
+          width: artifact.width,
+          height: artifact.height,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes,
+          fileUrl: `/api/export-artifacts/${artifact.id}/file`,
+        }));
+        return { ...job, artifactSummaries };
+      })
+    );
+
+    res.json({ data: jobsWithSummaries, total: jobsWithSummaries.length });
   })
 );
 
