@@ -111,7 +111,7 @@ describe('buildRenderHtml', () => {
     expect(html).toContain('mix-blend-mode:normal');
     expect(html).not.toContain('made-up-mode');
     expect(warnings).toContainEqual(
-      expect.objectContaining({ code: 'unsupported_blend_mode', layerId: 'shape-1' })
+      expect.objectContaining({ code: 'unsupported_blend_mode', layerId: 'shape-1', severity: 'warning' })
     );
   });
 
@@ -123,7 +123,7 @@ describe('buildRenderHtml', () => {
 
     expect(html).toContain("font-family:'Inter'");
     expect(warnings).toContainEqual(
-      expect.objectContaining({ code: 'font_fallback', layerId: 'text-1' })
+      expect.objectContaining({ code: 'font_fallback', layerId: 'text-1', severity: 'warning' })
     );
   });
 
@@ -134,7 +134,7 @@ describe('buildRenderHtml', () => {
     });
 
     expect(warnings).toContainEqual(
-      expect.objectContaining({ code: 'invalid_color', layerId: 'shape-1' })
+      expect.objectContaining({ code: 'invalid_color', layerId: 'shape-1', severity: 'warning' })
     );
   });
 
@@ -146,7 +146,7 @@ describe('buildRenderHtml', () => {
 
     expect(html).not.toContain('filter:');
     expect(warnings).toContainEqual(
-      expect.objectContaining({ code: 'unsupported_filter', layerId: 'image-1' })
+      expect.objectContaining({ code: 'unsupported_filter', layerId: 'image-1', severity: 'warning' })
     );
   });
 
@@ -172,7 +172,7 @@ describe('buildRenderHtml', () => {
 
     expect(html).toContain('Hello &lt;World&gt;');
     expect(warnings).toContainEqual(
-      expect.objectContaining({ code: 'anchor_ignored', layerId: 'text-1' })
+      expect.objectContaining({ code: 'anchor_ignored', layerId: 'text-1', severity: 'warning' })
     );
   });
 });

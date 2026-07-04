@@ -328,6 +328,31 @@ async function userIdByEmail(email: string) {
   return rows[0].id as string;
 }
 
+/**
+ * Direct-SQL manifest-manipulation idiom (Step 9B, mirrors the file's
+ * existing `UPDATE production_jobs SET package_manifest_snapshot = ...`
+ * pattern above): swaps out just the `layoutPlanSnapshot` key inside an
+ * already-package_ready production job's manifest for a hand-crafted one,
+ * so a test can exercise the render pipeline (and the new quality-warning
+ * pass) against deliberately "bad" layer data without re-running the whole
+ * AI-mocked pipeline with different mock content.
+ */
+async function setCraftedLayoutPlanSnapshot(
+  productionJobId: string,
+  craftedLayoutPlanSnapshot: Record<string, unknown>
+) {
+  const { rows } = await pool.query('SELECT package_manifest_snapshot FROM production_jobs WHERE id = $1', [
+    productionJobId,
+  ]);
+  expect(rows.length).toBe(1);
+  const manifest = rows[0].package_manifest_snapshot as Record<string, unknown>;
+  const updatedManifest = { ...manifest, layoutPlanSnapshot: craftedLayoutPlanSnapshot };
+  await pool.query('UPDATE production_jobs SET package_manifest_snapshot = $2 WHERE id = $1', [
+    productionJobId,
+    JSON.stringify(updatedManifest),
+  ]);
+}
+
 beforeEach(() => {
   aiControl.mode = 'success';
   rendererControl.failRender = false;
@@ -839,6 +864,240 @@ describe('8. Render history — GET /production-jobs/:id/render-jobs', () => {
       expect(failedEntry.status).toBe('failed');
       expect(failedEntry.errorMessage).toBeTruthy();
       expect(failedEntry.artifactSummaries).toEqual([]);
+    },
+    30_000
+  );
+});
+
+describe('9. Preset/exportFormat combination guard + render quality warnings + artifact summary polish (Phase 2 Step 9B)', () => {
+  it(
+    'instagram_post + pdf is rejected with 400 by the route (naming the preset and allowed formats), no render_jobs row is created, and the service-level guard rejects the same combo directly',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Preset Format Guard Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const res = await owner
+        .post(`/api/production-jobs/${productionJob.id}/render`)
+        .send({ preset: 'instagram_post', exportFormat: 'pdf' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/instagram_post/);
+      expect(res.body.error).toMatch(/png/);
+      expect(res.body.error).toMatch(/jpg/);
+
+      const { rows } = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM render_jobs WHERE production_job_id = $1',
+        [productionJob.id]
+      );
+      expect(rows[0].count).toBe(0);
+
+      // Service-level guard (defense in depth for non-HTTP callers) — same
+      // real, ready production job, called directly, bypassing the route.
+      const { renderProductionJob } = await import('../services/render-engine.js');
+      const ownerId = await userIdByEmail(TEST_USERS.OWNER);
+      await expect(
+        renderProductionJob(productionJob.id as string, { preset: 'instagram_post', exportFormat: 'pdf' }, ownerId)
+      ).rejects.toMatchObject({ status: 400 });
+
+      const { rows: rowsAfter } = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM render_jobs WHERE production_job_id = $1',
+        [productionJob.id]
+      );
+      expect(rowsAfter[0].count).toBe(0);
+    },
+    30_000
+  );
+
+  it(
+    'landscape + pdf still succeeds with 201 (the allowed-pdf path keeps working)',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Preset Format Guard Landscape Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const res = await owner
+        .post(`/api/production-jobs/${productionJob.id}/render`)
+        .send({ preset: 'landscape', exportFormat: 'pdf' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.status).toBe('rendered');
+    },
+    30_000
+  );
+
+  it(
+    'quality warnings (font fallback, text overflow, missing image source, safe zone overlap) surface on the render job and on its render-history entry',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Render Quality Warnings Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const craftedLayoutPlanSnapshot = {
+        format: 'instagram_post',
+        canvas: { width: 1080, height: 1080, backgroundColor: '#FFFFFF', dpi: 72 },
+        layers: [
+          {
+            id: 'overflow-text',
+            name: 'Overflow Headline',
+            type: 'text',
+            // Deliberately clear of the safe zone below (y 0-250) so this
+            // layer produces ONLY font_fallback + text_overflow_possible.
+            position: { x: 0, y: 600, width: 100, height: 40, rotation: 0, anchor: 'top-left' },
+            zIndex: 10,
+            visible: true,
+            locked: false,
+            opacity: 1,
+            blendMode: 'normal',
+            textProperties: {
+              // Non-whitelisted font -> font_fallback; absurdly long content
+              // in a tiny box with maxLines set -> text_overflow_possible
+              // (truncation variant).
+              content: 'A'.repeat(400),
+              fontFamily: 'Comic Sans MS',
+              fontSize: 40,
+              fontWeight: '400',
+              color: '#000000',
+              maxLines: 1,
+            },
+          },
+          {
+            id: 'no-source-image',
+            name: 'Missing Image',
+            type: 'image',
+            position: { x: 400, y: 400, width: 300, height: 300, rotation: 0, anchor: 'top-left' },
+            zIndex: 5,
+            visible: true,
+            locked: false,
+            opacity: 1,
+            blendMode: 'normal',
+            imageProperties: {
+              // No sourceUrl -> missing_image_source.
+              sourceType: 'placeholder',
+              fit: 'cover',
+              opacity: 1,
+              borderRadius: 0,
+            },
+          },
+          {
+            id: 'safezone-text',
+            name: 'Safe Zone Text',
+            type: 'text',
+            // Overlaps the safe zone defined below -> safe_area_warning.
+            position: { x: 10, y: 10, width: 200, height: 100, rotation: 0, anchor: 'top-left' },
+            zIndex: 15,
+            visible: true,
+            locked: false,
+            opacity: 1,
+            blendMode: 'normal',
+            textProperties: {
+              content: 'Overlaps zone',
+              fontFamily: 'Inter',
+              fontSize: 24,
+              fontWeight: '400',
+              color: '#000000',
+            },
+          },
+        ],
+        safeZones: [
+          {
+            label: 'Top UI overlay',
+            position: { x: 0, y: 0, width: 1080, height: 250, rotation: 0, anchor: 'top-left' },
+            reason: 'Platform navigation bar',
+          },
+        ],
+        exportSettings: { formats: ['png'], quality: 90, scaleFactor: 1 },
+      };
+
+      await setCraftedLayoutPlanSnapshot(productionJob.id as string, craftedLayoutPlanSnapshot);
+
+      const renderRes = await owner
+        .post(`/api/production-jobs/${productionJob.id}/render`)
+        .send({ preset: 'instagram_post', exportFormat: 'png' });
+      expect(renderRes.status).toBe(201);
+      const renderJob = renderRes.body.data as Record<string, unknown>;
+      expect(renderJob.status).toBe('rendered');
+
+      const warnings = renderJob.renderWarnings as Array<Record<string, unknown>>;
+      expect(Array.isArray(warnings)).toBe(true);
+
+      const fontFallback = warnings.find((w) => w.code === 'font_fallback');
+      expect(fontFallback).toBeDefined();
+      expect(fontFallback?.severity).toBe('warning');
+      expect(fontFallback?.layerId).toBe('overflow-text');
+
+      const textOverflow = warnings.find((w) => w.code === 'text_overflow_possible');
+      expect(textOverflow).toBeDefined();
+      expect(textOverflow?.severity).toBe('warning');
+      expect(textOverflow?.layerId).toBe('overflow-text');
+      expect(textOverflow?.details).toMatchObject({ maxLines: 1 });
+
+      const missingImage = warnings.find((w) => w.code === 'missing_image_source');
+      expect(missingImage).toBeDefined();
+      expect(missingImage?.severity).toBe('warning');
+      expect(missingImage?.layerId).toBe('no-source-image');
+
+      const safeAreaWarning = warnings.find((w) => w.code === 'safe_area_warning');
+      expect(safeAreaWarning).toBeDefined();
+      expect(safeAreaWarning?.severity).toBe('warning');
+      expect(safeAreaWarning?.layerId).toBe('safezone-text');
+      expect(safeAreaWarning?.details).toMatchObject({ safeZoneLabel: 'Top UI overlay' });
+
+      // Also visible on the render-history endpoint's entry for this job.
+      const historyRes = await owner.get(`/api/production-jobs/${productionJob.id}/render-jobs`);
+      expect(historyRes.status).toBe(200);
+      const historyEntry = (historyRes.body.data as Array<Record<string, unknown>>).find(
+        (j) => j.id === renderJob.id
+      );
+      expect(historyEntry).toBeDefined();
+      const historyWarnings = historyEntry!.renderWarnings as Array<Record<string, unknown>>;
+      expect(historyWarnings.find((w) => w.code === 'font_fallback')).toBeDefined();
+      expect(historyWarnings.find((w) => w.code === 'text_overflow_possible')).toBeDefined();
+      expect(historyWarnings.find((w) => w.code === 'missing_image_source')).toBeDefined();
+      expect(historyWarnings.find((w) => w.code === 'safe_area_warning')).toBeDefined();
+    },
+    30_000
+  );
+
+  it(
+    'artifact summary polish: history artifactSummaries carry preset/checksum/createdAt, and GET /render-jobs/:id/artifacts items additively carry preset + fileUrl alongside their existing fields',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Artifact Summary Polish Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      const renderRes = await owner
+        .post(`/api/production-jobs/${productionJob.id}/render`)
+        .send({ preset: 'instagram_post', exportFormat: 'png' });
+      expect(renderRes.status).toBe(201);
+      const renderJob = renderRes.body.data as Record<string, unknown>;
+
+      const historyRes = await owner.get(`/api/production-jobs/${productionJob.id}/render-jobs`);
+      expect(historyRes.status).toBe(200);
+      const historyEntry = (historyRes.body.data as Array<Record<string, any>>).find((j) => j.id === renderJob.id);
+      expect(historyEntry).toBeDefined();
+
+      const summary = historyEntry!.artifactSummaries[0];
+      expect(summary.preset).toBe('instagram_post');
+      expect(summary.format).toBe('png');
+      expect(summary.width).toBe(1080);
+      expect(summary.height).toBe(1080);
+      expect(summary.mimeType).toBe('image/png');
+      expect(summary.sizeBytes).toBeGreaterThan(0);
+      expect(summary.checksum).toMatch(/^[0-9a-f]{64}$/);
+      expect(summary.fileUrl).toBe(`/api/export-artifacts/${summary.id}/file`);
+      expect(typeof summary.createdAt).toBe('string');
+      expect(Number.isNaN(new Date(summary.createdAt).getTime())).toBe(false);
+
+      const artifactsRes = await owner.get(`/api/render-jobs/${renderJob.id}/artifacts`);
+      expect(artifactsRes.status).toBe(200);
+      expect(artifactsRes.body.total).toBe(1);
+      const artifact = artifactsRes.body.data[0];
+      // Existing 9A fields preserved.
+      expect(artifact.format).toBe('png');
+      expect(artifact.width).toBe(1080);
+      expect(artifact.height).toBe(1080);
+      expect(artifact.mimeType).toBe('image/png');
+      expect(artifact.storageProvider).toBe('local');
+      expect(Number(artifact.sizeBytes)).toBeGreaterThan(0);
+      expect(artifact.checksum).toBeTruthy();
+      // New additive fields (Step 9B).
+      expect(artifact.preset).toBe('instagram_post');
+      expect(artifact.fileUrl).toBe(`/api/export-artifacts/${artifact.id}/file`);
     },
     30_000
   );

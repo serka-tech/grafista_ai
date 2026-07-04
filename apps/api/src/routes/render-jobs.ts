@@ -5,7 +5,14 @@ import { asyncHandler } from '../middleware/async-handler.js';
 import { renderProductionJob } from '../services/render-engine.js';
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
-import { ExportFormatEnum, RenderPresetEnum } from '@grafista/schemas';
+import {
+  ExportFormatEnum,
+  RenderPresetEnum,
+  RENDER_PRESET_METADATA,
+  type ExportArtifact,
+  type ExportFormat,
+  type RenderPreset,
+} from '@grafista/schemas';
 
 // Mounted at /api — a production-job-scoped create route paired with its own
 // list route (render history, added as a hotfix — see the GET
@@ -20,15 +27,44 @@ export const renderJobsRouter: Router = Router();
 const VALID_PRESETS = new Set<string>(RenderPresetEnum.options);
 const VALID_EXPORT_FORMATS = new Set<string>(ExportFormatEnum.options);
 
+/**
+ * Builds the compact artifact-summary shape embedded on each render job by
+ * the render-history route below (GET /production-jobs/:id/render-jobs).
+ * Phase 2 Step 9B polish: additive `preset` (the OWNING render job's own
+ * requested preset — an export artifact has no preset field of its own),
+ * `checksum` (nullable — ExportArtifactSchema itself allows it to be absent)
+ * and `createdAt`, alongside the original id/format/width/height/mimeType/
+ * sizeBytes/fileUrl fields already returned pre-9B.
+ */
+function buildArtifactSummary(artifact: ExportArtifact, preset: RenderPreset) {
+  return {
+    id: artifact.id,
+    format: artifact.format,
+    width: artifact.width,
+    height: artifact.height,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+    checksum: artifact.checksum ?? null,
+    preset,
+    createdAt: artifact.createdAt,
+    fileUrl: `/api/export-artifacts/${artifact.id}/file`,
+  };
+}
+
 // POST /api/production-jobs/:id/render — requests a render of a
 // package_ready/approved production job at the given preset/exportFormat.
 // Synchronous (the whole render pipeline runs within the request — see
 // render-engine.ts). Body validated inline (no zod route-body schema — not
 // this codebase's convention, see production-jobs.ts's reject route): both
 // `preset` and `exportFormat` must be recognized strings, else 400 before the
-// service is ever called. The gate (404 unknown job / 409 not render-ready)
-// and the domain-level permission double-guard (403) both live INSIDE the
-// service and bubble to the centralized errorHandler untouched.
+// service is ever called. Phase 2 Step 9B additionally checks the two are a
+// SUPPORTED COMBINATION (RENDER_PRESET_METADATA[preset].allowedFormats) —
+// also a 400, also before the service is ever called; the service
+// (render-engine.ts) re-checks the same combination independently as
+// defense in depth for any non-HTTP caller. The gate (404 unknown job / 409
+// not render-ready) and the domain-level permission double-guard (403) both
+// live INSIDE the service and bubble to the centralized errorHandler
+// untouched.
 renderJobsRouter.post(
   '/production-jobs/:id/render',
   requireAuth,
@@ -45,6 +81,13 @@ renderJobsRouter.post(
     if (typeof exportFormat !== 'string' || !VALID_EXPORT_FORMATS.has(exportFormat)) {
       return res.status(400).json({
         error: `Invalid or missing "exportFormat" — must be one of: ${[...VALID_EXPORT_FORMATS].join(', ')}`,
+      });
+    }
+
+    const allowedFormats = RENDER_PRESET_METADATA[preset as RenderPreset].allowedFormats;
+    if (!allowedFormats.includes(exportFormat as ExportFormat)) {
+      return res.status(400).json({
+        error: `Export format "${exportFormat}" is not supported for preset "${preset}" — allowed formats: ${allowedFormats.join(', ')}`,
       });
     }
 
@@ -106,15 +149,9 @@ renderJobsRouter.get(
     const jobsWithSummaries = await Promise.all(
       jobs.map(async (job) => {
         const artifacts = await store.exportArtifacts.listByRenderJob(job.id);
-        const artifactSummaries = artifacts.map((artifact) => ({
-          id: artifact.id,
-          format: artifact.format,
-          width: artifact.width,
-          height: artifact.height,
-          mimeType: artifact.mimeType,
-          sizeBytes: artifact.sizeBytes,
-          fileUrl: `/api/export-artifacts/${artifact.id}/file`,
-        }));
+        const artifactSummaries = artifacts.map((artifact) =>
+          buildArtifactSummary(artifact, job.requestedFormat.preset)
+        );
         return { ...job, artifactSummaries };
       })
     );
@@ -141,6 +178,13 @@ renderJobsRouter.get(
 // route) rather than render_jobs:read — for the four seeded roles today the
 // two permissions are always granted together, so this has no behavioral
 // difference in practice, but it is the more semantically correct guard.
+//
+// Phase 2 Step 9B polish: each item ADDITIVELY gains `preset` (from the
+// owning render job's own requestedFormat.preset — an artifact has no
+// preset field of its own) and `fileUrl`, alongside every existing 9A field
+// on the artifact (id/format/width/height/mimeType/storageProvider/
+// storageBucket/storageKey/sizeBytes/checksum/createdAt) — nothing removed,
+// existing 9A tests assert on those.
 renderJobsRouter.get(
   '/render-jobs/:id/artifacts',
   requireAuth,
@@ -150,7 +194,12 @@ renderJobsRouter.get(
     if (!job) return res.status(404).json({ error: 'Render job not found' });
 
     const artifacts = await store.exportArtifacts.listByRenderJob(job.id);
-    res.json({ data: artifacts, total: artifacts.length });
+    const data = artifacts.map((artifact) => ({
+      ...artifact,
+      preset: job.requestedFormat.preset,
+      fileUrl: `/api/export-artifacts/${artifact.id}/file`,
+    }));
+    res.json({ data, total: data.length });
   })
 );
 

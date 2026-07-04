@@ -32,6 +32,29 @@ export const RENDER_PRESET_DIMENSIONS: Record<RenderPreset, { width: number; hei
 export const ExportFormatEnum = z.enum(['png', 'jpg', 'pdf']);
 export type ExportFormat = z.infer<typeof ExportFormatEnum>;
 
+// ─── Render preset metadata (Phase 2 Step 9B) ──────────────
+// Which export formats a given preset may be rendered as. PDF is
+// deliberately restricted to landscape/ad_creative (document-ish
+// deliverables); the two Instagram presets are png/jpg only — an Instagram
+// post/story is never consumed as a PDF downstream. This is Step 9B's ONE
+// intentional behavior change: `instagram_post|instagram_story` + `pdf`,
+// previously accepted (the enums allowed any preset/format pairing), now
+// rejects with 400 at both the route (render-jobs.ts) and service
+// (render-engine.ts) layers. RENDER_PRESET_DIMENSIONS above stays exported
+// unchanged — render-engine.ts already depends on it independently of this.
+export interface RenderPresetMetadata {
+  label: string;
+  width: number;
+  height: number;
+  allowedFormats: ExportFormat[];
+}
+export const RENDER_PRESET_METADATA: Record<RenderPreset, RenderPresetMetadata> = {
+  instagram_post: { label: 'Instagram Post', width: 1080, height: 1080, allowedFormats: ['png', 'jpg'] },
+  instagram_story: { label: 'Instagram Story', width: 1080, height: 1920, allowedFormats: ['png', 'jpg'] },
+  landscape: { label: 'Landscape', width: 1920, height: 1080, allowedFormats: ['png', 'jpg', 'pdf'] },
+  ad_creative: { label: 'Ad Creative', width: 1200, height: 628, allowedFormats: ['png', 'jpg', 'pdf'] },
+};
+
 export const RequestedFormatSchema = z.object({
   preset: RenderPresetEnum,
   exportFormat: ExportFormatEnum,
@@ -45,10 +68,23 @@ export type RequestedFormat = z.infer<typeof RequestedFormatSchema>;
 // blendMode, non-whitelisted font, unresolvable color, freeform filter,
 // anchor other than top-left, etc) is recorded as one of these rather than
 // dropped, so it can be surfaced to a human reviewer after the fact.
+export const RenderWarningSeverityEnum = z.enum(['info', 'warning', 'error']);
+export type RenderWarningSeverity = z.infer<typeof RenderWarningSeverityEnum>;
+
 export const RenderWarningSchema = z.object({
   code: z.string().max(100),
   message: z.string().max(500),
   layerId: z.string().optional(),
+  // ─── Phase 2 Step 9B (ADDITIVE) ───
+  // Both optional: pre-9B persisted render_warnings rows in the DB lack these
+  // fields entirely (they predate this schema change), so consumers reading
+  // an older row must default a missing severity to 'warning'. Every
+  // NEWLY-produced warning (html-renderer.ts and render-quality.ts) sets
+  // `severity` explicitly.
+  severity: RenderWarningSeverityEnum.optional(),
+  // Structured extras a UI can render without parsing `message`, e.g.
+  // { estimatedLines, capacityLines } for text_overflow_possible.
+  details: z.record(z.unknown()).optional(),
 });
 export type RenderWarning = z.infer<typeof RenderWarningSchema>;
 

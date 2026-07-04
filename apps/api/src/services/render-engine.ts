@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { v4 as uuid } from 'uuid';
 import {
   RENDER_PRESET_DIMENSIONS,
+  RENDER_PRESET_METADATA,
   type ExportFormat,
   type Layer,
   type RenderJob,
@@ -32,6 +33,7 @@ import {
 import { assertProductionJobReadyForRender } from './render-gate.js';
 import { store } from '../data/store.js';
 import { buildRenderHtml } from '../render/html-renderer.js';
+import { assessRenderQuality } from '../render/render-quality.js';
 import { getRendererAdapter } from '../render/adapters/factory.js';
 import { getStorageProvider } from '../storage/factory.js';
 import { usersRepo } from '../db/repositories/users.js';
@@ -76,6 +78,23 @@ export async function renderProductionJob(
   );
 
   const { width, height } = RENDER_PRESET_DIMENSIONS[requestedFormat.preset];
+
+  // Step 9B — preset/exportFormat combination guard (defense in depth: the
+  // route in render-jobs.ts has its own friendly 400 that fires first for
+  // HTTP callers, mirroring this codebase's double-guard idiom — see
+  // assertRequesterMayCreateRenderJobs above for the same pattern applied to
+  // permissions). Runs BEFORE the render_jobs row is created below, so an
+  // invalid combination never persists a job row.
+  const allowedFormats = RENDER_PRESET_METADATA[requestedFormat.preset].allowedFormats;
+  if (!allowedFormats.includes(requestedFormat.exportFormat)) {
+    throw Object.assign(
+      new Error(
+        `Export format "${requestedFormat.exportFormat}" is not supported for preset "${requestedFormat.preset}" — allowed: ${allowedFormats.join(', ')}`
+      ),
+      { status: 400 }
+    );
+  }
+
   const fullRequestedFormat: RequestedFormat = {
     preset: requestedFormat.preset,
     exportFormat: requestedFormat.exportFormat,
@@ -103,9 +122,21 @@ export async function renderProductionJob(
     // per-target-format (layoutPlan.format), so the two usually line up.
     const layers = (productionJob.packageManifestSnapshot?.layoutPlanSnapshot as { layers?: Layer[] } | undefined)
       ?.layers ?? [];
+    // Step 9B — safe zones live on the same layoutPlanSnapshot as layers;
+    // `as any` for the same reason `layers` above needs a cast: this
+    // snapshot is a loosely-typed Record<string, unknown> copy, not a
+    // validated LayoutPlan.
+    const safeZones = (productionJob.packageManifestSnapshot?.layoutPlanSnapshot as any)?.safeZones ?? [];
     const canvas = { width, height };
 
-    const { html, warnings } = buildRenderHtml({ canvas, layers });
+    const { html, warnings: htmlWarnings } = buildRenderHtml({ canvas, layers });
+    // Step 9B — pre-render heuristic QA pass (see render-quality.ts's module
+    // header: heuristics surfacing risk, not typographic ground truth).
+    // Renderer's warnings come first (produced in layer order), the quality
+    // pass appends. Warnings NEVER fail a render — only a real adapter/
+    // storage error does, via the catch block below (unchanged).
+    const qualityWarnings = assessRenderQuality({ canvas, layers, safeZones });
+    const warnings = [...htmlWarnings, ...qualityWarnings];
 
     const adapter = getRendererAdapter();
     const { buffer, mimeType } = await adapter.render({

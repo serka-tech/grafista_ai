@@ -23,6 +23,13 @@
  *  * Every warning this module raises is additive (see RenderWarningSchema
  *    in packages/schemas/src/render-job.ts) — a render is never "silently
  *    wrong", it degrades to a documented default and reports what happened.
+ *
+ * Phase 2 Step 9B: every warning pushed below now also sets `severity`
+ * ('warning' for all of them — every MVP limitation this module degrades
+ * from is a real, visible deviation from the requested design, never merely
+ * informational). No warning `code` was renamed: in particular, `invalid_color`
+ * (from safeColor()) IS this module's answer to the Step 9B spec's
+ * "invalid_color_fallback" requirement — same event, existing code kept.
  */
 
 import type { Layer, RenderWarning } from '@grafista/schemas';
@@ -86,8 +93,12 @@ function escapeHtml(value: string): string {
  * copy of the equivalent helper in production-package-builder.ts, which does
  * not export it — deliberately duplicated rather than imported, per the
  * task's scope boundary (this module must not reach into that service).
+ *
+ * Exported (Phase 2 Step 9B) so ../render-quality.ts can reuse the exact
+ * same traversal/order for its own pre-render QA pass over the same layers —
+ * a one-line `export` addition, not a refactor.
  */
-function flattenLayers(layers: Layer[]): Layer[] {
+export function flattenLayers(layers: Layer[]): Layer[] {
   const result: Layer[] = [];
   for (const layer of layers) {
     result.push(layer);
@@ -125,6 +136,7 @@ export function safeColor(value: string | undefined, fallback: string): { color:
     warning: {
       code: 'invalid_color',
       message: `Color "${value}" is not a recognized safe color, falling back to "${fallback}"`,
+      severity: 'warning',
     },
   };
 }
@@ -138,6 +150,7 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
       withLayerId({
         code: 'anchor_ignored',
         message: `Anchor "${layer.position.anchor}" is not supported in this MVP renderer — rendered at x/y unchanged`,
+        severity: 'warning',
       })
     );
   }
@@ -148,6 +161,7 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
       withLayerId({
         code: 'unsupported_blend_mode',
         message: `blendMode "${blendMode}" is not supported, falling back to normal`,
+        severity: 'warning',
       })
     );
     blendMode = 'normal';
@@ -178,6 +192,7 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
           withLayerId({
             code: 'font_fallback',
             message: `Font "${fontResolution.requestedFont}" not in whitelist, using ${fontResolution.resolvedFont}`,
+            severity: 'warning',
           })
         );
       }
@@ -192,6 +207,7 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
           withLayerId({
             code: 'invalid_font_weight',
             message: `fontWeight "${requestedWeight}" is not a supported CSS value, falling back to "400"`,
+            severity: 'warning',
           })
         );
         fontWeight = '400';
@@ -230,6 +246,7 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
           withLayerId({
             code: 'unsupported_filter',
             message: 'Custom filter values are not supported in this MVP',
+            severity: 'warning',
           })
         );
       }
@@ -287,6 +304,7 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
           withLayerId({
             code: 'unsupported_layer_type',
             message: `Layer type "${layer.type}" has no dedicated renderer, rendered as empty box`,
+            severity: 'warning',
           })
         );
       }

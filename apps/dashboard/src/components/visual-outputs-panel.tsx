@@ -56,16 +56,47 @@ const RENDER_JOB_STATUS_BADGES: Record<string, { class: string; label: string }>
   cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
 };
 
+// Render quality warnings (Phase 2 Step 9B) — see RenderJob.renderWarnings in
+// packages/schemas/src/render-job.ts. Persisted warnings created before this
+// field existed lack `severity` entirely; every lookup below must treat a
+// missing severity as 'warning'.
+const RENDER_WARNING_SEVERITY_BADGES: Record<string, { class: string; label: string }> = {
+  error: { class: 'badge-danger', label: 'Hata' },
+  warning: { class: 'badge-warning', label: 'Uyarı' },
+  info: { class: 'badge-info', label: 'Bilgi' },
+};
+
+// Warning code → Turkish label. Unmapped codes fall back to the raw code.
+const RENDER_WARNING_CODE_LABELS: Record<string, string> = {
+  font_fallback: 'Font fallback kullanıldı',
+  text_overflow_possible: 'Metin taşma riski',
+  safe_area_warning: 'Güvenli alan uyarısı',
+  safe_area_unavailable: 'Güvenli alan tanımsız',
+  missing_image_source: 'Görsel kaynağı eksik',
+  low_resolution_image_possible: 'Düşük çözünürlük riski',
+  unsupported_filter: 'Filtre desteklenmiyor',
+  unsupported_blend_mode: 'Karışım modu desteklenmiyor',
+  invalid_color: 'Geçersiz renk düzeltildi',
+  invalid_font_weight: 'Geçersiz font kalınlığı',
+  unsupported_layer_type: 'Desteklenmeyen katman türü',
+  anchor_ignored: 'Hizalama noktası yok sayıldı',
+};
+
 // Render presets/formats (Phase 2 Step 9A) — mirrors RenderPresetEnum /
 // ExportFormatEnum in packages/schemas/src/render-job.ts exactly. Hardcoded
 // here rather than fetched since the dashboard doesn't import @grafista/schemas.
-const RENDER_PRESETS = [
-  { value: 'instagram_post', label: 'Instagram Post (1080×1080)' },
-  { value: 'instagram_story', label: 'Story (1080×1920)' },
-  { value: 'landscape', label: 'Landscape (1920×1080)' },
-  { value: 'ad_creative', label: 'Ad Creative (1200×628)' },
+//
+// allowedFormats (Phase 2 Step 9B, additive) mirrors RENDER_PRESET_METADATA in
+// packages/schemas/src/render-job.ts — the backend now 400s any preset/format
+// combination outside this list, so the UI must never offer one. The old flat
+// EXPORT_FORMATS list is gone; every format <select> now derives its options
+// from the currently selected preset's own allowedFormats instead.
+const RENDER_PRESETS: Array<{ value: string; label: string; allowedFormats: string[] }> = [
+  { value: 'instagram_post', label: 'Instagram Post (1080×1080)', allowedFormats: ['png', 'jpg'] },
+  { value: 'instagram_story', label: 'Story (1080×1920)', allowedFormats: ['png', 'jpg'] },
+  { value: 'landscape', label: 'Landscape (1920×1080)', allowedFormats: ['png', 'jpg', 'pdf'] },
+  { value: 'ad_creative', label: 'Ad Creative (1200×628)', allowedFormats: ['png', 'jpg', 'pdf'] },
 ];
-const EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
 function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
@@ -349,6 +380,12 @@ function OutputCard({
     ? 'Bu işlemi çalıştırmak için yetkiniz yok'
     : 'Seçilen format ve boyutta bir export oluştur';
 
+  // Preset/format policy (Phase 2 Step 9B) — the export-format <select> below
+  // only ever offers the currently selected preset's allowed formats, so the
+  // user can never construct a combination the backend would now 400 on.
+  const selectedPresetConfig = RENDER_PRESETS.find((preset) => preset.value === state.selectedPreset) ?? RENDER_PRESETS[0];
+  const allowedExportFormats = selectedPresetConfig.allowedFormats;
+
   async function handleRenderExport() {
     if (!productionJob) return;
     patch({ rendering: true, renderError: null });
@@ -590,7 +627,19 @@ function OutputCard({
               className="form-select"
               style={{ width: 'auto' }}
               value={state.selectedPreset}
-              onChange={(e) => patch({ selectedPreset: e.target.value })}
+              onChange={(e) => {
+                // Preset/format policy (Phase 2 Step 9B): switching preset can
+                // narrow the allowed formats — if the currently selected
+                // format is no longer valid for the new preset, fall back to
+                // 'png' (always allowed) in the same patch so the UI can never
+                // hold a combination the backend would reject.
+                const nextPreset = RENDER_PRESETS.find((preset) => preset.value === e.target.value) ?? RENDER_PRESETS[0];
+                const formatStillAllowed = nextPreset.allowedFormats.includes(state.selectedExportFormat);
+                patch({
+                  selectedPreset: nextPreset.value,
+                  selectedExportFormat: formatStillAllowed ? state.selectedExportFormat : 'png',
+                });
+              }}
               disabled={state.rendering}
             >
               {RENDER_PRESETS.map((preset) => (
@@ -606,7 +655,7 @@ function OutputCard({
               onChange={(e) => patch({ selectedExportFormat: e.target.value })}
               disabled={state.rendering}
             >
-              {EXPORT_FORMATS.map((format) => (
+              {allowedExportFormats.map((format) => (
                 <option key={format} value={format}>
                   {format.toUpperCase()}
                 </option>
@@ -647,6 +696,52 @@ function OutputCard({
               ))}
           </div>
 
+          {/* Latest render's quality warnings (Phase 2 Step 9B) — compact,
+              non-collapsing list (renderWarnings is short, ≤ ~6 entries in
+              practice). Same small/muted-text vocabulary as the render
+              history list below. Missing severity (pre-9B persisted rows)
+              is treated as 'warning'. */}
+          {renderJob?.renderWarnings?.length > 0 && (
+            <div style={{ marginTop: '8px' }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                {`Render uyarıları (${renderJob.renderWarnings.length})`}
+              </p>
+              {renderJob.renderWarnings.map((warning: any, index: number) => {
+                const severity = warning.severity ?? 'warning';
+                const severityBadge = RENDER_WARNING_SEVERITY_BADGES[severity] ?? RENDER_WARNING_SEVERITY_BADGES.warning;
+                const codeLabel = RENDER_WARNING_CODE_LABELS[warning.code] ?? warning.code;
+                return (
+                  <div
+                    key={`${warning.code}-${warning.layerId ?? index}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      flexWrap: 'wrap',
+                      fontSize: '0.75rem',
+                      color: 'var(--color-text-muted)',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    <span className={`badge ${severityBadge.class}`}>{severityBadge.label}</span>
+                    <span>{codeLabel}</span>
+                    <span
+                      title={warning.message}
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '360px',
+                      }}
+                    >
+                      {warning.message}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Render history (this hotfix) — compact, muted list of up to the
               last 3 OLDER renders (the latest one is already shown in the row
               above), newest-first. Hydrated by loadRenderHistory; see the
@@ -683,6 +778,11 @@ function OutputCard({
                       </span>
                       <span className={`badge ${historyBadge.class}`}>{historyBadge.label}</span>
                       <span>{new Date(job.createdAt).toLocaleString()}</span>
+                      {job.renderWarnings?.length > 0 && (
+                        // Count only (Phase 2 Step 9B) — per-warning detail is
+                        // only shown for the latest render, above.
+                        <span>⚠ {job.renderWarnings.length} uyarı</span>
+                      )}
                       {(job.artifactSummaries ?? []).map((artifact: any) => (
                         <a
                           key={artifact.id}
