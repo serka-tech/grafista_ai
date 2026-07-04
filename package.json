@@ -10,8 +10,10 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
+    "test:stable": "pnpm --filter @grafista/api exec vitest run --maxWorkers=2",
     "lint": "pnpm -r run lint",
-    "clean": "pnpm -r run clean"
+    "clean": "pnpm -r run clean",
+    "check:release": "pnpm run typecheck && pnpm run lint && pnpm run test:stable && pnpm run build"
   },
   "engines": {
     "node": ">=18.0.0",

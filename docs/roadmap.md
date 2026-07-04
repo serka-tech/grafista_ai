@@ -59,14 +59,15 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
 
 ## Next steps (proposed order after Step 10)
 
-### Phase 2 Step 11 — Release Readiness + Local Deployment Checklist
-- env checklist (required vars, dummy-key demo rules)
-- migration checklist (001–020, pgvector-optional note)
-- fake/real provider mode switch documentation
-- MinIO/S3 configuration check
-- Playwright runtime check (`npx playwright install chromium`)
-- seed/demo runbook consolidation (`docs/mvp-demo-flow.md` is the base)
-- CI/test stability notes (`--maxWorkers=2` invocation, load sensitivity)
+### Phase 2 Step 11 — Release Readiness + Local Deployment Checklist ✅ (complete)
+- `docs/release-readiness.md` — env checklist, service list, local startup
+  checklist, fake/real provider modes, Playwright runtime check, test
+  stability notes, and the release go/no-go checklist
+- root scripts added: `pnpm run test:stable` (deterministic
+  `--maxWorkers=2` invocation) and `pnpm run check:release` (wraps
+  typecheck/lint/test:stable/build — no new tooling, no CI system)
+- `.env.example` reviewed — already covered every env var actually read by
+  the code, no additions needed
 
 ### Phase 2 Step 12 — Real Provider Smoke Test
 - run the demo chain once with real keys instead of the fake provider

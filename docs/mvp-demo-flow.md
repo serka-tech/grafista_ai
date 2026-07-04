@@ -152,6 +152,7 @@ publishing, multi-tenant isolation.
 
 ## Related docs
 
+- `docs/release-readiness.md` — release go/no-go checklist and env/service reference
 - `docs/roadmap.md` — project state, strategy, and what comes after Step 10
 - `docs/architecture.md` — system overview
 - `docs/model-routing.md` — provider matrix and routing rules
