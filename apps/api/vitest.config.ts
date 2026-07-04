@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // Test mode is isolated from any real/shared database: globalSetup starts a
 // throwaway embedded PostgreSQL instance (see src/test/global-setup.ts) on
@@ -9,6 +9,13 @@ const TEST_DATABASE_URL = 'postgresql://postgres:postgres@localhost:54329/grafis
 export default defineConfig({
   test: {
     environment: 'node',
+    // `tsc -p tsconfig.build.json` compiles the *.test.ts files into dist/ too,
+    // and without this exclude vitest collected those compiled .test.js copies
+    // ALONGSIDE their src/ originals — every pure-unit test ran twice and the
+    // suite totals were inflated (discovered in Phase 2 Step 10: 321 collected
+    // vs 274 unique). Spreading configDefaults.exclude keeps vitest's own
+    // defaults (node_modules etc) intact rather than replacing them.
+    exclude: [...configDefaults.exclude, '**/dist/**'],
     globalSetup: './src/test/global-setup.ts',
     env: {
       OPENAI_API_KEY: 'sk-test-fake-key-for-smoke-tests',
