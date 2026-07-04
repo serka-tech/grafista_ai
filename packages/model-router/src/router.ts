@@ -11,22 +11,31 @@ import { GeminiAdapter } from './providers/gemini.js';
 import { ClaudeAdapter } from './providers/claude.js';
 import { KieAIAdapter } from './providers/kie-ai.js';
 import { HiggsFieldAdapter } from './providers/higgsfield.js';
+import { FakeAIAdapter } from './providers/fake.js';
 
-// Default task → provider routing table
+// Default task → provider routing table.
+//
+// 'fake' is listed FIRST on every task it supports (all but video_generation) so
+// the offline demo mode (AI_DEFAULT_PROVIDER=fake, see providers/fake.ts) also
+// covers tasks that pass no explicit provider — today that's image_generation.
+// This is safe for production: FakeAIAdapter.isAvailable() is false unless
+// explicitly enabled, and selectProvider() only picks an AVAILABLE adapter
+// (`candidates.find((adapter) => adapter.isAvailable())` below), so a disabled
+// fake is skipped and the pre-existing real-provider order is unchanged.
 const DEFAULT_ROUTING: TaskRouting[] = [
-  { taskType: 'brand_intake', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'style_analysis', primaryProvider: 'openai', fallbackProviders: ['gemini', 'claude'], requiredCapabilities: ['vision'] },
+  { taskType: 'brand_intake', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'style_analysis', primaryProvider: 'fake', fallbackProviders: ['openai', 'gemini', 'claude'], requiredCapabilities: ['vision'] },
   // Synthesizes already-extracted per-reference JSON (text) into one client-level DesignDNA —
   // no raw images involved, so this does not require vision capability.
-  { taskType: 'design_dna_synthesis', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'tone_extraction', primaryProvider: 'claude', fallbackProviders: ['openai', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'content_ideation', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'caption_generation', primaryProvider: 'claude', fallbackProviders: ['openai', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'design_brief', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'layout_generation', primaryProvider: 'openai', fallbackProviders: ['claude'], requiredCapabilities: ['text'] },
-  { taskType: 'creative_qa', primaryProvider: 'openai', fallbackProviders: ['claude', 'gemini'], requiredCapabilities: ['text', 'vision'] },
-  { taskType: 'revision_learning', primaryProvider: 'claude', fallbackProviders: ['openai', 'gemini'], requiredCapabilities: ['text'] },
-  { taskType: 'image_generation', primaryProvider: 'openai', fallbackProviders: ['kie-ai'], requiredCapabilities: ['image_generation'] },
+  { taskType: 'design_dna_synthesis', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'tone_extraction', primaryProvider: 'fake', fallbackProviders: ['claude', 'openai', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'content_ideation', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'caption_generation', primaryProvider: 'fake', fallbackProviders: ['claude', 'openai', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'design_brief', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'layout_generation', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude'], requiredCapabilities: ['text'] },
+  { taskType: 'creative_qa', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text', 'vision'] },
+  { taskType: 'revision_learning', primaryProvider: 'fake', fallbackProviders: ['claude', 'openai', 'gemini'], requiredCapabilities: ['text'] },
+  { taskType: 'image_generation', primaryProvider: 'fake', fallbackProviders: ['openai', 'kie-ai'], requiredCapabilities: ['image_generation'] },
   { taskType: 'video_generation', primaryProvider: 'kie-ai', fallbackProviders: ['higgsfield'], requiredCapabilities: ['video_generation'] },
 ];
 
@@ -43,12 +52,14 @@ export class ModelRouter {
     const claude = new ClaudeAdapter();
     const kieAi = new KieAIAdapter();
     const higgsfield = new HiggsFieldAdapter();
+    const fake = new FakeAIAdapter();
 
     this.adapters.set('openai', openai);
     this.adapters.set('gemini', gemini);
     this.adapters.set('claude', claude);
     this.adapters.set('kie-ai', kieAi);
     this.adapters.set('higgsfield', higgsfield);
+    this.adapters.set('fake', fake);
   }
 
   /**

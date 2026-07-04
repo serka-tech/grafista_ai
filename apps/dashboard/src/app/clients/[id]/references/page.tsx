@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, resolveApiFileUrl } from '@/lib/api';
 
 export default function ReferencesPage({ params }: { params: { id: string } }) {
   const [refs, setRefs] = useState<any[]>([]);
@@ -92,9 +92,20 @@ export default function ReferencesPage({ params }: { params: { id: string } }) {
         <div className="card-grid">
           {refs.map((ref) => (
             <div key={ref.id} className="card">
-              <div style={{ background: 'var(--color-bg-glass)', borderRadius: 'var(--radius-md)', height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px', fontSize: '3rem' }}>
-                📐
-              </div>
+              {ref.fileUrl ? (
+                // fileUrl is an API-relative protected route, resolved against the API origin —
+                // same idiom as the preview image in visual-outputs-panel.tsx.
+                // eslint-disable-next-line @next/next/no-img-element -- uploaded reference files are served by the API (or a storage redirect); next/image domain allowlisting is not configured for them
+                <img
+                  src={resolveApiFileUrl(ref.fileUrl)}
+                  alt={ref.name}
+                  style={{ width: '100%', height: '160px', objectFit: 'cover', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-glass)', marginBottom: '12px' }}
+                />
+              ) : (
+                <div style={{ background: 'var(--color-bg-glass)', borderRadius: 'var(--radius-md)', height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px', fontSize: '3rem' }}>
+                  📐
+                </div>
+              )}
               <div className="card-title">{ref.name}</div>
               {ref.description && <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>{ref.description}</p>}
               <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>

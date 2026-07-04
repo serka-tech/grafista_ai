@@ -231,7 +231,9 @@ export default function BriefPage({ params }: { params: { id: string } }) {
           >
             {generating ? '⏳ Oluşturuluyor (biraz sürebilir)...' : '🎨 Yerleşim Planı Oluştur'}
           </button>
-          <button className="btn btn-secondary" disabled title="Faz 2'de aktif olacak">📊 Kalite Kontrolü Çalıştır (Faz 2)</button>
+          <a href={`/briefs/${briefId}/layout-plans`} className="btn btn-secondary">
+            📊 Kalite kontrol ve görseller → Yerleşim Planları
+          </a>
         </div>
 
         {!briefIsApproved && (

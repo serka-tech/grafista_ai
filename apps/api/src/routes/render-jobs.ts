@@ -64,7 +64,8 @@ function buildArtifactSummary(artifact: ExportArtifact, preset: RenderPreset) {
 // defense in depth for any non-HTTP caller. The gate (404 unknown job / 409
 // not render-ready) and the domain-level permission double-guard (403) both
 // live INSIDE the service and bubble to the centralized errorHandler
-// untouched.
+// untouched — EXCEPT the not-render-ready 409, which this route catches to
+// additionally echo the production job's current status (see the catch below).
 renderJobsRouter.post(
   '/production-jobs/:id/render',
   requireAuth,
@@ -91,12 +92,33 @@ renderJobsRouter.post(
       });
     }
 
-    const renderJob = await renderProductionJob(
-      req.params.id,
-      { preset: preset as (typeof RenderPresetEnum.options)[number], exportFormat: exportFormat as (typeof ExportFormatEnum.options)[number] },
-      req.user!.id
-    );
-    res.status(201).json({ data: renderJob });
+    try {
+      const renderJob = await renderProductionJob(
+        req.params.id,
+        { preset: preset as (typeof RenderPresetEnum.options)[number], exportFormat: exportFormat as (typeof ExportFormatEnum.options)[number] },
+        req.user!.id
+      );
+      return res.status(201).json({ data: renderJob });
+    } catch (err) {
+      // ── NOT-RENDER-READY 409 ── mirrors production-jobs.ts's approve/reject
+      // 409 convention of echoing the job's current status, without touching
+      // the central error contract: render-gate.ts attaches
+      // `productionJobStatus` to its not-ready error, and this route
+      // re-serializes it in the errorHandler's exact shape (error/message/
+      // timestamp) plus the ADDITIVE `status` field. Every other error
+      // (404 unknown job, defensive manifest 409, 403 domain guard, 502
+      // renderer) still bubbles to the centralized errorHandler untouched.
+      const e = err as Error & { status?: number; productionJobStatus?: string };
+      if (e.status === 409 && typeof e.productionJobStatus === 'string') {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: e.message,
+          timestamp: new Date().toISOString(),
+          status: e.productionJobStatus,
+        });
+      }
+      throw err;
+    }
   })
 );
 

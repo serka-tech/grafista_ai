@@ -48,11 +48,37 @@ designBriefsRouter.get('/design-briefs', requireAuth, requirePermission('clients
   res.json({ data: briefs, total: briefs.length });
 }));
 
+// ── Approve/reject state guards (Phase 2 Step 10 polish) ──────────────────
+// Statuses a brief can actually REACH today: 'draft' (creation default — see
+// migration 008's note: nothing else ever moved status before these routes),
+// 'approved' / 'rejected' / 'needs_revision' (written only here and by the
+// workflow engine's design_brief gate, which calls the repo directly and is
+// therefore NOT affected by these route guards). 'in_progress' / 'qa_pending'
+// / 'qa_passed' are declared in the schema but unreachable today; they are
+// treated as pre-approval states so this guard won't strand them if a future
+// phase starts using them. Decisions, mirroring layout-plans.ts's guarded
+// 409-with-current-status idiom:
+//  - approve allows 'needs_revision' (revision loop re-approve — mirrors
+//    layoutPlansRepo.approve's `status IN ('generated','needs_revision')`),
+//    but NOT 'approved' (re-approve conflict), 'rejected' (terminal without
+//    new notes) or 'exported' (post-approval).
+//  - reject deliberately DOES allow 'approved' — un-approving a brief after
+//    the fact is a real, supported scenario (creative-qa.test.ts §4 exercises
+//    "brief revision requested after its layout plans were already approved"
+//    through this exact route) — but NOT 'rejected' (double-reject) or
+//    'exported'.
+const APPROVABLE_BRIEF_STATUSES = new Set(['draft', 'in_progress', 'qa_pending', 'qa_passed', 'needs_revision']);
+const REJECTABLE_BRIEF_STATUSES = new Set(['draft', 'in_progress', 'qa_pending', 'qa_passed', 'approved', 'needs_revision']);
+
 // POST /api/design-briefs/:id/approve — required before layout generation can run
 // against this brief (see services/layout-generation.ts).
 designBriefsRouter.post('/design-briefs/:id/approve', requireAuth, requirePermission('design_briefs:approve'), asyncHandler(async (req: Request, res: Response) => {
   const brief = await store.designBriefs.getById(req.params.id);
   if (!brief) return res.status(404).json({ error: 'Design brief not found' });
+
+  if (!APPROVABLE_BRIEF_STATUSES.has(brief.status)) {
+    return res.status(409).json({ error: 'Design brief is not in an approvable state', status: brief.status });
+  }
 
   const updated = await store.designBriefs.updateStatus(brief.id, 'approved');
   res.json({ data: updated });
@@ -63,6 +89,10 @@ designBriefsRouter.post('/design-briefs/:id/approve', requireAuth, requirePermis
 designBriefsRouter.post('/design-briefs/:id/reject', requireAuth, requirePermission('design_briefs:approve'), asyncHandler(async (req: Request, res: Response) => {
   const brief = await store.designBriefs.getById(req.params.id);
   if (!brief) return res.status(404).json({ error: 'Design brief not found' });
+
+  if (!REJECTABLE_BRIEF_STATUSES.has(brief.status)) {
+    return res.status(409).json({ error: 'Design brief is not in a rejectable state', status: brief.status });
+  }
 
   const newStatus = req.body?.revisionNotes ? 'needs_revision' : 'rejected';
   const updated = await store.designBriefs.updateStatus(brief.id, newStatus);

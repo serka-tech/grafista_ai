@@ -404,3 +404,79 @@ describe('11. Reject requires layout_plans:reject', () => {
     expect(res.body.data.status).toBe('needs_revision');
   });
 });
+
+// Phase 2 Step 10 polish — the brief approve/reject routes now carry the same
+// guarded 409-with-current-status idiom as the layout-plan approve/reject
+// routes above (see routes/design-briefs.ts for the full state-machine
+// rationale). This suite already owns the design-brief approve/reject route
+// surface via its createDraftDesignBrief/createApprovedDesignBrief helpers,
+// so the guard tests live here.
+describe('12. Design brief approve/reject state guards', () => {
+  it('approving an already-rejected brief returns 409 and leaves it rejected', async () => {
+    const { brief } = await createDraftDesignBrief('Brief Guard Approve After Reject Client');
+    const owner = await loginAs(TEST_USERS.OWNER);
+
+    const rejectRes = await owner.post(`/api/design-briefs/${brief.id}/reject`);
+    expect(rejectRes.status).toBe(200);
+    expect(rejectRes.body.data.status).toBe('rejected');
+
+    const approveRes = await owner.post(`/api/design-briefs/${brief.id}/approve`);
+    expect(approveRes.status).toBe(409);
+    expect(approveRes.body.error).toBe('Design brief is not in an approvable state');
+    expect(approveRes.body.status).toBe('rejected');
+
+    const getRes = await owner.get(`/api/design-briefs/${brief.id}`);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.data.status).toBe('rejected');
+  }, 15_000);
+
+  it('re-approving an already-approved brief returns 409 (mirrors layout-plan approve)', async () => {
+    const { brief } = await createApprovedDesignBrief('Brief Guard Double Approve Client');
+    const owner = await loginAs(TEST_USERS.OWNER);
+
+    const res = await owner.post(`/api/design-briefs/${brief.id}/approve`);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Design brief is not in an approvable state');
+    expect(res.body.status).toBe('approved');
+  }, 15_000);
+
+  it('rejecting an approved brief still works — un-approval is a supported real scenario', async () => {
+    // Must stay allowed: creative-qa.test.ts §4 un-approves a brief through this
+    // exact route to prove layout QA then 409s (revision requested after approval).
+    const { brief } = await createApprovedDesignBrief('Brief Guard Unapprove Client');
+    const owner = await loginAs(TEST_USERS.OWNER);
+
+    const res = await owner.post(`/api/design-briefs/${brief.id}/reject`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('rejected');
+  }, 15_000);
+
+  it('double-rejecting a brief returns 409 with its current status', async () => {
+    const { brief } = await createDraftDesignBrief('Brief Guard Double Reject Client');
+    const owner = await loginAs(TEST_USERS.OWNER);
+
+    const first = await owner.post(`/api/design-briefs/${brief.id}/reject`);
+    expect(first.status).toBe(200);
+    expect(first.body.data.status).toBe('rejected');
+
+    const second = await owner.post(`/api/design-briefs/${brief.id}/reject`);
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe('Design brief is not in a rejectable state');
+    expect(second.body.status).toBe('rejected');
+  }, 15_000);
+
+  it('revision loop still works: reject with revisionNotes -> needs_revision -> re-approve', async () => {
+    const { brief } = await createDraftDesignBrief('Brief Guard Revision Loop Client');
+    const owner = await loginAs(TEST_USERS.OWNER);
+
+    const revisionRes = await owner
+      .post(`/api/design-briefs/${brief.id}/reject`)
+      .send({ revisionNotes: 'Tighten the headline' });
+    expect(revisionRes.status).toBe(200);
+    expect(revisionRes.body.data.status).toBe('needs_revision');
+
+    const reApproveRes = await owner.post(`/api/design-briefs/${brief.id}/approve`);
+    expect(reApproveRes.status).toBe(200);
+    expect(reApproveRes.body.data.status).toBe('approved');
+  }, 15_000);
+});

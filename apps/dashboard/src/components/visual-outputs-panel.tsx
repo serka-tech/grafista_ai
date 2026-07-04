@@ -12,8 +12,8 @@
  * the parent page already fetches via api.getCurrentUser().
  *
  * The Creative QA approval gate also lives in the backend service (409 when
- * no approved CreativeQA report exists); the `creativeQaApproved` prop is
- * only an early-warning UX hint, never a bypass.
+ * no approved/passed CreativeQA report exists); the `creativeQaApproved` prop
+ * is only an early-warning UX hint, never a bypass.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -523,6 +523,14 @@ function OutputCard({
         </button>
       </div>
 
+      {/* Stage-clarity hint (Phase 2 Step 10): derived from state this card
+          already loads — no extra fetch, no restructuring. */}
+      {output.status === 'generated' && !productionJob && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+          Sıradaki adım: Üretime gönder
+        </p>
+      )}
+
       {productionJob && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Üretim işi:</span>
@@ -612,6 +620,13 @@ function OutputCard({
             </>
           )}
         </div>
+      )}
+
+      {/* Stage-clarity hint (Phase 2 Step 10) — same derivation note as above. */}
+      {productionJob?.status === 'package_ready' && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+          Sıradaki adım: Paketi onayla veya render/export al
+        </p>
       )}
 
       {/* Render / export (Phase 2 Step 9A) — only makes sense once a package
@@ -877,7 +892,7 @@ export function VisualOutputsPanel({
       setOutputs((prev) => [...(res.data ?? []), ...prev]);
     } catch (err: any) {
       const message = err.status === 409
-        ? (err.message ?? 'Görsel üretmek için önce Creative QA onayı gerekli.')
+        ? (err.message ?? 'Görsel üretmek için Creative QA raporunun onaylı veya geçmiş (passed) olması gerekir.')
         : err.status === 502
           ? 'Görsel üretim tamamlanamadı — AI sağlayıcı hatası. Çıktı kaydedilmedi.'
           : (err.message ?? 'Görsel üretim başlatılamadı.');
@@ -890,7 +905,7 @@ export function VisualOutputsPanel({
   const generateTitle = !canRun
     ? 'Bu işlemi çalıştırmak için yetkiniz yok'
     : !creativeQaApproved
-      ? 'Görsel üretmek için önce Creative QA onayı gerekli'
+      ? 'Görsel üretmek için Creative QA raporunun onaylı veya geçmiş (passed) olması gerekir'
       : 'Bu yerleşim planı için yeni bir görsel alternatif seti üret';
 
   return (
@@ -911,7 +926,7 @@ export function VisualOutputsPanel({
 
       {!creativeQaApproved && (
         <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '10px' }}>
-          Görsel üretmek için önce Creative QA onayı gerekli.
+          Görsel üretmek için Creative QA raporunun onaylı veya geçmiş (passed) olması gerekir.
         </p>
       )}
 

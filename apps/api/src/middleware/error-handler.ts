@@ -16,6 +16,7 @@ const STATUS_LABELS: Record<number, string> = {
   404: 'Not Found',
   409: 'Conflict',
   500: 'Internal Server Error',
+  502: 'Bad Gateway', // AI-provider / upstream failures (services throw { status: 502 })
 };
 
 export function errorHandler(err: Error & { status?: number; code?: string }, _req: Request, res: Response, _next: NextFunction) {

@@ -3,12 +3,25 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 
+// Same local ErrorNote idiom as briefs/[id]/page.tsx and layout-plans/page.tsx.
+function ErrorNote({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <p style={{ color: 'var(--color-danger, #f87171)', fontSize: '0.85rem', marginTop: '8px' }}>
+      ⚠ {message}
+    </p>
+  );
+}
+
 export default function ContentPage({ params }: { params: { id: string } }) {
   const [ideas, setIdeas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [platform, setPlatform] = useState('instagram_post');
   const [topic, setTopic] = useState('');
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  // Approve/reject errors, keyed by content idea id, shown inline on that idea's card.
+  const [actionErrors, setActionErrors] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     api.getContentIdeas(params.id).then((res) => setIdeas(res.data)).catch(console.error).finally(() => setLoading(false));
@@ -16,18 +29,34 @@ export default function ContentPage({ params }: { params: { id: string } }) {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setGenerateError(null);
     try {
       const res = await api.generateContentIdeas(params.id, { platform, topic: topic || undefined, optionCount: 3 });
       setIdeas([...res.data, ...ideas]);
-    } catch (err) { console.error(err); }
+    } catch (err: any) {
+      setGenerateError(err.message ?? 'İçerik fikri üretimi başarısız oldu.');
+    }
     setGenerating(false);
   };
 
   const handleApprove = async (id: string) => {
+    setActionErrors((prev) => ({ ...prev, [id]: null }));
     try {
       await api.approveIdea(id);
       setIdeas(ideas.map(i => i.id === id ? { ...i, status: 'approved' } : i));
-    } catch (err) { console.error(err); }
+    } catch (err: any) {
+      setActionErrors((prev) => ({ ...prev, [id]: err.message ?? 'Onaylama başarısız oldu.' }));
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    setActionErrors((prev) => ({ ...prev, [id]: null }));
+    try {
+      await api.rejectIdea(id);
+      setIdeas(ideas.map(i => i.id === id ? { ...i, status: 'rejected' } : i));
+    } catch (err: any) {
+      setActionErrors((prev) => ({ ...prev, [id]: err.message ?? 'Reddetme işlemi başarısız oldu.' }));
+    }
   };
 
   const statusColors: Record<string, string> = {
@@ -69,6 +98,7 @@ export default function ContentPage({ params }: { params: { id: string } }) {
             {generating ? '⏳ Üretiliyor...' : '✨ 3 Fikir Üret'}
           </button>
         </div>
+        <ErrorNote message={generateError} />
       </div>
 
       {/* Ideas List */}
@@ -96,7 +126,7 @@ export default function ContentPage({ params }: { params: { id: string } }) {
               {idea.status === 'pending_approval' && (
                 <div className="approval-actions">
                   <button className="btn btn-success btn-sm" onClick={() => handleApprove(idea.id)}>✓ Onayla</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => api.rejectIdea(idea.id).then(() => setIdeas(ideas.map(i => i.id === idea.id ? { ...i, status: 'rejected' } : i)))}>✕ Reddet</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => handleReject(idea.id)}>✕ Reddet</button>
                 </div>
               )}
               {idea.status === 'approved' && (
@@ -106,6 +136,7 @@ export default function ContentPage({ params }: { params: { id: string } }) {
                   </button>
                 </div>
               )}
+              <ErrorNote message={actionErrors[idea.id] ?? null} />
             </div>
           ))}
         </div>

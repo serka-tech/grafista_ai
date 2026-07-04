@@ -19,6 +19,8 @@ settingsRouter.get('/settings/providers', requireAuth, requirePermission('settin
       claude: 'ANTHROPIC_API_KEY',
       'kie-ai': 'KIE_AI_API_KEY',
       higgsfield: 'HIGGSFIELD_API_KEY',
+      // Offline demo provider — enabled by AI_DEFAULT_PROVIDER=fake, not an API key.
+      fake: 'AI_DEFAULT_PROVIDER',
     }[name] ?? 'UNKNOWN',
   }));
 

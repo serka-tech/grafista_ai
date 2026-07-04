@@ -3,13 +3,16 @@ import { requireAuth, requirePermission } from '../auth/middleware.js';
 
 export const outputsRouter: Router = Router();
 
-// GET /api/outputs — list generated outputs (placeholder for MVP)
+// GET /api/outputs — cross-client aggregate listing (still a stub; same response
+// shape as before, only the copy changed). Real generated outputs DO exist since
+// Phase 2 Step 7 — they just live under their layout plans, not here.
 outputsRouter.get('/outputs', requireAuth, (_req: Request, res: Response) => {
-  // In MVP, no real outputs are generated
   res.json({
     data: [],
     total: 0,
-    message: 'No outputs generated yet. Create and approve a design brief to generate outputs.',
+    message:
+      "Generated visuals live under their layout plans — open a design brief's layout plans page in the dashboard, " +
+      'or GET /api/layout-plans/:layoutPlanId/visual-generation. This aggregate endpoint is not implemented yet.',
   });
 });
 

@@ -32,12 +32,17 @@ export async function assertProductionJobReadyForRender(productionJobId: string)
   }
 
   if (!RENDER_READY_STATUSES.has(productionJob.status)) {
+    // `productionJobStatus` rides along so the render CREATE route can echo the
+    // job's current status on its 409 body (additive — the central errorHandler
+    // itself only ever serializes label+message and is deliberately untouched).
     throw Object.assign(
       new Error(
         `Production job ${productionJobId} is not ready for render — its status is ` +
-          `'${productionJob.status}', but only a 'package_ready' or 'approved' job (package already built) can be rendered`
+          `'${productionJob.status}', but only a 'package_ready' or 'approved' job (package already built) can be rendered. ` +
+          `Build the production package (POST /api/generated-outputs/:id/production-jobs) and wait for status ` +
+          `'package_ready' or 'approved' before requesting a render.`
       ),
-      { status: 409 }
+      { status: 409, productionJobStatus: productionJob.status }
     );
   }
 

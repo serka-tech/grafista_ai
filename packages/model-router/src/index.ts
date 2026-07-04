@@ -15,3 +15,4 @@ export { GeminiAdapter } from './providers/gemini.js';
 export { ClaudeAdapter } from './providers/claude.js';
 export { KieAIAdapter } from './providers/kie-ai.js';
 export { HiggsFieldAdapter } from './providers/higgsfield.js';
+export { FakeAIAdapter } from './providers/fake.js';

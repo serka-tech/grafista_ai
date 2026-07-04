@@ -39,7 +39,8 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     redirectToLoginOn401(res.status);
     const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(error.error ?? error.message ?? 'API Error', res.status, error.requiredPermission);
+    // Two backend shapes: central error handler → { error: <generic label>, message: <detail> }; route-level → { error: <detail> } (no message) — so prefer `message`.
+    throw new ApiError(error.message ?? error.error ?? 'API Error', res.status, error.requiredPermission);
   }
   return res.json();
 }
@@ -49,7 +50,8 @@ async function uploadAPI<T>(path: string, formData: FormData): Promise<T> {
   if (!res.ok) {
     redirectToLoginOn401(res.status);
     const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(error.error ?? error.message ?? 'Upload failed', res.status, error.requiredPermission);
+    // Same two response shapes as fetchAPI above — prefer the detailed `message` when present.
+    throw new ApiError(error.message ?? error.error ?? 'Upload failed', res.status, error.requiredPermission);
   }
   return res.json();
 }

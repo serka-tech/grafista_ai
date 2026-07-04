@@ -71,7 +71,9 @@ export async function assertGeneratedOutputReadyForProduction(generatedOutputId:
     throw Object.assign(
       new Error(
         `Generated output ${generatedOutputId} is not ready for production — its status is ` +
-          `'${output.status}', but only a 'generated' output (file safely in storage) can be sent to production`
+          `'${output.status}', but only a 'generated' output (file safely in storage) can be sent to production. ` +
+          `Run visual generation (POST /api/layout-plans/:layoutPlanId/visual-generation) until an output reaches ` +
+          `'generated' before sending it to production.`
       ),
       { status: 409 }
     );

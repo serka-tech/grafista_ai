@@ -2,7 +2,7 @@
  * Grafista AI Studio — Model Router Types
  */
 
-export type AIProvider = 'openai' | 'gemini' | 'claude' | 'kie-ai' | 'higgsfield';
+export type AIProvider = 'openai' | 'gemini' | 'claude' | 'kie-ai' | 'higgsfield' | 'fake';
 
 export type AITaskType =
   | 'brand_intake'

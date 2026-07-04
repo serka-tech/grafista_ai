@@ -10,8 +10,12 @@ import { z } from 'zod';
 const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required — set it in .env'),
   ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required — set it in .env'),
-  AI_DEFAULT_PROVIDER: z.enum(['openai', 'claude'], {
-    errorMap: () => ({ message: 'AI_DEFAULT_PROVIDER must be one of: openai, claude' }),
+  // 'fake' enables the offline demo mode: every AI call is answered by the
+  // deterministic FakeAIAdapter (packages/model-router/src/providers/fake.ts)
+  // with no network and no real keys. OPENAI_API_KEY/ANTHROPIC_API_KEY must
+  // still be non-empty at boot (any dummy string) — see .env.example.
+  AI_DEFAULT_PROVIDER: z.enum(['openai', 'claude', 'fake'], {
+    errorMap: () => ({ message: 'AI_DEFAULT_PROVIDER must be one of: openai, claude, fake' }),
   }),
   API_PORT: z.coerce.number({ invalid_type_error: 'API_PORT must be a number' }).int().positive(),
   DATABASE_URL: z

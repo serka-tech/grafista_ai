@@ -223,14 +223,23 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
             const planQaReports = qaReports[plan.id] ?? [];
             const isPlanApproved = plan.status === 'approved';
             // Visual generation gate (Phase 2 Step 7): the backend service also
-            // enforces this (409 when no approved CreativeQA report exists), so
-            // this only drives the early-warning UX in VisualOutputsPanel.
-            const hasApprovedQa = planQaReports.some((r) => r.status === 'approved');
+            // enforces this (409 when no approved/passed CreativeQA report exists),
+            // so this only drives the early-warning UX in VisualOutputsPanel.
+            const hasApprovedQa = planQaReports.some((r) => r.status === 'approved' || r.status === 'passed');
             const runQaTitle = !canRunQa
               ? 'Bu işlemi çalıştırmak için yetkiniz yok'
               : !isPlanApproved
                 ? 'Bu alternatif şu an onaylı değil'
                 : 'Bu yerleşim planı alternatifi için Creative QA çalıştır';
+
+            // Stage-clarity hint (Phase 2 Step 10): derived purely from data this page
+            // already fetches (plan.status + the QA reports loaded above). Rejected
+            // plans are terminal — no next step to suggest.
+            const nextStepHint = !isPlanApproved
+              ? (canActOnThis ? 'Sıradaki adım: Planı onayla' : null)
+              : !hasApprovedQa
+                ? 'Sıradaki adım: Creative QA çalıştır'
+                : 'Sıradaki adım: Görsel üret';
 
             return (
               <div key={plan.id} className="card dna-section">
@@ -245,6 +254,12 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
                   {plan.canvas?.dpi && <span className="tag">{plan.canvas.dpi} dpi</span>}
                   {plan.provider && <span className="tag tag-accent">{plan.provider}{plan.model ? ` / ${plan.model}` : ''}</span>}
                 </div>
+
+                {nextStepHint && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '10px' }}>
+                    {nextStepHint}
+                  </p>
+                )}
 
                 <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '10px' }}>
                   <div><strong>Başlık konumu:</strong> {formatPosition(plan.headlinePlacement?.position)}</div>

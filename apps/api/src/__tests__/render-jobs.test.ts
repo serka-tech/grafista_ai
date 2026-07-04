@@ -477,6 +477,8 @@ describe('3. Render gate — only package_ready/approved production jobs may be 
       expect(pendingRes.status).toBe(409);
       expect(pendingRes.body.message).toMatch(/not ready for render/);
       expect(pendingRes.body.message).toMatch(/'pending'/);
+      // Step 10 polish: the 409 body additionally echoes the job's current status.
+      expect(pendingRes.body.status).toBe('pending');
 
       await pool.query("UPDATE production_jobs SET status = 'packaging' WHERE id = $1", [productionJob.id]);
       const packagingRes = await owner
@@ -484,6 +486,7 @@ describe('3. Render gate — only package_ready/approved production jobs may be 
         .send({ preset: 'instagram_post', exportFormat: 'png' });
       expect(packagingRes.status).toBe(409);
       expect(packagingRes.body.message).toMatch(/'packaging'/);
+      expect(packagingRes.body.status).toBe('packaging');
 
       const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM render_jobs WHERE production_job_id = $1', [
         productionJob.id,
@@ -507,6 +510,8 @@ describe('3. Render gate — only package_ready/approved production jobs may be 
           .send({ preset: 'instagram_post', exportFormat: 'png' });
         expect(res.status).toBe(409);
         expect(res.body.message).toMatch(new RegExp(`'${status}'`));
+        // Step 10 polish: the 409 body additionally echoes the job's current status.
+        expect(res.body.status).toBe(status);
       }
     },
     30_000
