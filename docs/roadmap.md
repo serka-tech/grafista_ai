@@ -1,46 +1,97 @@
 # Grafista AI Studio — Roadmap
 
-## Phase 1: MVP (Current) ✅
+> **Last synced with code reality:** 2026-07-04, commit `dda634f` (Phase 2 Step 10R).
+> If you are an agent picking up work: THIS file reflects what actually exists;
+> when in doubt, trust the test suite (274 tests, `apps/api` + see
+> `docs/mvp-demo-flow.md`) over any older planning language you find elsewhere.
+
+## Production strategy (read this first)
+
+- **Photoshop is NOT the primary production engine.** Earlier phase language
+  ("PSD Generation") is obsolete.
+- The primary production line is **AI-driven design + an automatic
+  render/export pipeline** (HTML/CSS + Playwright — shipped in Phase 2 Steps
+  9A/9B).
+- Photoshop / PSD / Adobe UXP integration is an **optional professional
+  finalization/handoff layer** for later — the production package's template
+  contract is deliberately renderer-agnostic so such a layer can consume it
+  without a format change (`docs/photoshop-automation-plan.md` is the parked
+  plan; nothing from it is implemented, by design).
+- The first MVP targets **social-media and digital creative exports**
+  (Instagram Post/Story, Landscape, Ad Creative — PNG/JPG/PDF).
+- Print/outdoor formats and PSD/Adobe integration are later, optional phases.
+
+## Phase 1: MVP Scaffold ✅ (complete)
 
 - [x] Monorepo scaffold (pnpm workspaces)
-- [x] Shared schemas (Zod — 8 core schemas)
-- [x] Prompt engine (9 templates + builder)
-- [x] Model router (5 providers + fallback routing)
+- [x] Shared schemas (Zod), prompt engine, model router (+ fallback routing)
 - [x] Database schema (PostgreSQL + pgvector migrations)
-- [x] API server (Express, all routes, approval gates)
-- [x] Dashboard (Next.js, 10 pages, dark mode UI)
-- [x] Workers (ingestion, AI router, Photoshop placeholder)
-- [x] Antigravity skills (10 skills)
+- [x] API server (Express, routes, approval gates)
+- [x] Dashboard (Next.js, dark mode UI)
+- [x] Real content generation + local uploads
 - [x] Sample data (Flavora Organic client)
 - [x] Documentation (architecture, workflows, security)
 
-## Phase 2: AI Integration & PSD Generation
+## Phase 2: Real Pipeline — AI Design → Render/Export ✅ (steps 1–10 complete)
 
-- [ ] Connect real OpenAI/Claude/Gemini APIs
-- [ ] Implement vision-based style analysis
-- [ ] Build Design DNA synthesis pipeline
-- [ ] Real content idea generation with brand context
-- [ ] Photoshop UXP plugin development
-- [ ] PSD generation from LayoutPlan
-- [ ] S3-compatible file storage integration
-- [ ] PostgreSQL database connection
-- [ ] File upload with real storage
-- [ ] Preview image generation
+- [x] PostgreSQL persistence (real repositories, migrations 001–020)
+- [x] Auth/RBAC (session auth, roles OWNER/CREATIVE_DIRECTOR/DESIGNER/CONTENT_MANAGER, `resource:action` permissions, route + domain-level double guards)
+- [x] Async route hardening + approval fix
+- [x] S3-compatible storage abstraction + MinIO verification (local/S3, authenticated file routes only)
+- [x] Real DesignDNA vision analysis (OpenAI, per-reference style analysis + synthesis)
+- [x] Layout Generation (2–3 alternatives per approved brief) — `8e2b38e`
+- [x] Creative QA (scored reports, pass/approve gate) — `38498c4`
+- [x] Workflow Engine + Skill Loader (persistent runs, 10 definitions) — `580cf95`
+- [x] Visual Generation (QA-gated, storage-backed) — `16a9778` + file-access hotfix `17cb403`
+- [x] Production Job + Template Contract + Package Builder — `34c03b2`
+- [x] Production Job Review Lifecycle (approve/reject + audit trail) — `ded3afc`
+- [x] Render-ready Production Package / Handoff (manifest v2, renderer-agnostic) — `2ae8b51`
+- [x] Template Render Engine planning (decision: HTML/CSS + Playwright; read-only step, no commit)
+- [x] HTML/CSS + Playwright Template Render Engine MVP (PNG/JPG/PDF, fake adapter for tests) — `6a452d8`
+- [x] Persisted render history + dashboard hydration — `0fb36ff`
+- [x] Render Quality QA + Export Preset Polish (structured warnings w/ severity, preset/format validation) — `bb3437d`
+- [x] MVP Demo Flow Hardening (fake AI provider, `db:seed-demo`, keyless E2E `demo-flow.test.ts`, runbook `docs/mvp-demo-flow.md`) — `f12bdcf` + `6bcf223` + `dda634f`
 
-## Phase 3: Production Features
+Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
+- Photoshop UXP plugin / PSD generation → optional later layer (see strategy above)
+- Gemini/Higgsfield adapters remain placeholders; Kie AI adapter is real but
+  a live-key end-to-end run is still pending (see Step 12 below)
 
-- [ ] NextAuth authentication (role-based)
-- [ ] Multi-user collaboration
-- [ ] Real-time approval notifications
+## Next steps (proposed order after Step 10)
+
+### Phase 2 Step 11 — Release Readiness + Local Deployment Checklist
+- env checklist (required vars, dummy-key demo rules)
+- migration checklist (001–020, pgvector-optional note)
+- fake/real provider mode switch documentation
+- MinIO/S3 configuration check
+- Playwright runtime check (`npx playwright install chromium`)
+- seed/demo runbook consolidation (`docs/mvp-demo-flow.md` is the base)
+- CI/test stability notes (`--maxWorkers=2` invocation, load sensitivity)
+
+### Phase 2 Step 12 — Real Provider Smoke Test
+- run the demo chain once with real keys instead of the fake provider
+  (OpenAI for text/vision; KIE for image generation — key already wired)
+- real visual generation, real render/export
+- dashboard artifact verification with real bytes
+
+### Phase 2 Step 13 — Dashboard Manual Demo Pass
+- walk the 12-step demo runbook by hand on the local dev stack
+- collect UI friction notes
+- produce a small UX polish list (no redesign)
+
+### Phase 3 — Productization
 - [ ] Revision history & version control
-- [ ] A/B content testing suggestions
-- [ ] Campaign calendar & scheduling
 - [ ] Analytics dashboard (approval rates, generation stats)
-- [ ] Cost tracking per client/campaign
-- [ ] Figma plugin integration
-- [ ] Template library (pre-built layouts)
+- [ ] Customer/project cost tracking
+- [ ] Client isolation hardening (move past the global-permission MVP model)
+- [ ] Render queue/worker (async renders; synchronous today by design)
+- [ ] Optional Photoshop/PSD handoff adapter (consumes the existing template contract)
+- [ ] Deployment & monitoring
+- Other earlier Phase-3 candidates (kept as backlog, not committed): real-time
+  approval notifications, A/B content suggestions, campaign calendar, Figma
+  plugin, template library, multi-user collaboration polish
 
-## Phase 4: Scale & Intelligence
+## Phase 4: Scale & Intelligence (unchanged backlog)
 
 - [ ] Vector similarity search (pgvector)
 - [ ] Cross-client style learning
@@ -52,3 +103,24 @@
 - [ ] API for external integrations
 - [ ] White-label deployment
 - [ ] Mobile app (React Native)
+
+## Known technical debt (accepted at MVP level — do not "fix" casually)
+
+- **Cross-client isolation** is limited by the global permission model
+  (single-team assumption; every read/write is permission-gated but not
+  client-scoped). Hardening is a Phase 3 item.
+- **Render history endpoint N+1 query** (one artifact query per render job)
+  — accepted at MVP scale, documented in the route.
+- **Text overflow / safe area QA are heuristics** (average glyph width, AABB
+  intersection) — they surface risk, not typographic ground truth.
+- **Test suite load sensitivity**: 17 files share one embedded Postgres; the
+  deterministic invocation is `cd apps/api && npx vitest run --maxWorkers=2`.
+  A flaked file passing in isolation is the known signature, not a product bug.
+  (Related fix already landed: `dist/` build artifacts are excluded from test
+  collection since `dda634f` — suite totals are real now: 274 unique tests.)
+- **Real-provider live smoke has not been run yet** (fake provider covers the
+  chain; Step 12 closes this).
+- **Dashboard manual demo requires the full local dev stack** (Step 13); the
+  automated twin (`demo-flow.test.ts`) covers the API chain only.
+- **Photoshop/Adobe/PSD integration is deliberately out of scope** — see the
+  strategy section; do not open it as a side effect of another step.

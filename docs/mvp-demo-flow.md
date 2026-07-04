@@ -152,6 +152,7 @@ publishing, multi-tenant isolation.
 
 ## Related docs
 
+- `docs/roadmap.md` — project state, strategy, and what comes after Step 10
 - `docs/architecture.md` — system overview
 - `docs/model-routing.md` — provider matrix and routing rules
 - `docs/photoshop-automation-plan.md` — future optional Photoshop layer (plan only)

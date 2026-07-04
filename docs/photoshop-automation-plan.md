@@ -1,6 +1,16 @@
 # Grafista AI Studio — Photoshop Automation Plan
 
-## Phase 2 Objective
+> **STATUS (2026-07-04, Step 10R): PARKED / OPTIONAL — nothing below is
+> implemented, and none of it is current Phase 2 scope.** The strategy changed
+> during Phase 2: the primary production line is the AI-driven design +
+> automatic render/export pipeline (HTML/CSS + Playwright, shipped in Steps
+> 9A/9B). Photoshop/PSD/UXP is an optional professional finalization/handoff
+> layer for a later phase — the production package's template contract
+> (`rendererCompatibilityHints`, manifest v2) already carries everything this
+> plan would need, so it can be picked up without format changes. See
+> `docs/roadmap.md` ("Production strategy") before acting on anything here.
+
+## Original Phase 2 Objective (superseded — kept for reference)
 
 Connect Grafista AI Studio to Adobe Photoshop via UXP (Unified Extensibility Platform) to automatically generate editable PSD files from LayoutPlan JSON.
 
