@@ -34,6 +34,9 @@
 
 ## Phase 2: Real Pipeline — AI Design → Render/Export ✅ (steps 1–10 complete)
 
+> Phase 2 is now CLOSED (Steps 11–13R below also complete) — closure record:
+> `docs/phase-2-final-state.md`.
+
 - [x] PostgreSQL persistence (real repositories, migrations 001–020)
 - [x] Auth/RBAC (session auth, roles OWNER/CREATIVE_DIRECTOR/DESIGNER/CONTENT_MANAGER, `resource:action` permissions, route + domain-level double guards)
 - [x] Async route hardening + approval fix
@@ -102,6 +105,10 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
   messages); UX polish list (10 items, F1–F10) recorded — no UI changes made
 
 ### Phase 3 — Productization
+
+> Detailed 7-step plan (Phase 3 Step 1–7, with prioritization):
+> `docs/phase-3-productization-roadmap.md`.
+
 - [ ] Revision history & version control
 - [ ] Analytics dashboard (approval rates, generation stats)
 - [ ] Customer/project cost tracking
