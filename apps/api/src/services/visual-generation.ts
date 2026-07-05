@@ -29,6 +29,7 @@ import { assertReadyForVisualProduction } from './production-gate.js';
 import { store } from '../data/store.js';
 import { getStorageProvider } from '../storage/factory.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const modelRouter = new ModelRouter();
 
@@ -137,6 +138,8 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
   if (!client) {
     throw notFound('Client not found');
   }
+  // Phase 3 Step 4 — client isolation hardening.
+  await assertClientAccessible(requestedBy, client.id);
 
   // The gate already guaranteed at least one cleared report exists.
   const qaReports = await store.creativeQaReports.listByLayoutPlan(layoutPlanId);

@@ -5,6 +5,7 @@ import { asyncHandler } from '../middleware/async-handler.js';
 import { renderProductionJob } from '../services/render-engine.js';
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 import {
   ExportFormatEnum,
   RenderPresetEnum,
@@ -161,6 +162,8 @@ renderJobsRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const productionJob = await store.productionJobs.getById(req.params.id);
     if (!productionJob) return res.status(404).json({ error: 'Production job not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, productionJob.clientId);
 
     const jobs = await store.renderJobs.listByProductionJob(productionJob.id);
 
@@ -190,6 +193,8 @@ renderJobsRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const job = await store.renderJobs.getById(req.params.id);
     if (!job) return res.status(404).json({ error: 'Render job not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, job.clientId);
     res.json({ data: job });
   })
 );
@@ -214,6 +219,8 @@ renderJobsRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const job = await store.renderJobs.getById(req.params.id);
     if (!job) return res.status(404).json({ error: 'Render job not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, job.clientId);
 
     const artifacts = await store.exportArtifacts.listByRenderJob(job.id);
     const data = artifacts.map((artifact) => ({
@@ -236,6 +243,8 @@ renderJobsRouter.get(
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const artifact = await store.exportArtifacts.getById(req.params.id);
     if (!artifact) return res.status(404).json({ error: 'Export artifact not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, artifact.clientId);
 
     const filename = `export-${artifact.id}.${artifact.format}`;
 

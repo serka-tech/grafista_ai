@@ -58,6 +58,7 @@ import { assertGeneratedOutputReadyForProduction } from './production-gate.js';
 import { store } from '../data/store.js';
 import { getStorageProvider } from '../storage/factory.js';
 import { usersRepo } from '../db/repositories/users.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const MANIFEST_VERSION = 2;
 const CONTRACT_VERSION = 1;
@@ -414,6 +415,8 @@ export async function buildProductionPackage(generatedOutputId: string, requeste
     // The gate just saw it; this only fires on a concurrent delete.
     throw notFound('Generated output not found');
   }
+  // Phase 3 Step 4 — client isolation hardening.
+  await assertClientAccessible(requestedBy, output.clientId);
 
   // IDEMPOTENCY — one active job per generated output: re-sending the same
   // visual to production returns the existing job instead of duplicating work.

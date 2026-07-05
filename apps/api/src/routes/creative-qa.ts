@@ -3,6 +3,7 @@ import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { runCreativeQa } from '../services/creative-qa.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 // Mounted at /api — layout-plan/design-brief-scoped run/list routes plus standalone
 // /creative-qa/:id routes (mirrors how layoutPlansRouter/clientLayoutPlansRouter from
@@ -57,6 +58,8 @@ creativeQaRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const report = await store.creativeQaReports.getById(req.params.id);
     if (!report) return res.status(404).json({ error: 'Creative QA report not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, report.clientId);
     res.json({ data: report });
   })
 );
@@ -69,6 +72,8 @@ creativeQaRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.creativeQaReports.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Creative QA report not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const approved = await store.creativeQaReports.approve(existing.id, req.user!.id);
     if (!approved) {
@@ -87,6 +92,8 @@ creativeQaRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.creativeQaReports.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Creative QA report not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
     const rejected = await store.creativeQaReports.reject(existing.id, req.user!.id, notes);

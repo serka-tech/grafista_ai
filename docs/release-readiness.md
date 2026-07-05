@@ -244,9 +244,15 @@ pnpm run build
 
 ## 9. Known technical debt
 
-- **Cross-client isolation** is limited by the global permission model
-  (single-team assumption — every read/write is permission-gated but not
-  client-scoped). Phase 3 item.
+- ~~**Cross-client isolation** is limited by the global permission model~~ —
+  resolved by Phase 3 Step 4: `client_members` (opt-in user↔client scoping,
+  additive/non-breaking — zero rows = unrestricted, unchanged for every
+  existing user) + `assertClientAccessible()` guard at both route and
+  service layer for production jobs, render jobs/export artifacts, visual
+  outputs, layout plans, creative QA, and design DNA. Remaining gap: no
+  self-service UI to manage `client_members` rows yet — restricting a real
+  user today requires a direct DB/migration insert. No tenant/organization/
+  billing model was introduced; this is scoping only.
 - **Render history endpoint N+1 query** (one artifact query per render job)
   — accepted at MVP scale.
 - **Text overflow / safe area QA are heuristics** (average glyph width, AABB

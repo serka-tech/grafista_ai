@@ -3,6 +3,7 @@ import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { runLayoutGeneration } from '../services/layout-generation.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 // Mounted at /api — design-brief-scoped generate/list routes plus standalone
 // /layout-plans/:id routes (mirrors how design-briefs.ts / approvals.ts are mounted).
@@ -43,6 +44,8 @@ layoutPlansRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const layoutPlan = await store.layoutPlans.getById(req.params.id);
     if (!layoutPlan) return res.status(404).json({ error: 'Layout plan not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, layoutPlan.clientId);
     res.json({ data: layoutPlan });
   })
 );
@@ -55,6 +58,8 @@ layoutPlansRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.layoutPlans.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Layout plan not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const approved = await store.layoutPlans.approve(existing.id, req.user!.id);
     if (!approved) {
@@ -73,6 +78,8 @@ layoutPlansRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.layoutPlans.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Layout plan not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
     const rejected = await store.layoutPlans.reject(existing.id, notes);

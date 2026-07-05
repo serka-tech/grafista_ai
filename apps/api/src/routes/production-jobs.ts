@@ -6,6 +6,7 @@ import { buildProductionPackage } from '../services/production-package-builder.j
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
 import type { ProductionJob } from '@grafista/schemas';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const PACKAGE_DOWNLOAD_FILENAME = 'production-package.json';
 
@@ -105,6 +106,8 @@ productionJobsRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const job = await store.productionJobs.getById(req.params.id);
     if (!job) return res.status(404).json({ error: 'Production job not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, job.clientId);
     // Step 8C — packageSummary is purely additive alongside the existing
     // `data: job` shape; nothing already reading `data` is affected.
     res.json({ data: job, packageSummary: buildPackageSummary(job) });
@@ -128,6 +131,8 @@ productionJobsRouter.get(
     if (!job || !job.packageStorageKey || !job.packageStorageProvider || !job.packageStorageBucket) {
       return res.status(404).json({ error: 'Package not found' });
     }
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, job.clientId);
 
     const access = await getFileAccess(
       {
@@ -164,6 +169,8 @@ productionJobsRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.productionJobs.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Production job not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const approved = await store.productionJobs.approve(existing.id, req.user!.id);
     if (!approved) {
@@ -192,6 +199,8 @@ productionJobsRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.productionJobs.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Production job not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
     const rejected = await store.productionJobs.reject(existing.id, req.user!.id, reason);

@@ -5,6 +5,7 @@ import { asyncHandler } from '../middleware/async-handler.js';
 import { runVisualGeneration } from '../services/visual-generation.js';
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 // Mounted at /api — layout-plan-scoped run/list routes plus standalone
 // /visual-outputs/:id routes (mirrors how creativeQaRouter from
@@ -52,6 +53,8 @@ visualGenerationRouter.get(
   asyncHandler(async (req: Request, res: Response) => {
     const output = await store.generatedOutputs.getById(req.params.id);
     if (!output) return res.status(404).json({ error: 'Generated output not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, output.clientId);
     res.json({ data: output });
   })
 );
@@ -68,6 +71,10 @@ visualGenerationRouter.get(
   requirePermission('visual_generation:read'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const output = await store.generatedOutputs.getById(req.params.id);
+    // Phase 3 Step 4 — client isolation hardening: checked as soon as we know
+    // the record exists, before the combined not-found/status check below
+    // reveals anything further about it.
+    if (output) await assertClientAccessible(req.user!.id, output.clientId);
     if (
       !output ||
       output.status !== 'generated' ||
@@ -110,6 +117,8 @@ visualGenerationRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.generatedOutputs.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Generated output not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const approved = await store.generatedOutputs.approve(existing.id, req.user!.id);
     if (!approved) {
@@ -133,6 +142,8 @@ visualGenerationRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const existing = await store.generatedOutputs.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Generated output not found' });
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, existing.clientId);
 
     const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
     const rejected = await store.generatedOutputs.reject(existing.id, notes);

@@ -18,6 +18,7 @@ import { env } from '../config/env.js';
 import { getObjectBuffer } from '../storage/file-service.js';
 import type { DesignReference } from '../db/repositories/design-references.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const modelRouter = new ModelRouter();
 
@@ -58,6 +59,8 @@ export async function runDesignDnaAnalysis(clientId: string, requestedBy: string
   if (!client) {
     throw Object.assign(new Error('Client not found'), { status: 404 });
   }
+  // Phase 3 Step 4 — client isolation hardening.
+  await assertClientAccessible(requestedBy, client.id);
 
   const allReferences = await store.designReferences.listByClient(clientId);
   const usableReferences = allReferences.filter(isUsable);

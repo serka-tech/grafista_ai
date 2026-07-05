@@ -3,6 +3,7 @@ import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { runDesignDnaAnalysis } from '../services/design-dna-analysis.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 export const designDnaRouter: Router = Router();
 
@@ -15,6 +16,9 @@ designDnaRouter.post(
   requireAuth,
   requirePermission('design_dna:run'),
   asyncHandler(async (req: Request, res: Response) => {
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, req.params.clientId);
+
     const client = await store.clients.getById(req.params.clientId);
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -29,6 +33,9 @@ designDnaRouter.get(
   requireAuth,
   requirePermission('design_dna:read'),
   asyncHandler(async (req: Request, res: Response) => {
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, req.params.clientId);
+
     const dna = await store.designDna.getLatestByClientId(req.params.clientId);
     if (!dna) return res.status(404).json({ error: 'Design DNA not found. Run analysis first.' });
     res.json({ data: dna });
@@ -53,6 +60,9 @@ designDnaRouter.post(
   requireAuth,
   requirePermission('design_dna:approve'),
   asyncHandler(async (req: Request, res: Response) => {
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, req.params.clientId);
+
     const latest = await store.designDna.getLatestByClientId(req.params.clientId);
     if (!latest) return res.status(404).json({ error: 'Design DNA not found. Run analysis first.' });
 
@@ -71,6 +81,9 @@ designDnaRouter.post(
   requireAuth,
   requirePermission('design_dna:revise'),
   asyncHandler(async (req: Request, res: Response) => {
+    // Phase 3 Step 4 — client isolation hardening.
+    await assertClientAccessible(req.user!.id, req.params.clientId);
+
     const latest = await store.designDna.getLatestByClientId(req.params.clientId);
     if (!latest) return res.status(404).json({ error: 'Design DNA not found. Run analysis first.' });
 

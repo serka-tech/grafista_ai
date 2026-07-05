@@ -105,23 +105,38 @@ yeniden değerlendirilir).
 
 ---
 
-## Phase 3 Step 4 — Client Isolation Hardening (size: L)
+## Phase 3 Step 4 — Client Isolation Hardening (size: L) — TAMAMLANDI
 
 **Amaç:** Global permission modelinden (tek-takım varsayımı) client-scoped
 erişime geçiş — SaaS'laşmanın ön koşulu.
 
-**Kapsam:**
-- Client/project ownership kontrolleri: her kaynak (brief, layout, output,
-  job, artifact) ait olduğu client üzerinden yetkilendirilir.
-- Route + servis seviyesi tenant guard: Phase 2'deki çift-katman guard
-  desenine (route + domain) client-scope katmanı eklenir.
-- Artifact erişim izolasyonu: file route'lar yalnız ilgili client'a yetkili
-  kullanıcıya servis eder.
-- Regression testler: cross-client erişim denemelerinin 403/404 döndüğünü
-  kanıtlayan suite.
-- Gerekirse migration planı: kullanıcı-client ilişki tablosu / scope
-  kolonları (migration'lar bu adımın implementation'ında, bu belge sadece
-  plan).
+**Yapılan (additive, opt-in, non-breaking):**
+- Yeni `client_members` tablosu (`021_client_members.sql`): user↔client
+  scoping. Bir kullanıcının HİÇ satırı yoksa unrestricted (bugüne kadarki
+  davranış — hiçbir mevcut/seed kullanıcı için erişim değişmedi); ≥1 satırı
+  varsa yalnız o client'lara erişebilir.
+- `assertClientAccessible(userId, clientId)` guard'ı (`auth/client-access.ts`):
+  route seviyesinde (production-jobs, render-jobs, export-artifacts,
+  visual-outputs, layout-plans, creative-qa, design-dna) VE servis
+  seviyesinde (production-package-builder, render-engine, visual-generation,
+  layout-generation, creative-qa, design-dna-analysis) — Phase 2'nin
+  çift-katman guard deseniyle uyumlu.
+- Cross-client 404 (403 değil): "yok" ile "senin değil" ayrımı dışarıdan
+  görünmez — mevcut 404 konvansiyonunu (`<Resource> not found`) genişletir,
+  bilgi sızdırmaz.
+- Regression suite: `client-isolation.test.ts` — iki bağımsız client pipeline
+  + iki client-scoped OWNER kullanıcı; production job / render job / export
+  artifact / visual output / layout plan / creative QA / design DNA
+  route'larının tamamında cross-client 404 + unrestricted kullanıcı için
+  davranış korunumu kanıtlanır.
+
+**Kapsam dışı bırakılan (kayıtlı teknik borç):** Büyük tenant/organization
+modeli, billing, self-servis client-membership yönetim UI'ı (bugün
+`clientMembersRepo.addMember` yalnız kod/migration seviyesinde çağrılabilir —
+dashboard'da bir "kullanıcıyı client'a ekle" ekranı yok). Production'da
+gerçek kısıtlama istenen bir kullanıcı için bu satırların elle/migration ile
+eklenmesi gerekir; aksi halde (varsayılan) her kullanıcı bugünkü gibi
+unrestricted kalır.
 
 **Çözdüğü borç:** "Cross-client isolation yok" (Adım 8B'den beri kayıtlı,
 [`docs/release-readiness.md`](./release-readiness.md) §9).

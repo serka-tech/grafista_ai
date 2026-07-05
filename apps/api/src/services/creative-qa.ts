@@ -26,6 +26,7 @@ import {
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const modelRouter = new ModelRouter();
 
@@ -161,6 +162,8 @@ export async function runCreativeQa(layoutPlanId: string, requestedBy: string): 
   if (!client) {
     throw notFound('Client not found');
   }
+  // Phase 3 Step 4 — client isolation hardening.
+  await assertClientAccessible(requestedBy, client.id);
 
   const latestDna = await store.designDna.getLatestByClientId(client.id);
   if (!latestDna) {

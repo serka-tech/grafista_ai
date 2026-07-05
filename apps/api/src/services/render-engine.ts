@@ -45,6 +45,7 @@ import { getStorageProvider } from '../storage/factory.js';
 import { getObjectBuffer } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
 import { usersRepo } from '../db/repositories/users.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const CREATE_PERMISSION = 'render_jobs:create';
 
@@ -163,6 +164,8 @@ export async function renderProductionJob(
   // buildProductionPackage().
   await assertRequesterMayCreateRenderJobs(requestedBy);
   const productionJob = await assertProductionJobReadyForRender(productionJobId);
+  // Phase 3 Step 4 — client isolation hardening.
+  await assertClientAccessible(requestedBy, productionJob.clientId);
 
   console.log(
     `[render-engine] render requested — productionJobId=${productionJobId} preset=${requestedFormat.preset} ` +

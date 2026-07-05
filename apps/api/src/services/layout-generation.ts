@@ -17,6 +17,7 @@ import { LayoutPlanContentSchema, type LayoutPlan, type LayoutPlanContent } from
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 
 const modelRouter = new ModelRouter();
 
@@ -97,6 +98,8 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
   if (!client) {
     throw Object.assign(new Error('Client not found'), { status: 404 });
   }
+  // Phase 3 Step 4 — client isolation hardening.
+  await assertClientAccessible(requestedBy, client.id);
 
   const latestDna = await store.designDna.getLatestByClientId(client.id);
   const approvedDna = latestDna && latestDna.status === 'approved' ? latestDna : undefined;
