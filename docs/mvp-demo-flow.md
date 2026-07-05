@@ -64,7 +64,7 @@ not configured, visual generation fails with a clear
 ```bash
 pnpm --filter @grafista/api run db:migrate     # 001..020
 pnpm --filter @grafista/api run db:seed        # roles/permissions + Flavora sample client
-ADMIN_EMAIL=demo@local ADMIN_PASSWORD='Demo1234!' \
+ADMIN_EMAIL=demo@grafista.local ADMIN_PASSWORD='Demo1234!' \
   pnpm --filter @grafista/api run db:seed-admin   # your login user (OWNER)
 pnpm --filter @grafista/api run db:seed-demo   # 2 design references WITH real image bytes
 ```

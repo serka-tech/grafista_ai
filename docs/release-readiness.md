@@ -86,7 +86,7 @@ pnpm --filter @grafista/api run db:migrate
 pnpm --filter @grafista/api run db:seed
 
 # 5. create your login user (OWNER)
-ADMIN_EMAIL=demo@local ADMIN_PASSWORD='Demo1234!' \
+ADMIN_EMAIL=demo@grafista.local ADMIN_PASSWORD='Demo1234!' \
   pnpm --filter @grafista/api run db:seed-admin
 
 # 6. seed demo design references WITH real image bytes (needed for DesignDNA)

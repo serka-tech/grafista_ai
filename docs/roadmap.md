@@ -85,10 +85,21 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
 - S3 smoke skipped (`STORAGE_PROVIDER=local`, S3 env empty); full
   dashboard-driven real chain belongs to Step 13's manual pass
 
-### Phase 2 Step 13 — Dashboard Manual Demo Pass
-- walk the 12-step demo runbook by hand on the local dev stack
-- collect UI friction notes
-- produce a small UX polish list (no redesign)
+### Phase 2 Step 13 — Dashboard Manual Demo Pass ✅ (complete, 1 open hotfix)
+- full 12-step walkthrough on the real local stack (real Postgres, real
+  OpenAI, real Playwright renderer) driven through a real browser —
+  results, failure-path checks and the UI friction list live in
+  `docs/manual-demo-pass.md`
+- 11/12 steps PASS; step 8 (real KIE image) FAILS on a real bug:
+  `visual-generation.ts` sends the aspect ratio as raw pixels
+  (`1080:1080`) where Kie expects normalized (`1:1`) → **open Step 13
+  hotfix** (GCD-normalize + regression test), steps 9–12 were validated
+  with a synthetic generated output meanwhile
+- runbook credential fix: seed-admin examples now use `demo@grafista.local`
+  (`demo@local` passes seeding but fails the login endpoint's email
+  validation)
+- all five failure/gate paths verified live (409/403/401 with actionable
+  messages); UX polish list (10 items, F1–F10) recorded — no UI changes made
 
 ### Phase 3 — Productization
 - [ ] Revision history & version control
