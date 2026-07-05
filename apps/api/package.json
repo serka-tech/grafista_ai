@@ -14,7 +14,8 @@
     "db:seed": "tsx src/scripts/db-seed.ts",
     "db:seed-admin": "tsx src/scripts/db-seed-admin.ts",
     "db:seed-demo": "tsx src/scripts/db-seed-demo.ts",
-    "db:setup": "pnpm run db:migrate && pnpm run db:seed"
+    "db:setup": "pnpm run db:migrate && pnpm run db:seed",
+    "smoke:providers": "tsx src/scripts/smoke-real-providers.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1078.0",

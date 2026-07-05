@@ -137,7 +137,37 @@ STORAGE_PROVIDER=local
 
 ## 6. Real provider smoke mode
 
-Not yet run end-to-end (tracked as Phase 2 Step 12). To attempt it:
+Live smoke run on 2026-07-05 (Phase 2 Step 12) via the dedicated probe:
+
+```bash
+# from the repo root, with apps/api/.env loaded into the shell
+# (the scripts read process.env directly — nothing auto-loads .env):
+set -a; source apps/api/.env; set +a
+pnpm --filter @grafista/api run smoke:providers            # all sections
+pnpm --filter @grafista/api run smoke:providers openai kie # subset
+```
+
+Sections and last results (no secrets are ever printed):
+
+| Section | Result | Notes |
+|---|---|---|
+| `storage` | PASS | local put/get/delete roundtrip under `apps/api/uploads/` |
+| `openai` | PASS | one tiny chat completion, `gpt-4o`, auth + routing verified |
+| `kie` | PASS* | 1 image via `nano-banana-2`, bytes downloaded + stored + verified |
+| `render` | PASS | real Playwright/Chromium PNG render, non-empty buffer |
+
+*KIE caveat: the adapter's built-in default model `gpt-image-1.5` is no
+longer accepted by Kie (HTTP 422 "model not supported"). **Set
+`KIE_AI_IMAGE_MODEL=nano-banana-2`** (or another currently supported Kie
+model) in `apps/api/.env` — without it, real image generation fails at
+createTask. Changing the hard-coded default in
+`packages/model-router/src/providers/kie-ai.ts` is a separate hotfix,
+deliberately not done inside Step 12.
+
+S3 smoke was skipped: `STORAGE_PROVIDER=local` and S3 env vars are empty —
+local mode is the verified path.
+
+Env combinations for running real provider mode:
 
 - **OpenAI key present:** set `AI_DEFAULT_PROVIDER=openai` + real
   `OPENAI_API_KEY`. Text tasks (DesignDNA analysis/synthesis, content
@@ -204,8 +234,14 @@ pnpm run build
 - **Text overflow / safe area QA are heuristics** (average glyph width, AABB
   intersection) — they surface risk, not typographic ground truth.
 - **Test suite load sensitivity** — see §8 above.
-- **Real-provider live smoke has not been run yet** — fake provider covers
-  the full chain; this is explicitly Phase 2 Step 12, not yet done.
+- **KIE default image model is stale** — `kie-ai.ts` hard-codes
+  `gpt-image-1.5`, which Kie now rejects (422). Works only with
+  `KIE_AI_IMAGE_MODEL` set (verified with `nano-banana-2`). Needs a small
+  hotfix to update the default; see §6.
+- **Real-provider smoke covers connectivity, not the full user chain** —
+  §6's probe verified auth/generation/storage/render per provider; the full
+  dashboard-driven chain with real providers is part of Step 13's manual
+  pass.
 - **Dashboard manual demo requires the full local dev stack** (real
   Postgres + `pnpm run dev:api` + `pnpm run dev:dashboard`) — the automated
   twin (`demo-flow.test.ts`) covers the API chain only. This is Phase 2 Step

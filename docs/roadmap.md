@@ -69,11 +69,21 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
 - `.env.example` reviewed — already covered every env var actually read by
   the code, no additions needed
 
-### Phase 2 Step 12 — Real Provider Smoke Test
-- run the demo chain once with real keys instead of the fake provider
-  (OpenAI for text/vision; KIE for image generation — key already wired)
-- real visual generation, real render/export
-- dashboard artifact verification with real bytes
+### Phase 2 Step 12 — Real Provider Smoke Test ✅ (complete)
+- dedicated probe added: `pnpm --filter @grafista/api run smoke:providers`
+  (`apps/api/src/scripts/smoke-real-providers.ts` — sections: storage,
+  openai, kie, render; prints PASS/SKIP/FAIL, never logs secrets)
+- live results (2026-07-05): storage PASS, OpenAI PASS (real `gpt-4o`
+  completion), KIE PASS (1 real image via `nano-banana-2`, bytes stored +
+  verified), Playwright render PASS (real Chromium PNG)
+- migrations 019–020 applied to the manual DB; API boots against it,
+  `/api/health` 200, protected routes return structured 401
+- finding: Kie rejects the adapter's built-in default model
+  `gpt-image-1.5` (422) — `KIE_AI_IMAGE_MODEL=nano-banana-2` env override
+  required; default-model hotfix left as a separate follow-up
+  (see `docs/release-readiness.md` §6/§9)
+- S3 smoke skipped (`STORAGE_PROVIDER=local`, S3 env empty); full
+  dashboard-driven real chain belongs to Step 13's manual pass
 
 ### Phase 2 Step 13 — Dashboard Manual Demo Pass
 - walk the 12-step demo runbook by hand on the local dev stack
