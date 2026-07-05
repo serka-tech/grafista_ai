@@ -13,6 +13,63 @@ function ErrorNote({ message }: { message: string | null }) {
   );
 }
 
+// F2 fix — these badges/tags used to show the raw English enum value
+// (ContentIdeaSchema.status / PlatformEnum / ContentFormatEnum in
+// packages/schemas/src/content.ts) in an otherwise Turkish UI. Backend
+// values are untouched; these are UI-only display label maps. Any value not
+// in the map (e.g. a future enum addition) falls back to a prettified
+// version of the raw value, never a raw untouched string.
+const IDEA_STATUS_LABELS: Record<string, { class: string; label: string }> = {
+  draft: { class: 'badge-neutral', label: 'Taslak' },
+  pending_approval: { class: 'badge-warning', label: 'Onay Bekliyor' },
+  approved: { class: 'badge-success', label: 'Onaylandı' },
+  rejected: { class: 'badge-danger', label: 'Reddedildi' },
+  revision_requested: { class: 'badge-info', label: 'Revizyon İstendi' },
+};
+
+const PLATFORM_LABELS: Record<string, string> = {
+  instagram_post: 'Instagram Gönderisi',
+  instagram_story: 'Instagram Hikayesi',
+  instagram_reel: 'Instagram Reels',
+  instagram_carousel: 'Instagram Karusel',
+  facebook_post: 'Facebook Gönderisi',
+  facebook_story: 'Facebook Hikayesi',
+  twitter_post: 'Twitter/X Gönderisi',
+  linkedin_post: 'LinkedIn Gönderisi',
+  tiktok: 'TikTok',
+  youtube_thumbnail: 'YouTube Kapak Görseli',
+  youtube_short: 'YouTube Shorts',
+  pinterest: 'Pinterest',
+  email_header: 'E-posta Başlığı',
+  web_banner: 'Web Banner',
+  other: 'Diğer',
+};
+
+const FORMAT_LABELS: Record<string, string> = {
+  single_image: 'Tekli Görsel',
+  carousel: 'Karusel',
+  video: 'Video',
+  story: 'Hikaye',
+  reel: 'Reels',
+  animated: 'Animasyonlu',
+  text_only: 'Sadece Metin',
+  infographic: 'İnfografik',
+  other: 'Diğer',
+};
+
+/** Title-cases a raw snake_case enum value as a last-resort fallback — never
+ * shows an untouched raw string like the pre-F2 badges did. */
+function prettify(raw: string): string {
+  return raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// F3 fix: legacy 'draft' rows (older seed data, predating this UI — new ideas
+// are always created as 'pending_approval', see content-ideation.ts) used to
+// show NO action buttons at all — a dead end. Approve/reject have no
+// from-state gate on the backend (routes/approvals.ts), so treating 'draft'
+// the same as 'pending_approval' here is a safe, backward-compatible fix.
+const ACTIONABLE_IDEA_STATUSES = ['draft', 'pending_approval'];
+
 export default function ContentPage({ params }: { params: { id: string } }) {
   const [ideas, setIdeas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,10 +114,6 @@ export default function ContentPage({ params }: { params: { id: string } }) {
     } catch (err: any) {
       setActionErrors((prev) => ({ ...prev, [id]: err.message ?? 'Reddetme işlemi başarısız oldu.' }));
     }
-  };
-
-  const statusColors: Record<string, string> = {
-    draft: 'badge-neutral', pending_approval: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger', revision_requested: 'badge-info',
   };
 
   return (
@@ -108,37 +161,53 @@ export default function ContentPage({ params }: { params: { id: string } }) {
         <div className="empty-state"><div className="icon">💡</div><p>Henüz içerik fikri yok. Yukarıdan üretin!</p></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {ideas.map((idea) => (
-            <div key={idea.id} className={`card approval-card ${idea.status === 'approved' ? 'approved' : idea.status === 'pending_approval' ? 'pending' : ''}`}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div className="card-title">{idea.title}</div>
-                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>{idea.description}</p>
+          {ideas.map((idea) => {
+            const statusInfo = IDEA_STATUS_LABELS[idea.status] ?? { class: 'badge-neutral', label: prettify(idea.status) };
+            const isActionable = ACTIONABLE_IDEA_STATUSES.includes(idea.status);
+            return (
+              <div key={idea.id} className={`card approval-card ${idea.status === 'approved' ? 'approved' : isActionable ? 'pending' : ''}`}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="card-title">{idea.title}</div>
+                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>{idea.description}</p>
+                  </div>
+                  <span className={`badge ${statusInfo.class}`}>{statusInfo.label}</span>
                 </div>
-                <span className={`badge ${statusColors[idea.status] ?? 'badge-neutral'}`}>{idea.status.replace(/_/g, ' ')}</span>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                  <span className="tag">{PLATFORM_LABELS[idea.platform] ?? prettify(idea.platform)}</span>
+                  {idea.format && <span className="tag">{FORMAT_LABELS[idea.format] ?? prettify(idea.format)}</span>}
+                  {idea.campaignName && <span className="tag tag-accent">{idea.campaignName}</span>}
+                </div>
+                {idea.hook && <p style={{ color: 'var(--color-text-accent)', fontSize: '0.9rem', marginTop: '12px', fontStyle: 'italic' }}>&quot;{idea.hook}&quot;</p>}
+                {/* F3 fix: 'draft' used to be a dead end with no action at
+                    all — approve/reject have no from-state gate on the
+                    backend, so a legacy draft row can be actioned exactly
+                    like a pending_approval one. */}
+                {isActionable && (
+                  <>
+                    <div className="approval-actions">
+                      <button className="btn btn-success btn-sm" onClick={() => handleApprove(idea.id)}>✓ Onayla</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleReject(idea.id)}>✕ Reddet</button>
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '6px' }}>
+                      Sıradaki adım: Fikri onayla
+                    </p>
+                  </>
+                )}
+                {idea.status === 'approved' && (
+                  <div style={{ marginTop: '12px' }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => api.createDesignBrief(idea.id).then(res => window.location.href = `/briefs/${res.data.id}`)}>
+                      📋 Tasarım Brifi Oluştur
+                    </button>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '6px' }}>
+                      Sıradaki adım: Tasarım brifi oluştur
+                    </p>
+                  </div>
+                )}
+                <ErrorNote message={actionErrors[idea.id] ?? null} />
               </div>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-                <span className="tag">{idea.platform.replace(/_/g, ' ')}</span>
-                <span className="tag">{idea.format?.replace(/_/g, ' ')}</span>
-                {idea.campaignName && <span className="tag tag-accent">{idea.campaignName}</span>}
-              </div>
-              {idea.hook && <p style={{ color: 'var(--color-text-accent)', fontSize: '0.9rem', marginTop: '12px', fontStyle: 'italic' }}>&quot;{idea.hook}&quot;</p>}
-              {idea.status === 'pending_approval' && (
-                <div className="approval-actions">
-                  <button className="btn btn-success btn-sm" onClick={() => handleApprove(idea.id)}>✓ Onayla</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => handleReject(idea.id)}>✕ Reddet</button>
-                </div>
-              )}
-              {idea.status === 'approved' && (
-                <div style={{ marginTop: '12px' }}>
-                  <button className="btn btn-primary btn-sm" onClick={() => api.createDesignBrief(idea.id).then(res => window.location.href = `/briefs/${res.data.id}`)}>
-                    📋 Tasarım Brifi Oluştur
-                  </button>
-                </div>
-              )}
-              <ErrorNote message={actionErrors[idea.id] ?? null} />
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

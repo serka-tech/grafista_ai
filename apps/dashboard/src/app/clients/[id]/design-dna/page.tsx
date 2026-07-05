@@ -131,6 +131,14 @@ export default function DesignDNAPage({ params }: { params: { id: string } }) {
         ? 'Yeni bir Tasarım DNA versiyonu oluşturur'
         : 'Tasarım DNA analizini başlat';
 
+  // F4 fix: the approve button used to stay enabled (and read as "not
+  // approved yet") even on an already-approved DNA version — approve() is
+  // idempotent server-side, but that's not obvious from the UI alone.
+  const dnaAlreadyApproved = dna?.status === 'approved';
+  const approveTitle = dnaAlreadyApproved
+    ? 'Bu Tasarım DNA versiyonu zaten onaylandı'
+    : 'Bu Tasarım DNA versiyonunu onayla';
+
   return (
     <div className="animate-fade-in">
       <div className="page-header">
@@ -168,11 +176,11 @@ export default function DesignDNAPage({ params }: { params: { id: string } }) {
           {canApprove && dna && (
             <button
               className="btn btn-success"
-              disabled={approving}
+              disabled={approving || dnaAlreadyApproved}
               onClick={handleApprove}
-              title="Bu Tasarım DNA versiyonunu onayla"
+              title={approveTitle}
             >
-              {approving ? '⏳ Onaylanıyor...' : '✓ Onayla'}
+              {approving ? '⏳ Onaylanıyor...' : dnaAlreadyApproved ? '✓ Onaylandı' : '✓ Onayla'}
             </button>
           )}
 

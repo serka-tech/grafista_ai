@@ -21,8 +21,8 @@ import { api, resolveApiFileUrl } from '@/lib/api';
 
 const OUTPUT_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
-  generated: { class: 'badge-success', label: 'Üretildi' },
-  failed: { class: 'badge-danger', label: 'Başarısız' },
+  generated: { class: 'badge-success', label: 'Görsel Üretildi' },
+  failed: { class: 'badge-danger', label: 'Hata Oluştu' },
 };
 
 const APPROVAL_STATUS_BADGES: Record<string, { class: string; label: string }> = {
@@ -35,10 +35,10 @@ const APPROVAL_STATUS_BADGES: Record<string, { class: string; label: string }> =
 // Production job lifecycle (Phase 2 Step 8A) — single linear status axis,
 // see packages/schemas/src/production-job.ts.
 const PRODUCTION_JOB_STATUS_BADGES: Record<string, { class: string; label: string }> = {
-  pending: { class: 'badge-warning', label: 'Sırada' },
+  pending: { class: 'badge-warning', label: 'Bekliyor' },
   packaging: { class: 'badge-info', label: 'Paketleniyor' },
-  package_ready: { class: 'badge-success', label: 'Paket Hazır' },
-  failed: { class: 'badge-danger', label: 'Başarısız' },
+  package_ready: { class: 'badge-success', label: 'Üretim Paketi Hazır' },
+  failed: { class: 'badge-danger', label: 'Hata Oluştu' },
   cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
   approved: { class: 'badge-success', label: 'Onaylandı' },
   rejected: { class: 'badge-danger', label: 'Reddedildi' },
@@ -49,10 +49,10 @@ const PRODUCTION_JOB_STATUS_BADGES: Record<string, { class: string; label: strin
 // downstream, already-approved-upstream artifact request, not another human
 // approval gate.
 const RENDER_JOB_STATUS_BADGES: Record<string, { class: string; label: string }> = {
-  pending: { class: 'badge-warning', label: 'Sırada' },
-  rendering: { class: 'badge-info', label: 'Render Ediliyor' },
-  rendered: { class: 'badge-success', label: 'Hazır' },
-  failed: { class: 'badge-danger', label: 'Başarısız' },
+  pending: { class: 'badge-warning', label: 'Bekliyor' },
+  rendering: { class: 'badge-info', label: 'Render Alınıyor' },
+  rendered: { class: 'badge-success', label: 'Render Hazır' },
+  failed: { class: 'badge-danger', label: 'Hata Oluştu' },
   cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
 };
 
@@ -82,11 +82,15 @@ const RENDER_WARNING_CODE_LABELS: Record<string, string> = {
   anchor_ignored: 'Hizalama noktası yok sayıldı',
   // Phase 3 Step 1 — generated visual composition (F8 fix).
   selected_visual_loaded: 'Üretilen görsel yerleştirildi',
-  selected_visual_missing: 'Manifest içinde seçili görsel yok',
+  selected_visual_missing: 'Seçili görsel bulunamadı',
   selected_visual_storage_missing: 'Görsel depodan okunamadı',
   selected_visual_aspect_mismatch: 'Görsel/slot oran farkı',
-  image_slot_missing: 'Layout planında görsel slotu yok',
-  image_slot_unmapped: 'Görsel slotu eşleşmedi',
+  image_slot_missing: 'Görsel alanı bulunamadı',
+  image_slot_unmapped: 'Bazı görsel alanları eşleşmedi',
+  // Reserved for a future backend warning code — kept mapped defensively so a
+  // Turkish label is ready the day it starts being emitted (harmless unused
+  // key otherwise, no backend contract implied).
+  placeholder_used: 'Placeholder kullanıldı',
 };
 
 // Render presets/formats (Phase 2 Step 9A) — mirrors RenderPresetEnum /
@@ -111,6 +115,45 @@ function ErrorNote({ message }: { message: string | null }) {
     <p style={{ color: 'var(--color-danger, #f87171)', fontSize: '0.85rem', marginTop: '8px' }}>
       ⚠ {message}
     </p>
+  );
+}
+
+// Kapsam 5 — small human-readable file size for artifact download links
+// (e.g. "1.3 MB"). Returns null for anything not a positive finite number so
+// callers can just skip rendering the size instead of showing "NaN undefined".
+function formatFileSize(bytes: unknown): string | null {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// F6 fix: raw AI-provider/renderer error text (English, technical — e.g.
+// "All 3 attempts failed: Kie AI createTask failed (code=500)...") is
+// intimidating in an otherwise Turkish demo UI. This shows a short Turkish
+// summary up front and tucks the full raw text behind a native <details>
+// disclosure (no modal/dialog framework, just semantic HTML) so ops can still
+// get the exact string when they need it.
+function friendlyErrorSummary(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('schema validation')) return 'AI yanıtı beklenen formatta değildi.';
+  if (lower.includes('provider') || lower.includes('createtask') || lower.includes('attempts failed') || lower.includes('ai response'))
+    return 'AI sağlayıcısında bir hata oluştu.';
+  return 'Bir hata oluştu.';
+}
+
+function ProviderErrorNote({ message }: { message: string | null | undefined }) {
+  if (!message) return null;
+  return (
+    <div style={{ marginTop: '8px' }}>
+      <p style={{ color: 'var(--color-danger, #f87171)', fontSize: '0.85rem', marginBottom: '4px' }}>
+        ⚠ {friendlyErrorSummary(message)}
+      </p>
+      <details style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+        <summary style={{ cursor: 'pointer' }}>Teknik detayı göster</summary>
+        <p style={{ marginTop: '4px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message}</p>
+      </details>
+    </div>
   );
 }
 
@@ -451,7 +494,13 @@ function OutputCard({
 
       <div className="tag-list" style={{ marginBottom: '10px' }}>
         {output.provider && (
-          <span className="tag tag-accent">{output.provider}{output.aiModel ? ` / ${output.aiModel}` : ''}</span>
+          // F5 fix: 'none' is the model router's literal placeholder for "no
+          // model was actually reached" on a total-failure response — never a
+          // real model name, so it must never be displayed as one.
+          <span className="tag tag-accent">
+            {output.provider}
+            {output.aiModel && output.aiModel !== 'none' ? ` / ${output.aiModel}` : ''}
+          </span>
         )}
         {output.dimensions?.width && output.dimensions?.height && (
           <span className="tag">{output.dimensions.width} × {output.dimensions.height}</span>
@@ -460,11 +509,7 @@ function OutputCard({
         {output.createdAt && <span className="tag">{new Date(output.createdAt).toLocaleString()}</span>}
       </div>
 
-      {output.status === 'failed' && output.errorMessage && (
-        <p style={{ color: 'var(--color-danger, #f87171)', fontSize: '0.8rem', marginBottom: '10px' }}>
-          Hata: {output.errorMessage}
-        </p>
-      )}
+      {output.status === 'failed' && <ProviderErrorNote message={output.errorMessage} />}
 
       {output.approvalStatus === 'approved' && output.approvedAt && (
         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '10px' }}>
@@ -636,6 +681,22 @@ function OutputCard({
         </p>
       )}
 
+      {/* Kapsam 2/3 — the render/export section below is entirely absent
+          (never a hidden-but-disabled button) for pending/packaging/failed/
+          cancelled/rejected production jobs. Without this line that silence
+          reads as "the render feature disappeared"; this explains WHY. */}
+      {productionJob && !['package_ready', 'approved'].includes(productionJob.status) && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+          {productionJob.status === 'pending' || productionJob.status === 'packaging'
+            ? 'Render/export almak için üretim paketinin hazır olması gerekir.'
+            : productionJob.status === 'rejected'
+              ? 'Bu üretim işi reddedildiği için render/export alınamaz.'
+              : productionJob.status === 'cancelled'
+                ? 'Bu üretim işi iptal edildiği için render/export alınamaz.'
+                : 'Bu üretim işi hata ile sonuçlandığı için render/export alınamaz.'}
+        </p>
+      )}
+
       {/* Render / export (Phase 2 Step 9A) — only makes sense once a package
           actually exists, same reasoning as why approve/reject only appear
           once productionJob itself exists; this whole feature section is
@@ -712,11 +773,25 @@ function OutputCard({
                   href={resolveApiFileUrl(artifact.fileUrl ?? `/api/export-artifacts/${artifact.id}/file`)}
                   target="_blank"
                   rel="noreferrer"
+                  title={`${artifact.width ?? '?'}×${artifact.height ?? '?'}${formatFileSize(artifact.sizeBytes) ? ` · ${formatFileSize(artifact.sizeBytes)}` : ''}`}
                 >
                   ⬇ {artifact.format.toUpperCase()} İndir
+                  {formatFileSize(artifact.sizeBytes) && (
+                    <span style={{ opacity: 0.75 }}> ({formatFileSize(artifact.sizeBytes)})</span>
+                  )}
                 </a>
               ))}
           </div>
+
+          {/* Kapsam 5 — before the very first render request, tell the user
+              where the download will appear instead of leaving a silent gap.
+              Once a renderJob exists its own status badge/error note already
+              covers 'rendering'/'failed', so this hint steps aside then. */}
+          {!renderJob && (
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '6px' }}>
+              Render tamamlanınca indirme linki burada görünecek.
+            </p>
+          )}
 
           {/* Latest render's quality warnings (Phase 2 Step 9B) — compact,
               non-collapsing list (renderWarnings is short, ≤ ~6 entries in
@@ -737,25 +812,20 @@ function OutputCard({
                     key={`${warning.code}-${warning.layerId ?? index}`}
                     style={{
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       gap: '6px',
                       flexWrap: 'wrap',
                       fontSize: '0.75rem',
                       color: 'var(--color-text-muted)',
-                      marginBottom: '4px',
+                      marginBottom: '6px',
                     }}
                   >
                     <span className={`badge ${severityBadge.class}`}>{severityBadge.label}</span>
-                    <span>{codeLabel}</span>
-                    <span
-                      title={warning.message}
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        maxWidth: '360px',
-                      }}
-                    >
+                    <span style={{ flexShrink: 0 }}>{codeLabel}</span>
+                    {/* F7 fix: no more mid-sentence truncation — the full
+                        message now wraps onto multiple lines instead of
+                        being clipped with an ellipsis. */}
+                    <span style={{ overflowWrap: 'anywhere', whiteSpace: 'normal', flex: '1 1 260px' }}>
                       {warning.message}
                     </span>
                   </div>
@@ -811,12 +881,17 @@ function OutputCard({
                           href={resolveApiFileUrl(artifact.fileUrl ?? `/api/export-artifacts/${artifact.id}/file`)}
                           target="_blank"
                           rel="noreferrer"
+                          title={formatFileSize(artifact.sizeBytes) ?? undefined}
                         >
-                          ⬇ {artifact.format.toUpperCase()}
+                          ⬇ {artifact.format.toUpperCase()} İndir
                         </a>
                       ))}
                       {job.status === 'failed' && job.errorMessage && (
-                        <span style={{ color: 'var(--color-danger, #f87171)' }}>⚠ {job.errorMessage}</span>
+                        // F6 fix: short Turkish summary in the compact history
+                        // line, full raw text still available on hover.
+                        <span style={{ color: 'var(--color-danger, #f87171)' }} title={job.errorMessage}>
+                          ⚠ {friendlyErrorSummary(job.errorMessage)}
+                        </span>
                       )}
                     </div>
                   );
@@ -827,7 +902,7 @@ function OutputCard({
       )}
 
       {renderJob?.status === 'failed' && (
-        <ErrorNote message={renderJob.errorMessage ?? 'Render işlemi başarısız oldu.'} />
+        <ProviderErrorNote message={renderJob.errorMessage ?? 'Render işlemi başarısız oldu.'} />
       )}
       <ErrorNote message={state.renderError} />
 
@@ -838,7 +913,7 @@ function OutputCard({
       )}
 
       {productionJob?.status === 'failed' && (
-        <ErrorNote message={productionJob.errorMessage ?? 'Üretim paketleme başarısız oldu.'} />
+        <ProviderErrorNote message={productionJob.errorMessage ?? 'Üretim paketleme başarısız oldu.'} />
       )}
       <ErrorNote message={state.sendToProductionError} />
       <ErrorNote message={state.approveError} />

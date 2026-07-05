@@ -147,13 +147,25 @@ export function CreativeQAReportCard({
         <span className={`badge ${report.passed ? 'badge-success' : 'badge-danger'}`}>
           {report.passed ? '✓ Geçti' : '✕ Kaldı'} ({Math.round(report.overallScore)}/100, eşik {report.passThreshold})
         </span>
-        {report.provider && <span className="tag tag-accent">{report.provider}{report.model ? ` / ${report.model}` : ''}</span>}
+        {report.provider && <span className="tag tag-accent">{report.provider}{report.model && report.model !== 'none' ? ` / ${report.model}` : ''}</span>}
         {typeof report.canProceedToProduction === 'boolean' && (
           <span className={`badge ${report.canProceedToProduction ? 'badge-success' : 'badge-warning'}`}>
             {report.canProceedToProduction ? 'Üretime hazır' : 'Üretime hazır değil'}
           </span>
         )}
       </div>
+
+      {/* F1 fix: "Geçti" (score ≥ eşik) and "Üretime hazır değil" can appear
+          side by side and read as contradictory — they answer two different
+          questions (did it clear the pass threshold? vs. is a human reviewer
+          still recommending fixes first?). This line makes that distinction
+          explicit instead of leaving it as two unexplained badges. */}
+      {report.passed && report.canProceedToProduction === false && (
+        <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '10px' }}>
+          QA eşiği geçildi, ancak üretime göndermeden önce aşağıdaki önerilen düzeltmelerin
+          gözden geçirilmesi tavsiye ediliyor.
+        </p>
+      )}
 
       {/* ─── Required minimum: overall + DNA/readability/mobile/logo/contrast scores ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '4px 16px', marginBottom: '10px' }}>
