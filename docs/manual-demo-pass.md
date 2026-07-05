@@ -119,10 +119,14 @@ states; 409/400 messages name the exact status and the route that fixes it;
 1. **Step 13 hotfix A:** ~~aspect-ratio normalization~~ **DONE** — implemented
    at the provider boundary (`packages/model-router/src/aspect-ratio.ts` +
    `KieAIAdapter`) with regression tests; real KIE smoke with raw
-   `1080:1080` passes. Remaining KIE note: the stale hard-coded default
-   image model (`gpt-image-1.5`) is still a separate hotfix — real runs
-   need `KIE_AI_IMAGE_MODEL` set (verified with `nano-banana-2`).
-2. **Step 13 hotfix B (optional, small):** email format validation in
+   `1080:1080` passes. The remaining KIE note (stale hard-coded default
+   image model `gpt-image-1.5`) was closed by **Step 13 hotfix B**: the
+   built-in default is now `nano-banana-2` (`KIE_DEFAULT_IMAGE_MODEL` in
+   `packages/model-router/src/providers/kie-ai.ts`), so real runs no
+   longer require the `KIE_AI_IMAGE_MODEL` override (it remains an
+   optional override). Regression tests:
+   `apps/api/src/__tests__/kie-default-model.test.ts`.
+2. **Step 13 hotfix C (optional, small):** email format validation in
    `db:seed-admin`; Turkish provider-error summary (F6); render warning text
    wrap (F7).
 3. **Phase 3 candidate:** composite generated visuals into render image

@@ -22,12 +22,21 @@ import { normalizeAspectRatio } from '../aspect-ratio.js';
  *   KIE_AI_API_KEY            — bearer token (required)
  *   KIE_AI_BASE_URL           — e.g. https://api.kie.ai (required; a trailing
  *                               /api/v1 is tolerated and normalized)
- *   KIE_AI_IMAGE_MODEL        — default image model id (optional)
+ *   KIE_AI_IMAGE_MODEL        — image model id override (optional; defaults to
+ *                               KIE_DEFAULT_IMAGE_MODEL below)
  *   KIE_AI_TIMEOUT_MS         — overall createTask+poll budget (optional)
  *   KIE_AI_POLL_INTERVAL_MS   — polling interval (optional)
  */
 
-const DEFAULT_IMAGE_MODEL = 'gpt-image-1.5';
+/**
+ * Built-in fallback image model, used only when neither request.model nor the
+ * KIE_AI_IMAGE_MODEL env var is set. Phase 2 Step 13 hotfix B: the previous
+ * default (gpt-image-1.5) is no longer accepted by Kie (HTTP 422 "model not
+ * supported"), which broke real image generation on any environment that
+ * forgot the env override. Single source of truth — do not duplicate this
+ * string elsewhere; import KIE_DEFAULT_IMAGE_MODEL instead.
+ */
+export const KIE_DEFAULT_IMAGE_MODEL = 'nano-banana-2';
 /** Per-HTTP-call timeout — one createTask or one recordInfo round-trip. */
 const HTTP_TIMEOUT_MS = 30_000;
 /** Overall budget for createTask + polling. Kie docs: images typically take ~30-60s. */
@@ -111,7 +120,7 @@ export class KieAIAdapter implements ProviderAdapter {
     return {
       success: false,
       provider: 'kie-ai',
-      model: request.model ?? process.env.KIE_AI_IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL,
+      model: request.model ?? process.env.KIE_AI_IMAGE_MODEL ?? KIE_DEFAULT_IMAGE_MODEL,
       content: '',
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       latencyMs: Date.now() - start,
@@ -133,7 +142,7 @@ export class KieAIAdapter implements ProviderAdapter {
       );
     }
 
-    const model = request.model ?? process.env.KIE_AI_IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL;
+    const model = request.model ?? process.env.KIE_AI_IMAGE_MODEL ?? KIE_DEFAULT_IMAGE_MODEL;
     const headers = {
       Authorization: `Bearer ${this.apiKey}`,
       'Content-Type': 'application/json',

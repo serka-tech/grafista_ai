@@ -156,13 +156,14 @@ Sections and last results (no secrets are ever printed):
 | `kie` | PASS* | 1 image via `nano-banana-2`, bytes downloaded + stored + verified. Re-verified after Step 13 hotfix A: the smoke now deliberately sends raw `1080:1080`, which the adapter normalizes to `1:1` (aspect-ratio normalization, see below) |
 | `render` | PASS | real Playwright/Chromium PNG render, non-empty buffer |
 
-*KIE caveat: the adapter's built-in default model `gpt-image-1.5` is no
-longer accepted by Kie (HTTP 422 "model not supported"). **Set
-`KIE_AI_IMAGE_MODEL=nano-banana-2`** (or another currently supported Kie
-model) in `apps/api/.env` — without it, real image generation fails at
-createTask. Changing the hard-coded default in
-`packages/model-router/src/providers/kie-ai.ts` is a separate hotfix,
-deliberately not done inside Step 12.
+*KIE caveat — resolved by Step 13 hotfix B: at Step 12 time the adapter's
+built-in default model was `gpt-image-1.5`, which Kie no longer accepts
+(HTTP 422 "model not supported"), so real runs needed a manual
+`KIE_AI_IMAGE_MODEL=nano-banana-2` override in `apps/api/.env`. The
+built-in default is now `nano-banana-2` (`KIE_DEFAULT_IMAGE_MODEL` in
+`packages/model-router/src/providers/kie-ai.ts`), so fresh environments
+work without the override; `KIE_AI_IMAGE_MODEL` remains an optional
+override with unchanged precedence.
 
 **Step 13 hotfix A (applied):** KIE aspect-ratio normalization. The adapter
 now normalizes any `metadata.aspectRatio` (raw pixel pairs like `1080:1080`,
@@ -172,6 +173,14 @@ unusable input degrades to omitting `aspect_ratio` instead of crashing.
 Fixes manual-demo-pass blocker B2 (real image generation 500'd for every
 standard preset). Covered by `apps/api/src/__tests__/kie-aspect-ratio.test.ts`;
 real KIE smoke with raw `1080:1080` passes.
+
+**Step 13 hotfix B (applied):** KIE default image model updated. The
+adapter's built-in fallback is now `nano-banana-2` (exported as
+`KIE_DEFAULT_IMAGE_MODEL`, single source of truth), replacing the
+Kie-rejected `gpt-image-1.5`. Resolution order is unchanged:
+`request.model` > `KIE_AI_IMAGE_MODEL` env > built-in default. Covered by
+`apps/api/src/__tests__/kie-default-model.test.ts` (mocked fetch, no real
+network).
 
 S3 smoke was skipped: `STORAGE_PROVIDER=local` and S3 env vars are empty —
 local mode is the verified path.
@@ -243,10 +252,9 @@ pnpm run build
 - **Text overflow / safe area QA are heuristics** (average glyph width, AABB
   intersection) — they surface risk, not typographic ground truth.
 - **Test suite load sensitivity** — see §8 above.
-- **KIE default image model is stale** — `kie-ai.ts` hard-codes
-  `gpt-image-1.5`, which Kie now rejects (422). Works only with
-  `KIE_AI_IMAGE_MODEL` set (verified with `nano-banana-2`). Needs a small
-  hotfix to update the default; see §6.
+- ~~**KIE default image model is stale**~~ — resolved by Step 13 hotfix B:
+  the built-in default is now `nano-banana-2` (`KIE_DEFAULT_IMAGE_MODEL`),
+  `KIE_AI_IMAGE_MODEL` stays an optional override; see §6.
 - **Real-provider smoke covers connectivity, not the full user chain** —
   §6's probe verified auth/generation/storage/render per provider; the full
   dashboard-driven chain with real providers is part of Step 13's manual
