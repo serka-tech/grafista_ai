@@ -1,4 +1,5 @@
 import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
+import { normalizeAspectRatio } from '../aspect-ratio.js';
 
 /**
  * KIE AI Provider Adapter (Phase 2 Step 7 — real implementation)
@@ -142,8 +143,32 @@ export class KieAIAdapter implements ProviderAdapter {
       // Kie AI image models take one flat text prompt — fold system + user together,
       // the same information the chat-based providers receive as two messages.
       const prompt = [request.systemPrompt, request.userPrompt].filter(Boolean).join('\n\n');
-      const aspectRatio =
+
+      // Phase 2 Step 13 hotfix A: callers may pass raw pixel ratios ("1080:1080");
+      // Kie only accepts normalized ratios ("1:1") and 500s otherwise. Normalize at
+      // the provider boundary so every caller (service, workflow engine, smoke) is
+      // covered. Unusable input degrades to omitting aspect_ratio — never a crash.
+      // These logs carry only ratio strings, never secrets.
+      const rawAspectRatio =
         typeof request.metadata?.aspectRatio === 'string' ? request.metadata.aspectRatio : undefined;
+      let aspectRatio: string | undefined;
+      if (rawAspectRatio !== undefined) {
+        const normalized = normalizeAspectRatio(rawAspectRatio);
+        if (!normalized.ok) {
+          console.warn(
+            `[kie-ai] unusable aspect ratio — omitting aspect_ratio from request ` +
+              `(originalAspectRatio=${normalized.original} reason=${normalized.reason})`
+          );
+        } else {
+          aspectRatio = normalized.ratio;
+          if (normalized.ratio !== rawAspectRatio) {
+            console.warn(
+              `[kie-ai] aspect ratio normalized — originalAspectRatio=${normalized.original} ` +
+                `normalizedAspectRatio=${normalized.ratio} snappedToNearestSupported=${normalized.snapped}`
+            );
+          }
+        }
+      }
 
       const created = await fetchJson<KieCreateTaskResponse>(`${this.apiRoot()}/jobs/createTask`, {
         method: 'POST',

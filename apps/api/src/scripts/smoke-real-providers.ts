@@ -89,7 +89,10 @@ async function smokeKie(): Promise<void> {
     systemPrompt: '',
     userPrompt: 'A plain solid light blue square, flat color, no details. Connectivity test image.',
     outputFormat: 'json',
-    metadata: { aspectRatio: '1:1' },
+    // Raw pixel ratio on purpose: the exact input that broke the manual demo pass
+    // (blocker B2). The adapter must normalize this to '1:1' before hitting Kie —
+    // this smoke proves the Step 13 hotfix A normalization live.
+    metadata: { aspectRatio: '1080:1080' },
   });
   if (!response.success) {
     record('kie', 'FAIL', `provider error: ${response.error ?? 'unknown'}`);

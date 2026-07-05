@@ -96,7 +96,16 @@ states; 409/400 messages name the exact status and the route that fixes it;
   documented credentials could never log in. Both docs now use
   `demo@grafista.local`. A follow-up hotfix could add the same email format
   check to `db:seed-admin` itself.
-- **B2 (src, NOT fixed — needs a separate Step 13 hotfix):**
+- **B2 (RESOLVED by Step 13 hotfix A — commit after `a609f61`):**
+  `normalizeAspectRatio` (gcd reduction + nearest-supported snapping,
+  `packages/model-router/src/aspect-ratio.ts`) is now applied inside
+  `KieAIAdapter` before `createTask`, so raw `1080:1080` goes out as `1:1`
+  (with an `originalAspectRatio`/`normalizedAspectRatio` trace log, no
+  secrets). Regression tests: `apps/api/src/__tests__/kie-aspect-ratio.test.ts`
+  (18 tests). Real KIE smoke re-run with the raw `1080:1080` input:
+  **PASS** (`nano-banana-2`, 1 image generated, bytes downloaded + stored +
+  verified). Original finding kept below for the record.
+- **B2 (original finding, src, as observed during the pass):**
   `apps/api/src/services/visual-generation.ts:212` sends
   `aspectRatio: "${width}:${height}"` (e.g. `1080:1080`); Kie AI rejects
   non-normalized ratios with HTTP 500, so **every real image generation
@@ -107,9 +116,12 @@ states; 409/400 messages name the exact status and the route that fixes it;
 
 ## Next actions (proposed)
 
-1. **Step 13 hotfix A:** aspect-ratio normalization in
-   `visual-generation.ts` (+ regression test), then re-run steps 8–12 live
-   with a real KIE image.
+1. **Step 13 hotfix A:** ~~aspect-ratio normalization~~ **DONE** — implemented
+   at the provider boundary (`packages/model-router/src/aspect-ratio.ts` +
+   `KieAIAdapter`) with regression tests; real KIE smoke with raw
+   `1080:1080` passes. Remaining KIE note: the stale hard-coded default
+   image model (`gpt-image-1.5`) is still a separate hotfix — real runs
+   need `KIE_AI_IMAGE_MODEL` set (verified with `nano-banana-2`).
 2. **Step 13 hotfix B (optional, small):** email format validation in
    `db:seed-admin`; Turkish provider-error summary (F6); render warning text
    wrap (F7).

@@ -153,7 +153,7 @@ Sections and last results (no secrets are ever printed):
 |---|---|---|
 | `storage` | PASS | local put/get/delete roundtrip under `apps/api/uploads/` |
 | `openai` | PASS | one tiny chat completion, `gpt-4o`, auth + routing verified |
-| `kie` | PASS* | 1 image via `nano-banana-2`, bytes downloaded + stored + verified |
+| `kie` | PASS* | 1 image via `nano-banana-2`, bytes downloaded + stored + verified. Re-verified after Step 13 hotfix A: the smoke now deliberately sends raw `1080:1080`, which the adapter normalizes to `1:1` (aspect-ratio normalization, see below) |
 | `render` | PASS | real Playwright/Chromium PNG render, non-empty buffer |
 
 *KIE caveat: the adapter's built-in default model `gpt-image-1.5` is no
@@ -163,6 +163,15 @@ model) in `apps/api/.env` — without it, real image generation fails at
 createTask. Changing the hard-coded default in
 `packages/model-router/src/providers/kie-ai.ts` is a separate hotfix,
 deliberately not done inside Step 12.
+
+**Step 13 hotfix A (applied):** KIE aspect-ratio normalization. The adapter
+now normalizes any `metadata.aspectRatio` (raw pixel pairs like `1080:1080`,
+`WxH` strings, unreduced ratios) to a Kie-supported ratio via gcd reduction +
+nearest-supported snapping (`packages/model-router/src/aspect-ratio.ts`);
+unusable input degrades to omitting `aspect_ratio` instead of crashing.
+Fixes manual-demo-pass blocker B2 (real image generation 500'd for every
+standard preset). Covered by `apps/api/src/__tests__/kie-aspect-ratio.test.ts`;
+real KIE smoke with raw `1080:1080` passes.
 
 S3 smoke was skipped: `STORAGE_PROVIDER=local` and S3 env vars are empty —
 local mode is the verified path.
