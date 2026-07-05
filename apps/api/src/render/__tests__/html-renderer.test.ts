@@ -176,3 +176,93 @@ describe('buildRenderHtml', () => {
     );
   });
 });
+
+// Phase 3 Step 1 — generated-visual compositing via the injected imageSources map.
+describe('buildRenderHtml — injected image sources (Phase 3 Step 1)', () => {
+  const DATA_URI = `data:image/png;base64,${Buffer.from('fake-generated-visual-bytes').toString('base64')}`;
+
+  function aiImageLayer(overrides: Partial<Layer> = {}): Layer {
+    return imageLayer({
+      id: 'ai-slot',
+      imageProperties: { sourceType: 'ai_generated', fit: 'cover', opacity: 1, borderRadius: 0 },
+      ...overrides,
+    });
+  }
+
+  it('renders an <img> with the injected data URI for a sourceless ai_generated slot', () => {
+    const { html, warnings } = buildRenderHtml({
+      canvas,
+      layers: [aiImageLayer()],
+      imageSources: { 'ai-slot': DATA_URI },
+    });
+
+    expect(html).toContain(`<img src="${DATA_URI}"`);
+    expect(html).not.toContain('background-color:#e5e7eb');
+    expect(warnings).toEqual([]);
+  });
+
+  it('an injected source takes precedence over the layer sourceUrl', () => {
+    const layer = aiImageLayer({
+      imageProperties: {
+        sourceType: 'ai_generated',
+        sourceUrl: 'https://example.com/old.png',
+        fit: 'cover',
+        opacity: 1,
+        borderRadius: 0,
+      },
+    });
+
+    const { html } = buildRenderHtml({ canvas, layers: [layer], imageSources: { 'ai-slot': DATA_URI } });
+
+    expect(html).toContain(`<img src="${DATA_URI}"`);
+    expect(html).not.toContain('https://example.com/old.png');
+  });
+
+  it('rejects a non-data-URI injected value and keeps the gray placeholder box', () => {
+    const { html } = buildRenderHtml({
+      canvas,
+      layers: [aiImageLayer()],
+      imageSources: { 'ai-slot': 'javascript:alert(1)' },
+    });
+
+    expect(html).not.toContain('javascript:alert(1)');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('background-color:#e5e7eb');
+  });
+
+  it('without an injection, a sourceless slot keeps the exact gray placeholder behavior', () => {
+    const { html } = buildRenderHtml({ canvas, layers: [aiImageLayer()] });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('background-color:#e5e7eb');
+  });
+
+  it.each(['cover', 'contain', 'fill', 'none'] as const)(
+    'emits object-fit:%s on the composited <img>',
+    (fit) => {
+      const layer = aiImageLayer({
+        imageProperties: { sourceType: 'ai_generated', fit, opacity: 1, borderRadius: 0 },
+      });
+      const { html } = buildRenderHtml({ canvas, layers: [layer], imageSources: { 'ai-slot': DATA_URI } });
+      expect(html).toContain(`object-fit:${fit}`);
+      expect(html).toContain('<img');
+    }
+  );
+
+  it('defaults object-fit to cover when a bare injected slot has no imageProperties', () => {
+    const bare = aiImageLayer({ imageProperties: undefined });
+    const { html } = buildRenderHtml({ canvas, layers: [bare], imageSources: { 'ai-slot': DATA_URI } });
+    expect(html).toContain('object-fit:cover');
+  });
+
+  it('preserves borderRadius and layer opacity on the composited <img>', () => {
+    const layer = aiImageLayer({
+      opacity: 0.5,
+      imageProperties: { sourceType: 'ai_generated', fit: 'contain', opacity: 1, borderRadius: 24 },
+    });
+    const { html } = buildRenderHtml({ canvas, layers: [layer], imageSources: { 'ai-slot': DATA_URI } });
+
+    expect(html).toContain('border-radius:24px');
+    expect(html).toContain('opacity:0.5');
+    expect(html).toContain('object-fit:contain');
+  });
+});

@@ -39,7 +39,16 @@ function rectsIntersect(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
-function hasUsableImageSource(layer: Layer): boolean {
+/**
+ * Phase 3 Step 1 — a layer counts as "has a usable source" when EITHER its own
+ * sourceUrl is a valid http(s) URL OR the render engine injected a composited
+ * source for it (`imageSources`, the selected generated visual as a data URI —
+ * see ./visual-composition.ts). Without the second check this heuristic would
+ * keep raising a false-positive missing_image_source for the very slot the
+ * generated visual was just composited into.
+ */
+function hasUsableImageSource(layer: Layer, imageSources?: Record<string, string>): boolean {
+  if (imageSources?.[layer.id]) return true;
   const sourceUrl = layer.imageProperties?.sourceUrl?.trim();
   return !!sourceUrl && HTTP_URL_RE.test(sourceUrl);
 }
@@ -55,8 +64,10 @@ export function assessRenderQuality(input: {
   canvas: { width: number; height: number };
   layers: Layer[];
   safeZones?: SafeZone[];
+  /** Phase 3 Step 1 (additive) — layerId -> injected composited source, same map handed to buildRenderHtml(). */
+  imageSources?: Record<string, string>;
 }): RenderWarning[] {
-  const { layers, safeZones } = input;
+  const { layers, safeZones, imageSources } = input;
   const warnings: RenderWarning[] = [];
 
   const visibleLayers = flattenLayers(layers).filter((layer) => layer.visible !== false);
@@ -129,7 +140,7 @@ export function assessRenderQuality(input: {
     if (layer.type !== 'image' && layer.type !== 'logo') continue;
     const ip = layer.imageProperties;
 
-    if (!hasUsableImageSource(layer)) {
+    if (!hasUsableImageSource(layer, imageSources)) {
       warnings.push({
         code: 'missing_image_source',
         message: `Layer "${layer.name}" has no usable image source URL and will render as a placeholder box`,

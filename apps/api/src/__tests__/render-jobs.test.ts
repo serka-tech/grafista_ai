@@ -353,6 +353,32 @@ async function setCraftedLayoutPlanSnapshot(
   ]);
 }
 
+/**
+ * Phase 3 Step 1 — same direct-SQL idiom: nulls the manifest's
+ * selectedVisual/generatedOutput storage coordinates so a test can exercise
+ * the "visual unreadable -> placeholder + warning, render still succeeds"
+ * degradation path (and so pre-Step-1 warning tests can keep a genuinely
+ * source-less image slot: with a loadable selected visual, a sourceless slot
+ * would now legitimately be composited instead).
+ */
+async function nullOutSelectedVisualStorage(productionJobId: string) {
+  const { rows } = await pool.query('SELECT package_manifest_snapshot FROM production_jobs WHERE id = $1', [
+    productionJobId,
+  ]);
+  expect(rows.length).toBe(1);
+  const manifest = rows[0].package_manifest_snapshot as Record<string, any>;
+  const gutted = { provider: null, bucket: null, key: null };
+  const updatedManifest = {
+    ...manifest,
+    selectedVisual: { ...manifest.selectedVisual, storage: gutted },
+    generatedOutput: { ...manifest.generatedOutput, storage: gutted },
+  };
+  await pool.query('UPDATE production_jobs SET package_manifest_snapshot = $2 WHERE id = $1', [
+    productionJobId,
+    JSON.stringify(updatedManifest),
+  ]);
+}
+
 beforeEach(() => {
   aiControl.mode = 'success';
   rendererControl.failRender = false;
@@ -972,8 +998,13 @@ describe('9. Preset/exportFormat combination guard + render quality warnings + a
             opacity: 1,
             blendMode: 'normal',
             imageProperties: {
-              // No sourceUrl -> missing_image_source.
-              sourceType: 'placeholder',
+              // No sourceUrl -> missing_image_source. Phase 3 Step 1 note:
+              // this only stays a "genuinely missing source" because the
+              // test below ALSO nulls the manifest's selectedVisual storage
+              // (nullOutSelectedVisualStorage) — otherwise the composition
+              // pass would now legitimately fill this sourceless slot with
+              // the package's generated visual.
+              sourceType: 'uploaded',
               fit: 'cover',
               opacity: 1,
               borderRadius: 0,
@@ -1010,6 +1041,9 @@ describe('9. Preset/exportFormat combination guard + render quality warnings + a
       };
 
       await setCraftedLayoutPlanSnapshot(productionJob.id as string, craftedLayoutPlanSnapshot);
+      // Phase 3 Step 1 — keep the sourceless image slot genuinely
+      // source-less (see the fixture comment above).
+      await nullOutSelectedVisualStorage(productionJob.id as string);
 
       const renderRes = await owner
         .post(`/api/production-jobs/${productionJob.id}/render`)
@@ -1103,6 +1137,148 @@ describe('9. Preset/exportFormat combination guard + render quality warnings + a
       // New additive fields (Step 9B).
       expect(artifact.preset).toBe('instagram_post');
       expect(artifact.fileUrl).toBe(`/api/export-artifacts/${artifact.id}/file`);
+    },
+    30_000
+  );
+});
+
+describe('10. Generated-visual compositing (Phase 3 Step 1 — F8)', () => {
+  /** A layout plan snapshot whose primary slot is a full-canvas ai_generated
+   * image layer plus a smaller secondary placeholder slot — the standard
+   * compositing fixture for this describe. All layer fields are explicit
+   * because crafted snapshots bypass zod defaulting. */
+  function compositingLayoutSnapshot() {
+    return {
+      format: 'instagram_post',
+      canvas: { width: 1080, height: 1080, backgroundColor: '#FFFFFF', dpi: 72 },
+      layers: [
+        {
+          id: 'hero-visual',
+          name: 'Hero Visual',
+          type: 'image',
+          position: { x: 0, y: 0, width: 1080, height: 1080, rotation: 0, anchor: 'top-left' },
+          zIndex: 1,
+          visible: true,
+          locked: false,
+          opacity: 1,
+          blendMode: 'normal',
+          imageProperties: { sourceType: 'ai_generated', fit: 'cover', opacity: 1, borderRadius: 0 },
+        },
+        {
+          id: 'secondary-visual',
+          name: 'Secondary Visual',
+          type: 'image',
+          position: { x: 700, y: 700, width: 300, height: 300, rotation: 0, anchor: 'top-left' },
+          zIndex: 2,
+          visible: true,
+          locked: false,
+          opacity: 1,
+          blendMode: 'normal',
+          imageProperties: { sourceType: 'placeholder', fit: 'cover', opacity: 1, borderRadius: 0 },
+        },
+      ],
+      safeZones: [],
+      exportSettings: { formats: ['png'], quality: 90, scaleFactor: 1 },
+    };
+  }
+
+  async function renderAndGetChecksum(owner: ReturnType<typeof request.agent>, productionJobId: string) {
+    const renderRes = await owner
+      .post(`/api/production-jobs/${productionJobId}/render`)
+      .send({ preset: 'instagram_post', exportFormat: 'png' });
+    expect(renderRes.status).toBe(201);
+    const renderJob = renderRes.body.data as Record<string, any>;
+    expect(renderJob.status).toBe('rendered');
+    const { rows } = await pool.query('SELECT checksum FROM export_artifacts WHERE render_job_id = $1', [renderJob.id]);
+    expect(rows.length).toBe(1);
+    return { renderJob, checksum: rows[0].checksum as string };
+  }
+
+  it(
+    'the selected generated visual is composited into the primary ai_generated slot: selected_visual_loaded fires, missing_image_source does NOT (for that slot), the secondary slot is image_slot_unmapped, and the composited bytes change the export deterministically',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Compositing Primary Slot Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+      await setCraftedLayoutPlanSnapshot(productionJob.id as string, compositingLayoutSnapshot());
+
+      const first = await renderAndGetChecksum(owner, productionJob.id as string);
+      const warnings = first.renderJob.renderWarnings as Array<Record<string, any>>;
+
+      // The composited visual is reported, targeting the full-canvas primary slot.
+      const loaded = warnings.find((w) => w.code === 'selected_visual_loaded');
+      expect(loaded).toBeDefined();
+      expect(loaded?.severity).toBe('info');
+      expect(loaded?.layerId).toBe('hero-visual');
+      expect((loaded?.details as Record<string, any>).sizeBytes).toBeGreaterThan(0);
+
+      // The primary slot is NO LONGER a false-positive "missing source"; the
+      // secondary slot legitimately still is (it stays a placeholder), and it
+      // is additionally flagged as unmapped.
+      expect(warnings.find((w) => w.code === 'missing_image_source' && w.layerId === 'hero-visual')).toBeUndefined();
+      expect(warnings.find((w) => w.code === 'missing_image_source' && w.layerId === 'secondary-visual')).toBeDefined();
+      const unmapped = warnings.find((w) => w.code === 'image_slot_unmapped');
+      expect(unmapped).toBeDefined();
+      expect(unmapped?.layerId).toBe('secondary-visual');
+      expect(unmapped?.severity).toBe('warning');
+
+      // Deterministic: an identical second render produces a byte-identical export.
+      const second = await renderAndGetChecksum(owner, productionJob.id as string);
+      expect(second.checksum).toBe(first.checksum);
+
+      // And the visual's bytes really are part of the rendered document: the
+      // SAME layout on a job whose selected visual is unreadable produces a
+      // DIFFERENT export (fake adapter hashes the HTML, so this proves the
+      // data URI reached the markup).
+      const { productionJob: guttedJob } = await createPackageReadyProductionJob('Compositing Diff Baseline Client');
+      await setCraftedLayoutPlanSnapshot(guttedJob.id as string, compositingLayoutSnapshot());
+      await nullOutSelectedVisualStorage(guttedJob.id as string);
+      const gutted = await renderAndGetChecksum(owner, guttedJob.id as string);
+      expect(gutted.checksum).not.toBe(first.checksum);
+    },
+    60_000
+  );
+
+  it(
+    'an unreadable selected visual degrades gracefully: render still succeeds, selected_visual_storage_missing (warning) fires, and the placeholder + missing_image_source behavior is preserved',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Compositing Storage Missing Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+      await setCraftedLayoutPlanSnapshot(productionJob.id as string, compositingLayoutSnapshot());
+      await nullOutSelectedVisualStorage(productionJob.id as string);
+
+      const { renderJob } = await renderAndGetChecksum(owner, productionJob.id as string);
+      const warnings = renderJob.renderWarnings as Array<Record<string, any>>;
+
+      const storageMissing = warnings.find((w) => w.code === 'selected_visual_storage_missing');
+      expect(storageMissing).toBeDefined();
+      expect(storageMissing?.severity).toBe('warning');
+
+      // Nothing was composited -> both slots keep the documented placeholder behavior.
+      expect(warnings.find((w) => w.code === 'selected_visual_loaded')).toBeUndefined();
+      expect(warnings.find((w) => w.code === 'missing_image_source' && w.layerId === 'hero-visual')).toBeDefined();
+      expect(warnings.find((w) => w.code === 'missing_image_source' && w.layerId === 'secondary-visual')).toBeDefined();
+    },
+    30_000
+  );
+
+  it(
+    'a layout with no image slot at all renders fine and reports image_slot_missing (info) — the pipeline default layout (background/text/logo only) is exactly this case',
+    async () => {
+      const { productionJob } = await createPackageReadyProductionJob('Compositing No Image Slot Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      // No crafted snapshot: the mocked pipeline's layout has background +
+      // text + logo layers and NO 'image' layer.
+      const { renderJob } = await renderAndGetChecksum(owner, productionJob.id as string);
+      const warnings = renderJob.renderWarnings as Array<Record<string, any>>;
+
+      const slotMissing = warnings.find((w) => w.code === 'image_slot_missing');
+      expect(slotMissing).toBeDefined();
+      expect(slotMissing?.severity).toBe('info');
+      // selected_visual_loaded means "composited into a slot" — with no slot
+      // to receive it, it must NOT fire (and the render must not fail).
+      expect(warnings.find((w) => w.code === 'selected_visual_loaded')).toBeUndefined();
+      expect(renderJob.status).toBe('rendered');
     },
     30_000
   );

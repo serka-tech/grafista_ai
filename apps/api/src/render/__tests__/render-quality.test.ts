@@ -249,6 +249,37 @@ describe('assessRenderQuality', () => {
       expect(warnings.find((w) => w.code === 'missing_image_source')).toBeUndefined();
     });
 
+    // Phase 3 Step 1 — an injected composited source counts as a usable source.
+    it('does not warn missing_image_source for a sourceless layer that received an injected image source', () => {
+      const layer = imageLayer({ imageProperties: { ...imageLayer().imageProperties!, sourceUrl: undefined } });
+      const warnings = assessRenderQuality({
+        canvas,
+        layers: [layer],
+        safeZones: [],
+        imageSources: { 'image-1': 'data:image/png;base64,QUJD' },
+      });
+      expect(warnings.find((w) => w.code === 'missing_image_source')).toBeUndefined();
+    });
+
+    it('still warns missing_image_source for a sourceless layer that is NOT in the injected map', () => {
+      const injected = imageLayer({
+        id: 'injected-slot',
+        imageProperties: { ...imageLayer().imageProperties!, sourceUrl: undefined },
+      });
+      const orphan = imageLayer({
+        id: 'orphan-slot',
+        imageProperties: { ...imageLayer().imageProperties!, sourceUrl: undefined },
+      });
+      const warnings = assessRenderQuality({
+        canvas,
+        layers: [injected, orphan],
+        safeZones: [],
+        imageSources: { 'injected-slot': 'data:image/png;base64,QUJD' },
+      });
+      expect(warnings.find((w) => w.code === 'missing_image_source' && w.layerId === 'orphan-slot')).toBeDefined();
+      expect(warnings.find((w) => w.code === 'missing_image_source' && w.layerId === 'injected-slot')).toBeUndefined();
+    });
+
     it('warns low_resolution_image_possible only for a large box with a usable url', () => {
       const largeLayer = imageLayer({
         id: 'image-large',

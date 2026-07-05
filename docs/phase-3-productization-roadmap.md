@@ -1,6 +1,7 @@
 # Grafista AI Studio — Phase 3 Productization Roadmap
 
-> **Status: PLANNED — nothing in this document is implemented yet.** Phase 2
+> **Status: IN PROGRESS — Step 1 is DONE (see its status note below); Steps
+> 2–7 remain planned.** Phase 2
 > closed at commit `a8e5949` with a 12/12 real-provider dashboard demo pass;
 > see [`docs/phase-2-final-state.md`](./phase-2-final-state.md) for the
 > closure record. This document numbers Phase 3 work as **Phase 3 Step 1–7**
@@ -18,6 +19,19 @@
 ---
 
 ## Phase 3 Step 1 — Render Composition Polish (size: M)
+
+> **Status: DONE.** `render-engine.ts` artık `manifest.selectedVisual.storage`
+> koordinatlarını storage abstraction üzerinden okuyup görseli base64 data
+> URI olarak layout'un primary image slot'una kompoze ediyor (yeni modül:
+> `apps/api/src/render/visual-composition.ts` — deterministik slot seçimi +
+> `selected_visual_loaded` / `selected_visual_missing` /
+> `selected_visual_storage_missing` / `selected_visual_aspect_mismatch` /
+> `image_slot_missing` / `image_slot_unmapped` structured warning'leri).
+> Kaynak yoksa/okunamıyorsa mevcut placeholder+warning davranışı aynen
+> korunur, compositing hiçbir durumda render'ı fail etmez. Kalan kısıtlar:
+> tek primary slot doldurulur (fazla slot'lar `image_slot_unmapped` ile
+> placeholder kalır), focal-point kırpma yok (`object-fit` ile öngörülebilir
+> kırpma var), Photoshop/PSD rendering bu adımın kapsamı dışında (Step 7).
 
 **Amaç:** Üretilen gerçek görselin nihai render'da gerçekten görünmesini
 sağlamak — bugün render, layout'un image slot'larında gri placeholder basıyor

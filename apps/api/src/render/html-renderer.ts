@@ -30,6 +30,16 @@
  * informational). No warning `code` was renamed: in particular, `invalid_color`
  * (from safeColor()) IS this module's answer to the Step 9B spec's
  * "invalid_color_fallback" requirement — same event, existing code kept.
+ *
+ * Phase 3 Step 1 (F8 — render composition polish, ADDITIVE): buildRenderHtml
+ * now accepts an optional `imageSources` map (layerId -> injected image
+ * source, typically a base64 data URI of the production package's selected
+ * generated visual — see ./visual-composition.ts + render-engine.ts). An
+ * injected source takes precedence over the layer's own sourceUrl and, unlike
+ * sourceUrl, may be a data: URI (it is built server-side from bytes read
+ * through the storage abstraction, never from AI-generated freeform text).
+ * Layers with neither an injected source nor a valid http(s) sourceUrl keep
+ * the exact same gray-placeholder-box behavior as before.
  */
 
 import type { Layer, RenderWarning } from '@grafista/schemas';
@@ -77,6 +87,11 @@ const HSL_COLOR_RE = /^hsla?\([\d\s.,%]+\)$/;
 const FONT_WEIGHT_RE = /^\d{3}$|^(normal|bold|lighter|bolder)$/i;
 
 const HTTP_URL_RE = /^https?:\/\/.+/i;
+
+/** Accepted shape for an INJECTED image source only (see buildRenderHtml's
+ * `imageSources`): a server-built base64 image data URI. Layer-provided
+ * sourceUrl values are still restricted to HTTP_URL_RE. */
+const IMAGE_DATA_URI_RE = /^data:image\/[a-z0-9.+-]+;base64,[a-zA-Z0-9+/=]+$/i;
 
 function escapeHtml(value: string): string {
   return value
@@ -142,7 +157,12 @@ export function safeColor(value: string | undefined, fallback: string): { color:
 }
 
 /** Builds the absolutely-positioned markup for one already-flattened, visible layer. */
-function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: RenderWarning[]): string {
+function buildLayerHtml(
+  layer: Layer,
+  canvas: RenderableCanvas,
+  warnings: RenderWarning[],
+  imageSources?: Record<string, string>
+): string {
   const withLayerId = (warning: RenderWarning): RenderWarning => ({ ...warning, layerId: layer.id });
 
   if (layer.position.anchor !== 'top-left') {
@@ -238,7 +258,6 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
     case 'logo': {
       const ip = layer.imageProperties;
       const styles = [...baseStyles];
-      if (ip?.fit) styles.push(`object-fit:${ip.fit}`);
       if (ip?.borderRadius !== undefined) styles.push(`border-radius:${ip.borderRadius}px`);
 
       if (ip?.filter) {
@@ -251,11 +270,28 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
         );
       }
 
+      // Phase 3 Step 1 — an injected source (the composited generated visual,
+      // see module header) wins over the layer's own sourceUrl. It must be a
+      // base64 image data URI; anything else is ignored (placeholder path
+      // below), never interpolated raw.
+      const injected = imageSources?.[layer.id]?.trim();
       const sourceUrl = ip?.sourceUrl?.trim();
-      if (sourceUrl && HTTP_URL_RE.test(sourceUrl)) {
-        return `<img src="${escapeHtml(sourceUrl)}" alt="" style="${styles.join('; ')};">`;
+      const src =
+        injected && IMAGE_DATA_URI_RE.test(injected)
+          ? injected
+          : sourceUrl && HTTP_URL_RE.test(sourceUrl)
+            ? sourceUrl
+            : undefined;
+
+      if (src) {
+        // object-fit only matters on a real <img>; schema default is 'cover'
+        // (see ImagePropertiesSchema), applied here too when imageProperties
+        // is absent so an injected bare slot still crops predictably.
+        styles.push(`object-fit:${ip?.fit ?? 'cover'}`);
+        return `<img src="${escapeHtml(src)}" alt="" style="${styles.join('; ')};">`;
       }
 
+      if (ip?.fit) styles.push(`object-fit:${ip.fit}`);
       styles.push('background-color:#e5e7eb');
       return `<div style="${styles.join('; ')};"></div>`;
     }
@@ -320,16 +356,25 @@ function buildLayerHtml(layer: Layer, canvas: RenderableCanvas, warnings: Render
  * sorted by `zIndex` ascending and rendered in that order, each as an
  * absolutely-positioned box using the same numeric `zIndex` as its CSS
  * `z-index` (so correctness never depends on DOM order alone).
+ *
+ * `imageSources` (Phase 3 Step 1, optional/additive): layerId -> injected
+ * image source for image/logo layers — see the module header.
  */
-export function buildRenderHtml(input: { canvas: RenderableCanvas; layers: Layer[] }): HtmlRenderResult {
-  const { canvas, layers } = input;
+export function buildRenderHtml(input: {
+  canvas: RenderableCanvas;
+  layers: Layer[];
+  imageSources?: Record<string, string>;
+}): HtmlRenderResult {
+  const { canvas, layers, imageSources } = input;
   const warnings: RenderWarning[] = [];
 
   const visibleLayers = flattenLayers(layers)
     .filter((layer) => layer.visible !== false)
     .sort((a, b) => a.zIndex - b.zIndex);
 
-  const layerMarkup = visibleLayers.map((layer) => buildLayerHtml(layer, canvas, warnings)).join('\n    ');
+  const layerMarkup = visibleLayers
+    .map((layer) => buildLayerHtml(layer, canvas, warnings, imageSources))
+    .join('\n    ');
 
   // Canvas-level fill is a convenience base coat only — a 'background'-type
   // layer (validated separately in buildLayerHtml, with its own warning) is

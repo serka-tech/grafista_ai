@@ -80,6 +80,13 @@ const RENDER_WARNING_CODE_LABELS: Record<string, string> = {
   invalid_font_weight: 'Geçersiz font kalınlığı',
   unsupported_layer_type: 'Desteklenmeyen katman türü',
   anchor_ignored: 'Hizalama noktası yok sayıldı',
+  // Phase 3 Step 1 — generated visual composition (F8 fix).
+  selected_visual_loaded: 'Üretilen görsel yerleştirildi',
+  selected_visual_missing: 'Manifest içinde seçili görsel yok',
+  selected_visual_storage_missing: 'Görsel depodan okunamadı',
+  selected_visual_aspect_mismatch: 'Görsel/slot oran farkı',
+  image_slot_missing: 'Layout planında görsel slotu yok',
+  image_slot_unmapped: 'Görsel slotu eşleşmedi',
 };
 
 // Render presets/formats (Phase 2 Step 9A) — mirrors RenderPresetEnum /

@@ -87,6 +87,24 @@ is still accurate:
   generation working, F8 is now the single most visible gap in the demo —
   unchanged recommendation: Phase 3 item to wire generated outputs into
   image layers.
+  > **RESOLVED — Phase 3 Step 1 (render composition polish):** the render
+  > engine now loads `manifest.selectedVisual.storage` through the storage
+  > abstraction, embeds it as a base64 data URI, and composites it into the
+  > layout's primary image slot (deterministic mapping: any image slot
+  > without a usable http(s) sourceUrl is a candidate — real AI layouts
+  > label sourceless hero slots `uploaded` — ranked `ai_generated` >
+  > `placeholder`/bare > `uploaded`/`stock`, then largest area, lowest
+  > zIndex, smallest id; logos never; a slot with a working sourceUrl is
+  > never overridden).
+  > New structured warnings: `selected_visual_loaded`,
+  > `selected_visual_missing`, `selected_visual_storage_missing`,
+  > `selected_visual_aspect_mismatch`, `image_slot_missing`,
+  > `image_slot_unmapped`. "No/unreadable source → gray placeholder +
+  > warning" behavior is preserved; compositing failures never fail a
+  > render. Remaining limits: only ONE primary slot receives the visual
+  > (extra slots stay placeholders, flagged `image_slot_unmapped`), no
+  > focal-point crop control beyond `object-fit`, and layouts whose only
+  > "visual" layer is a background/shape still render color fills.
 - **F9:** still valid (headline overflows the canvas and is white-on-light
   in the placeholder render, as QA predicted).
 - **F3:** not re-tested in detail (no UI change since the original pass;

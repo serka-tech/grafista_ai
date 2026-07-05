@@ -28,14 +28,22 @@ import {
   type Layer,
   type RenderJob,
   type RenderPreset,
+  type RenderWarning,
   type RequestedFormat,
 } from '@grafista/schemas';
 import { assertProductionJobReadyForRender } from './render-gate.js';
 import { store } from '../data/store.js';
 import { buildRenderHtml } from '../render/html-renderer.js';
 import { assessRenderQuality } from '../render/render-quality.js';
+import {
+  extractSelectedVisual,
+  planVisualComposition,
+  type LoadedVisual,
+} from '../render/visual-composition.js';
 import { getRendererAdapter } from '../render/adapters/factory.js';
 import { getStorageProvider } from '../storage/factory.js';
+import { getObjectBuffer } from '../storage/file-service.js';
+import type { StorageProviderName } from '../storage/types.js';
 import { usersRepo } from '../db/repositories/users.js';
 
 const CREATE_PERMISSION = 'render_jobs:create';
@@ -53,6 +61,90 @@ async function assertRequesterMayCreateRenderJobs(requestedBy: string): Promise<
       new Error(`Forbidden — user is not an active user with the '${CREATE_PERMISSION}' permission`),
       { status: 403 }
     );
+  }
+}
+
+/**
+ * Phase 3 Step 1 (F8) — resolves the production package's selected generated
+ * visual into an embeddable base64 data URI. The manifest's
+ * `selectedVisual.storage` coordinates (Step 8C) are read back through the
+ * storage abstraction (getObjectBuffer — same in-process pattern
+ * design-dna-analysis.ts uses), NEVER via the authenticated fileUrl route or
+ * a raw public storage URL: the Playwright adapter loads the document with
+ * page.setContent() and has no session cookie, so the image must be
+ * self-contained in the HTML.
+ *
+ * This helper NEVER throws — a missing/unreadable visual degrades to a
+ * structured warning and the render proceeds with the existing placeholder
+ * behavior (warnings never fail a render, only adapter/storage-write errors
+ * do).
+ */
+async function loadSelectedVisual(
+  manifestSnapshot: Record<string, unknown> | undefined
+): Promise<{ visual: LoadedVisual | null; warnings: RenderWarning[] }> {
+  const section = extractSelectedVisual(manifestSnapshot);
+  if (!section) {
+    return {
+      visual: null,
+      warnings: [
+        {
+          code: 'selected_visual_missing',
+          message:
+            'Package manifest carries no selectedVisual/generatedOutput section — compositing skipped, image slots keep their placeholders',
+          severity: 'info',
+        },
+      ],
+    };
+  }
+
+  const storage = section.storage;
+  const provider = storage?.provider;
+  const key = storage?.key;
+  if (!key || (provider !== 'local' && provider !== 's3')) {
+    return {
+      visual: null,
+      warnings: [
+        {
+          code: 'selected_visual_storage_missing',
+          message:
+            'Selected visual has no usable storage coordinates in the package manifest — image slots keep their placeholders',
+          severity: 'warning',
+          details: { selectedVisualId: section.id ?? null, provider: provider ?? null },
+        },
+      ],
+    };
+  }
+
+  try {
+    const buffer = await getObjectBuffer({
+      storageProvider: provider as StorageProviderName,
+      storageBucket: storage?.bucket ?? '',
+      storageKey: key,
+    });
+    const mimeType = section.mimeType && section.mimeType.startsWith('image/') ? section.mimeType : 'image/png';
+    return {
+      visual: {
+        dataUri: `data:${mimeType};base64,${buffer.toString('base64')}`,
+        mimeType,
+        sizeBytes: buffer.length,
+        dimensions: section.dimensions ?? null,
+      },
+      warnings: [],
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`[render-engine] selected visual could not be read from storage — degrading to placeholder: ${reason}`);
+    return {
+      visual: null,
+      warnings: [
+        {
+          code: 'selected_visual_storage_missing',
+          message: `Selected visual could not be read from storage (${reason}) — image slots keep their placeholders`,
+          severity: 'warning',
+          details: { selectedVisualId: section.id ?? null, storageKey: key },
+        },
+      ],
+    };
   }
 }
 
@@ -129,14 +221,25 @@ export async function renderProductionJob(
     const safeZones = (productionJob.packageManifestSnapshot?.layoutPlanSnapshot as any)?.safeZones ?? [];
     const canvas = { width, height };
 
-    const { html, warnings: htmlWarnings } = buildRenderHtml({ canvas, layers });
+    // Phase 3 Step 1 (F8) — load the package's selected generated visual from
+    // storage and deterministically map it onto the layout's primary image
+    // slot (see loadSelectedVisual above + render/visual-composition.ts).
+    // Both halves degrade to warnings, never fail the render.
+    const { visual, warnings: visualLoadWarnings } = await loadSelectedVisual(productionJob.packageManifestSnapshot);
+    const compositionPlan = visual
+      ? planVisualComposition({ layers, visual })
+      : { imageSources: {} as Record<string, string>, warnings: [] as RenderWarning[] };
+    const imageSources = compositionPlan.imageSources;
+
+    const { html, warnings: htmlWarnings } = buildRenderHtml({ canvas, layers, imageSources });
     // Step 9B — pre-render heuristic QA pass (see render-quality.ts's module
     // header: heuristics surfacing risk, not typographic ground truth).
-    // Renderer's warnings come first (produced in layer order), the quality
-    // pass appends. Warnings NEVER fail a render — only a real adapter/
+    // Composition warnings come first (they explain what the renderer was
+    // given), then the renderer's warnings (produced in layer order), then
+    // the quality pass. Warnings NEVER fail a render — only a real adapter/
     // storage error does, via the catch block below (unchanged).
-    const qualityWarnings = assessRenderQuality({ canvas, layers, safeZones });
-    const warnings = [...htmlWarnings, ...qualityWarnings];
+    const qualityWarnings = assessRenderQuality({ canvas, layers, safeZones, imageSources });
+    const warnings = [...visualLoadWarnings, ...compositionPlan.warnings, ...htmlWarnings, ...qualityWarnings];
 
     const adapter = getRendererAdapter();
     const { buffer, mimeType } = await adapter.render({
