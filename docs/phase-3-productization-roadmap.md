@@ -143,11 +143,18 @@ unrestricted kalır.
 
 ---
 
-## Phase 3 Step 5 — Render Queue / Worker Planning (size: M, planning-first)
+## Phase 3 Step 5 — Render Queue / Worker Planning (size: M, planning-first) — PLAN TAMAMLANDI
 
 **Amaç:** Bugün bilinçli olarak senkron olan render/AI çağrılarını production
 ölçeğinde async job'lara taşımanın planını yapmak (ilk teslimat plan +
 minimal iskelet; büyük altyapı tek adımda yazılmaz).
+
+Tam plan (karar matrisi, model gap analizi, worker lifecycle, API/dashboard/
+test planı, Step 5A implementation prompt'u dahil):
+[`docs/render-queue-worker-plan.md`](./render-queue-worker-plan.md). Bu adım
+docs-only — hiçbir kod/migration yazılmadı; öneri: Postgres-backed job
+tablosu + in-process polling worker (Redis/BullMQ/Temporal gibi yeni dış
+bağımlılık YOK), ilk kapsam render/export job'ı.
 
 **Kapsam:**
 - Async job queue planı: teknoloji seçimi (Postgres tabanlı kuyruk vs harici
