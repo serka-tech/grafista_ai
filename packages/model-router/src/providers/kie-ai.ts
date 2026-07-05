@@ -79,7 +79,12 @@ async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {
     const response = await fetch(url, { ...init, signal: controller.signal });
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`Kie AI HTTP ${response.status}: ${text.slice(0, 500)}`);
+      // httpStatus is attached structurally (not just embedded in the message)
+      // so complete()'s catch-all can surface it on the AIResponse and the
+      // router's retry policy can classify 429/5xx/4xx without string parsing.
+      throw Object.assign(new Error(`Kie AI HTTP ${response.status}: ${text.slice(0, 500)}`), {
+        httpStatus: response.status,
+      });
     }
     try {
       return JSON.parse(text) as T;
@@ -116,7 +121,13 @@ export class KieAIAdapter implements ProviderAdapter {
     return trimmed.endsWith('/api/v1') ? trimmed : `${trimmed}/api/v1`;
   }
 
-  private failure(request: AIRequest, start: number, error: string, metadata?: Record<string, unknown>): AIResponse {
+  private failure(
+    request: AIRequest,
+    start: number,
+    error: string,
+    metadata?: Record<string, unknown>,
+    httpStatus?: number
+  ): AIResponse {
     return {
       success: false,
       provider: 'kie-ai',
@@ -126,6 +137,7 @@ export class KieAIAdapter implements ProviderAdapter {
       latencyMs: Date.now() - start,
       error,
       ...(metadata ? { metadata } : {}),
+      ...(httpStatus !== undefined ? { httpStatus } : {}),
     };
   }
 
@@ -193,10 +205,17 @@ export class KieAIAdapter implements ProviderAdapter {
 
       const taskId = created.data?.taskId;
       if (created.code !== 200 || !taskId) {
+        // Kie's envelope `code` mirrors HTTP semantics (e.g. 422 "model not
+        // supported", 401 bad key, 500) — pass it through as httpStatus so a
+        // permanent 422 is never pointlessly retried.
+        const envelopeCode =
+          typeof created.code === 'number' && created.code >= 400 && created.code <= 599 ? created.code : undefined;
         return this.failure(
           request,
           start,
-          `Kie AI createTask failed (code=${created.code ?? 'n/a'}): ${created.msg ?? created.message ?? 'no taskId returned'}`
+          `Kie AI createTask failed (code=${created.code ?? 'n/a'}): ${created.msg ?? created.message ?? 'no taskId returned'}`,
+          undefined,
+          envelopeCode
         );
       }
 
@@ -256,7 +275,15 @@ export class KieAIAdapter implements ProviderAdapter {
       return this.failure(request, start, `Kie AI task did not complete within ${taskTimeoutMs}ms`);
     } catch (err) {
       // Network errors, HTTP errors, aborts — same catch-all shape as OpenAIAdapter.
-      return this.failure(request, start, err instanceof Error ? err.message : String(err));
+      // fetchJson attaches httpStatus to HTTP-level failures; forward it structurally.
+      const status = (err as { httpStatus?: unknown })?.httpStatus;
+      return this.failure(
+        request,
+        start,
+        err instanceof Error ? err.message : String(err),
+        undefined,
+        typeof status === 'number' ? status : undefined
+      );
     }
   }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, friendlyAiErrorMessage } from '@/lib/api';
 import { CreativeQAReportCard } from '@/components/creative-qa-report';
 import { VisualOutputsPanel } from '@/components/visual-outputs-panel';
 
@@ -150,9 +150,10 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
       // the "expand a report panel directly under the alternative" UX from the spec.
       setQaReports((prev) => ({ ...prev, [planId]: [res.data, ...(prev[planId] ?? [])] }));
     } catch (err: any) {
-      const message = err.status === 502
-        ? 'Creative QA tamamlanamadı — AI sağlayıcı veya yanıt doğrulaması başarısız oldu. Rapor kaydedilmedi.'
-        : (err.message ?? 'Creative QA çalıştırılamadı.');
+      const message =
+        err.status === 502
+          ? `${friendlyAiErrorMessage(err, 'Creative QA çalıştırılamadı.')} Rapor kaydedilmedi.`
+          : (err.message ?? 'Creative QA çalıştırılamadı.');
       updateQaRunState(planId, { runError: message });
     } finally {
       updateQaRunState(planId, { running: false });

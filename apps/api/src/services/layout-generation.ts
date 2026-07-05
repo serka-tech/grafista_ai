@@ -11,11 +11,12 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import { ModelRouter, type AIResponse } from '@grafista/model-router';
+import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, layoutGenerationTemplate } from '@grafista/prompt-engine';
 import { LayoutPlanContentSchema, type LayoutPlan, type LayoutPlanContent } from '@grafista/schemas';
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
+import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 
 const modelRouter = new ModelRouter();
 
@@ -28,35 +29,6 @@ export interface LayoutGenerationResult {
   layoutPlans: LayoutPlan[];
 }
 
-/** Tolerates markdown code fences around the model's JSON output (same cleanup as content-ideas.ts / design-dna-analysis.ts). */
-function parseJsonFromModelOutput(content: string): unknown {
-  const cleaned = content.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  return JSON.parse(cleaned);
-}
-
-function logAiCall(label: string, response: AIResponse): void {
-  if (response.success) {
-    console.log(
-      `[layout-generation] ${label} ok — provider=${response.provider} model=${response.model} ` +
-        `tokens(in/out/total)=${response.usage.inputTokens}/${response.usage.outputTokens}/${response.usage.totalTokens} ` +
-        `estimatedCost=${response.usage.estimatedCost ?? 'n/a'} latencyMs=${response.latencyMs}`
-    );
-  } else {
-    console.error(
-      `[layout-generation] ${label} FAILED — provider=${response.provider} latencyMs=${response.latencyMs} error=${response.error}`
-    );
-  }
-}
-
-/** Raised with a `.status` property so the central errorHandler renders the right HTTP status. */
-function providerError(response: AIResponse): Error & { status: number } {
-  return Object.assign(new Error(response.error ?? 'AI provider error'), { status: 502 });
-}
-
-function schemaError(context: string, issues: string): Error & { status: number } {
-  return Object.assign(new Error(`AI response failed schema validation (${context}): ${issues}`), { status: 502 });
-}
-
 /** Extracts an array of raw alternative objects, tolerating a bare array or a {alternatives:[...]} wrapper. */
 function extractAlternatives(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw;
@@ -66,6 +38,39 @@ function extractAlternatives(raw: unknown): unknown[] {
     if (Array.isArray(obj.layoutAlternatives)) return obj.layoutAlternatives;
   }
   throw new Error('Model did not return a JSON array of layout alternatives');
+}
+
+/**
+ * Full structural validation of one model response: alternative extraction,
+ * count bounds, and per-alternative LayoutPlanContentSchema. Used by
+ * callAiForJson so a validation flake on ANY of these steps triggers the
+ * automatic in-service retry (manual-demo-pass N1) instead of an instant 502.
+ */
+function validateLayoutAlternatives(raw: unknown): ValidateResult<LayoutPlanContent[]> {
+  let rawAlternatives: unknown[];
+  try {
+    rawAlternatives = extractAlternatives(raw);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  if (rawAlternatives.length < MIN_ALTERNATIVES || rawAlternatives.length > MAX_ALTERNATIVES) {
+    return {
+      ok: false,
+      error: `expected ${MIN_ALTERNATIVES}-${MAX_ALTERNATIVES} layout alternatives, got ${rawAlternatives.length}`,
+    };
+  }
+
+  // Validate EVERY alternative before accepting ANY of them — no partial/broken rows.
+  const validatedAlternatives: LayoutPlanContent[] = [];
+  for (const [i, rawAlternative] of rawAlternatives.entries()) {
+    const validated = LayoutPlanContentSchema.safeParse(rawAlternative);
+    if (!validated.success) {
+      return { ok: false, error: `alternative ${i + 1}: ${validated.error.message}` };
+    }
+    validatedAlternatives.push(validated.data);
+  }
+  return { ok: true, data: validatedAlternatives };
 }
 
 /**
@@ -122,47 +127,31 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
     })
     .build();
 
-  const aiResponse = await modelRouter.complete({
-    taskType: 'layout_generation',
-    provider: env.AI_DEFAULT_PROVIDER,
-    systemPrompt: prompt.system,
-    userPrompt: prompt.user,
-    outputFormat: 'json',
-    maxTokens: prompt.metadata.maxTokens,
-    temperature: prompt.metadata.temperature,
+  // Phase 3 Step 3 (N1 fix): a syntactically fine response that fails schema
+  // validation gets ONE automatic same-prompt retry inside callAiForJson before
+  // any 502 reaches the user. Nothing is persisted unless a whole attempt
+  // validates end to end.
+  const outcome = await callAiForJson<LayoutPlanContent[]>({
+    router: modelRouter,
+    request: {
+      taskType: 'layout_generation',
+      provider: env.AI_DEFAULT_PROVIDER,
+      systemPrompt: prompt.system,
+      userPrompt: prompt.user,
+      outputFormat: 'json',
+      maxTokens: prompt.metadata.maxTokens,
+      temperature: prompt.metadata.temperature,
+    },
+    context: 'layout_generation',
+    logPrefix: 'layout-generation',
+    validate: validateLayoutAlternatives,
   });
-  logAiCall('layout_generation', aiResponse);
 
-  if (!aiResponse.success) {
-    throw providerError(aiResponse);
+  if (!outcome.ok) {
+    throw aiCallError(outcome);
   }
 
-  let rawAlternatives: unknown[];
-  try {
-    rawAlternatives = extractAlternatives(parseJsonFromModelOutput(aiResponse.content));
-  } catch (err) {
-    throw Object.assign(
-      new Error(`AI response was not valid JSON (layout_generation): ${err instanceof Error ? err.message : String(err)}`),
-      { status: 502 }
-    );
-  }
-
-  if (rawAlternatives.length < MIN_ALTERNATIVES || rawAlternatives.length > MAX_ALTERNATIVES) {
-    throw schemaError(
-      'layout_generation',
-      `expected ${MIN_ALTERNATIVES}-${MAX_ALTERNATIVES} layout alternatives, got ${rawAlternatives.length}`
-    );
-  }
-
-  // Validate EVERY alternative before persisting ANY of them — no partial/broken rows.
-  const validatedAlternatives: LayoutPlanContent[] = [];
-  for (const [i, raw] of rawAlternatives.entries()) {
-    const validated = LayoutPlanContentSchema.safeParse(raw);
-    if (!validated.success) {
-      throw schemaError(`layout_generation, alternative ${i + 1}`, validated.error.message);
-    }
-    validatedAlternatives.push(validated.data);
-  }
+  const { data: validatedAlternatives, response: aiResponse } = outcome;
 
   const layoutPlans: LayoutPlan[] = [];
   for (const [i, content] of validatedAlternatives.entries()) {

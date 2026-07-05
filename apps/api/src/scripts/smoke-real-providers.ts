@@ -21,7 +21,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { OpenAIAdapter, KieAIAdapter } from '@grafista/model-router';
+import { OpenAIAdapter, KieAIAdapter, classifyProviderError, type AIResponse } from '@grafista/model-router';
 import { LocalStorageProvider, LOCAL_UPLOAD_DIR } from '../storage/local-provider.js';
 import { getRendererAdapter, resolveActiveRendererProviderName } from '../render/adapters/factory.js';
 
@@ -31,6 +31,18 @@ const results: Array<{ section: string; outcome: Outcome; detail: string }> = []
 function record(section: string, outcome: Outcome, detail: string): void {
   results.push({ section, outcome, detail });
   console.log(`[smoke] ${section.padEnd(8)} ${outcome.padEnd(5)} ${detail}`);
+}
+
+/**
+ * Phase 3 Step 3 — short classification report for provider failures: kind +
+ * retryable + httpStatus (when known) so a failing smoke immediately tells you
+ * whether it's config (no retry will help) or transient (try again). Only the
+ * adapter's own error message is echoed — never env values or secrets.
+ */
+function describeProviderFailure(response: AIResponse): string {
+  const classification = classifyProviderError({ error: response.error, httpStatus: response.httpStatus });
+  const statusNote = classification.httpStatus !== undefined ? ` httpStatus=${classification.httpStatus}` : '';
+  return `provider error [kind=${classification.kind} retryable=${classification.retryable}${statusNote}]: ${response.error ?? 'unknown'}`;
 }
 
 const SMOKE_KEY = 'smoke/step12-storage-roundtrip.txt';
@@ -68,7 +80,7 @@ async function smokeOpenAI(): Promise<void> {
     temperature: 0,
   });
   if (!response.success) {
-    record('openai', 'FAIL', `provider error: ${response.error ?? 'unknown'}`);
+    record('openai', 'FAIL', describeProviderFailure(response));
     return;
   }
   record(
@@ -95,7 +107,7 @@ async function smokeKie(): Promise<void> {
     metadata: { aspectRatio: '1080:1080' },
   });
   if (!response.success) {
-    record('kie', 'FAIL', `provider error: ${response.error ?? 'unknown'}`);
+    record('kie', 'FAIL', describeProviderFailure(response));
     return;
   }
 

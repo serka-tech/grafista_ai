@@ -6,6 +6,7 @@
  */
 
 import { AIProvider, AIRequest, AIResponse, AITaskType, ProviderAdapter, TaskRouting } from './types.js';
+import { DelayFn, executeWithClassifiedRetry } from './provider-errors.js';
 import { OpenAIAdapter } from './providers/openai.js';
 import { GeminiAdapter } from './providers/gemini.js';
 import { ClaudeAdapter } from './providers/claude.js';
@@ -39,12 +40,21 @@ const DEFAULT_ROUTING: TaskRouting[] = [
   { taskType: 'video_generation', primaryProvider: 'kie-ai', fallbackProviders: ['higgsfield'], requiredCapabilities: ['video_generation'] },
 ];
 
+export interface ModelRouterOptions {
+  /** Test seam: replace individual adapters with stubs (additive — unspecified providers keep their real adapter). */
+  adapters?: Partial<Record<AIProvider, ProviderAdapter>>;
+  /** Test seam: injectable retry backoff delay so tests never actually sleep. */
+  delayFn?: DelayFn;
+}
+
 export class ModelRouter {
   private adapters: Map<AIProvider, ProviderAdapter> = new Map();
   private routing: TaskRouting[];
+  private delayFn: DelayFn | undefined;
 
-  constructor(customRouting?: TaskRouting[]) {
+  constructor(customRouting?: TaskRouting[], options?: ModelRouterOptions) {
     this.routing = customRouting ?? DEFAULT_ROUTING;
+    this.delayFn = options?.delayFn;
 
     // Initialize all adapters
     const openai = new OpenAIAdapter();
@@ -60,6 +70,12 @@ export class ModelRouter {
     this.adapters.set('kie-ai', kieAi);
     this.adapters.set('higgsfield', higgsfield);
     this.adapters.set('fake', fake);
+
+    if (options?.adapters) {
+      for (const [name, adapter] of Object.entries(options.adapters)) {
+        if (adapter) this.adapters.set(name as AIProvider, adapter);
+      }
+    }
   }
 
   /**
@@ -146,27 +162,30 @@ export class ModelRouter {
       };
     }
 
-    const maxRetries = 3;
-    let lastError: string | undefined;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const response = await adapter.complete(request);
-        if (response.success) return response;
-        lastError = response.error;
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-      }
-    }
-
-    return {
-      success: false,
-      provider: adapter.name,
-      model: 'none',
-      content: '',
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      latencyMs: 0,
-      error: `All ${maxRetries} attempts failed: ${lastError}`,
-    };
+    // Phase 3 Step 3: classified retry replaces the previous blind 3-attempt
+    // loop (which retried even 401s, back-to-back, with no backoff). Only
+    // transient / rate-limit / timeout / unknown failures are retried, with
+    // per-kind limits and exponential backoff — auth, permanent and
+    // provider-configuration failures fail fast on the first attempt.
+    return executeWithClassifiedRetry(() => adapter.complete(request), {
+      delayFn: this.delayFn,
+      buildFailure: (error) => ({
+        success: false,
+        provider: adapter.name,
+        model: 'none',
+        content: '',
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        latencyMs: 0,
+        error,
+      }),
+      onAttemptFailure: ({ attempt, kind, willRetry, delayMs, error }) => {
+        // Secret-free observability: provider name, classification, retry plan
+        // and the adapter's own error message (adapters never embed secrets).
+        console.warn(
+          `[model-router] provider=${adapter.name} taskType=${request.taskType} attempt=${attempt} failed ` +
+            `(kind=${kind} willRetry=${willRetry}${willRetry ? ` delayMs=${delayMs}` : ''}) — ${error}`
+        );
+      },
+    });
   }
 }

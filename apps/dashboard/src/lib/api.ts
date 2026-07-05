@@ -16,6 +16,42 @@ export class ApiError extends Error {
 }
 
 /**
+ * Phase 3 Step 3 (Kapsam 5) — maps a 502 AI-provider failure to a short,
+ * actionable Turkish message instead of surfacing raw English provider text.
+ * Non-502 errors keep their own message (409 gates, 403 permissions etc. are
+ * already meaningful). Purely presentational: the backend error shape and
+ * status codes are untouched, and the raw text stays available on the error
+ * object for anyone who needs the technical detail.
+ */
+export function friendlyAiErrorMessage(
+  err: unknown,
+  fallback: string,
+  overrides?: { schema?: string }
+): string {
+  const e = err as { status?: number; message?: string } | null | undefined;
+  const raw = e?.message ?? '';
+  if (e?.status !== 502) return raw || fallback;
+
+  const lower = raw.toLowerCase();
+  if (/kie_ai_api_key|kie_ai_base_url/.test(lower)) {
+    return 'Görsel sağlayıcı yapılandırılmamış.';
+  }
+  if (/provider configuration error|is not set|no provider available/.test(lower)) {
+    return 'API anahtarı eksik veya geçersiz.';
+  }
+  if (/incorrect api key|invalid api key|unauthorized|authentication/.test(lower)) {
+    return 'API anahtarı eksik veya geçersiz.';
+  }
+  if (/schema validation|not valid json/.test(lower)) {
+    return overrides?.schema ?? 'AI yanıtı beklenen formatta dönmedi, tekrar denenebilir.';
+  }
+  if (/rate limit|too many requests|quota/.test(lower)) {
+    return 'AI sağlayıcı şu an yoğun. Kısa bir süre sonra tekrar deneyin.';
+  }
+  return 'Provider geçici olarak yanıt vermedi. Tekrar deneyebilirsiniz.';
+}
+
+/**
  * Resolves an API-relative protected file path (e.g. `/api/visual-outputs/:id/file`)
  * to an absolute URL on the API origin, so <img src> / download links work when the
  * dashboard and API run on different origins. Absolute URLs pass through unchanged.

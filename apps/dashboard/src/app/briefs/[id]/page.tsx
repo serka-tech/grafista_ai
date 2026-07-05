@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, friendlyAiErrorMessage } from '@/lib/api';
 
 const BRIEF_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   draft: { class: 'badge-neutral', label: 'Taslak' },
@@ -94,7 +94,11 @@ export default function BriefPage({ params }: { params: { id: string } }) {
       await api.generateLayoutPlans(briefId);
       await loadAll();
     } catch (err: any) {
-      setGenerateError(err.message ?? 'Yerleşim planı oluşturma başarısız oldu.');
+      setGenerateError(
+        friendlyAiErrorMessage(err, 'Yerleşim planı oluşturma başarısız oldu.', {
+          schema: 'Layout üretimi geçici olarak başarısız oldu. Tekrar deneyin.',
+        })
+      );
     } finally {
       setGenerating(false);
     }

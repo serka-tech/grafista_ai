@@ -20,6 +20,22 @@ export type AITaskType =
 
 export type AICapability = 'text' | 'vision' | 'image_generation' | 'video_generation' | 'embedding';
 
+/**
+ * Classification of a FAILED AIResponse — assigned by classifyProviderError()
+ * (see provider-errors.ts). Drives the router's retry policy: only transient /
+ * rate_limit / timeout / unknown failures are ever retried; auth, permanent
+ * and provider-configuration failures fail fast on the first attempt.
+ */
+export type ProviderErrorKind =
+  | 'transient'
+  | 'permanent'
+  | 'rate_limit'
+  | 'timeout'
+  | 'schema_validation'
+  | 'auth_error'
+  | 'provider_unavailable'
+  | 'unknown';
+
 export interface ProviderConfig {
   name: AIProvider;
   displayName: string;
@@ -70,6 +86,17 @@ export interface AIResponse {
   latencyMs: number;
   error?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * HTTP status code of the upstream provider failure, when the adapter could
+   * capture one structurally (OpenAI/Anthropic SDK `APIError.status`, Kie AI
+   * HTTP responses). Additive/optional — absent on success and on failures
+   * with no HTTP layer (network drop, missing configuration).
+   */
+  httpStatus?: number;
+  /** Error classification the router assigned to a failed response (additive/optional). */
+  errorKind?: ProviderErrorKind;
+  /** Total attempts the router made for this request (additive/optional; set when > 1). */
+  attempts?: number;
 }
 
 export interface ProviderAdapter {

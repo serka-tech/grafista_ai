@@ -9,13 +9,15 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import { ModelRouter, type AIResponse } from '@grafista/model-router';
+import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, styleAnalysisTemplate, designDnaSynthesisTemplate } from '@grafista/prompt-engine';
 import { StyleAnalysisSchema, DesignDNAContentSchema, type StyleAnalysis, type DesignDNA } from '@grafista/schemas';
+import { z } from 'zod';
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
 import { getObjectBuffer } from '../storage/file-service.js';
 import type { DesignReference } from '../db/repositories/design-references.js';
+import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 
 const modelRouter = new ModelRouter();
 
@@ -35,33 +37,12 @@ function isUsable(ref: DesignReference): ref is UsableDesignReference {
   return !!ref.storageKey && !!ref.storageProvider && !!ref.storageBucket;
 }
 
-/** Tolerates markdown code fences around the model's JSON output (same cleanup as content-ideas.ts). */
-function parseJsonFromModelOutput(content: string): Record<string, unknown> {
-  const cleaned = content.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  return JSON.parse(cleaned);
-}
-
-function logAiCall(label: string, response: AIResponse): void {
-  if (response.success) {
-    console.log(
-      `[design-dna-analysis] ${label} ok — provider=${response.provider} model=${response.model} ` +
-        `tokens(in/out/total)=${response.usage.inputTokens}/${response.usage.outputTokens}/${response.usage.totalTokens} ` +
-        `estimatedCost=${response.usage.estimatedCost ?? 'n/a'} latencyMs=${response.latencyMs}`
-    );
-  } else {
-    console.error(
-      `[design-dna-analysis] ${label} FAILED — provider=${response.provider} latencyMs=${response.latencyMs} error=${response.error}`
-    );
-  }
-}
-
-/** Raised with a `.status` property so the central errorHandler renders the right HTTP status. */
-function providerError(response: AIResponse): Error & { status: number } {
-  return Object.assign(new Error(response.error ?? 'AI provider error'), { status: 502 });
-}
-
-function schemaError(context: string, issues: string): Error & { status: number } {
-  return Object.assign(new Error(`AI response failed schema validation (${context}): ${issues}`), { status: 502 });
+/** Generic zod-safeParse -> ValidateResult bridge for callAiForJson. */
+function zodValidate<S extends z.ZodTypeAny>(schema: S) {
+  return (raw: unknown): ValidateResult<z.infer<S>> => {
+    const validated = schema.safeParse(raw);
+    return validated.success ? { ok: true, data: validated.data } : { ok: false, error: validated.error.message };
+  };
 }
 
 /**
@@ -107,61 +88,55 @@ export async function runDesignDnaAnalysis(clientId: string, requestedBy: string
       })
       .build();
 
-    const aiResponse = await modelRouter.complete({
-      taskType: 'style_analysis',
-      provider: env.AI_DEFAULT_PROVIDER,
-      images: [dataUri],
-      systemPrompt: prompt.system,
-      userPrompt: prompt.user,
-      outputFormat: 'json',
-      maxTokens: prompt.metadata.maxTokens,
-      temperature: prompt.metadata.temperature,
+    // Phase 3 Step 3: limited schema-retry via callAiForJson (same N1 pattern
+    // as layout-generation). The transform adds the server-controlled fields
+    // before validation — the model never invents these — and runs fresh on
+    // every attempt.
+    const outcome = await callAiForJson<StyleAnalysis>({
+      router: modelRouter,
+      request: {
+        taskType: 'style_analysis',
+        provider: env.AI_DEFAULT_PROVIDER,
+        images: [dataUri],
+        systemPrompt: prompt.system,
+        userPrompt: prompt.user,
+        outputFormat: 'json',
+        maxTokens: prompt.metadata.maxTokens,
+        temperature: prompt.metadata.temperature,
+      },
+      context: `style_analysis, reference ${ref.id}`,
+      logPrefix: 'design-dna-analysis',
+      transform: (raw) => ({
+        ...(raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}),
+        id: uuid(),
+        designReferenceId: ref.id,
+        analyzedAt: new Date().toISOString(),
+      }),
+      validate: zodValidate(StyleAnalysisSchema),
     });
-    logAiCall(`style_analysis (reference ${ref.id})`, aiResponse);
 
-    if (!aiResponse.success) {
-      throw providerError(aiResponse);
+    if (!outcome.ok) {
+      throw aiCallError(outcome);
     }
-
-    let rawAnalysis: Record<string, unknown>;
-    try {
-      rawAnalysis = parseJsonFromModelOutput(aiResponse.content);
-    } catch (err) {
-      throw Object.assign(
-        new Error(`AI response was not valid JSON (style_analysis, reference ${ref.id}): ${err instanceof Error ? err.message : String(err)}`),
-        { status: 502 }
-      );
-    }
-
-    // Server-controlled fields, filled in before validation — the model never invents these.
-    const candidate = {
-      ...rawAnalysis,
-      id: uuid(),
-      designReferenceId: ref.id,
-      analyzedAt: new Date().toISOString(),
-    };
-    const validated = StyleAnalysisSchema.safeParse(candidate);
-    if (!validated.success) {
-      throw schemaError(`style_analysis, reference ${ref.id}`, validated.error.message);
-    }
+    const validatedData = outcome.data;
 
     const persisted = await store.designAnalysis.create({
       designReferenceId: ref.id,
-      format: validated.data.format,
-      aspectRatio: validated.data.aspectRatio,
-      dominantColors: validated.data.dominantColors,
-      typographyHierarchy: validated.data.typographyHierarchy,
-      logoPosition: validated.data.logoPosition,
-      imageTreatment: validated.data.imageTreatment,
-      backgroundStyle: validated.data.backgroundStyle,
-      textDensity: validated.data.textDensity,
-      ctaStyle: validated.data.ctaStyle,
-      layoutPattern: validated.data.layoutPattern,
-      visualMood: validated.data.visualMood,
-      brandConsistencyNotes: validated.data.brandConsistencyNotes,
-      reusableDesignRules: validated.data.reusableDesignRules,
-      designCategory: validated.data.designCategory,
-      confidence: validated.data.confidence,
+      format: validatedData.format,
+      aspectRatio: validatedData.aspectRatio,
+      dominantColors: validatedData.dominantColors,
+      typographyHierarchy: validatedData.typographyHierarchy,
+      logoPosition: validatedData.logoPosition,
+      imageTreatment: validatedData.imageTreatment,
+      backgroundStyle: validatedData.backgroundStyle,
+      textDensity: validatedData.textDensity,
+      ctaStyle: validatedData.ctaStyle,
+      layoutPattern: validatedData.layoutPattern,
+      visualMood: validatedData.visualMood,
+      brandConsistencyNotes: validatedData.brandConsistencyNotes,
+      reusableDesignRules: validatedData.reusableDesignRules,
+      designCategory: validatedData.designCategory,
+      confidence: validatedData.confidence,
     });
     analyses.push(persisted);
   }
@@ -176,54 +151,45 @@ export async function runDesignDnaAnalysis(clientId: string, requestedBy: string
     })
     .build();
 
-  const synthesisResponse = await modelRouter.complete({
-    taskType: 'design_dna_synthesis',
-    provider: env.AI_DEFAULT_PROVIDER,
-    systemPrompt: synthesisPrompt.system,
-    userPrompt: synthesisPrompt.user,
-    outputFormat: 'json',
-    maxTokens: synthesisPrompt.metadata.maxTokens,
-    temperature: synthesisPrompt.metadata.temperature,
+  const synthesisOutcome = await callAiForJson<z.infer<typeof DesignDNAContentSchema>>({
+    router: modelRouter,
+    request: {
+      taskType: 'design_dna_synthesis',
+      provider: env.AI_DEFAULT_PROVIDER,
+      systemPrompt: synthesisPrompt.system,
+      userPrompt: synthesisPrompt.user,
+      outputFormat: 'json',
+      maxTokens: synthesisPrompt.metadata.maxTokens,
+      temperature: synthesisPrompt.metadata.temperature,
+    },
+    context: 'design_dna_synthesis',
+    logPrefix: 'design-dna-analysis',
+    validate: zodValidate(DesignDNAContentSchema),
   });
-  logAiCall('design_dna_synthesis', synthesisResponse);
 
-  if (!synthesisResponse.success) {
-    throw providerError(synthesisResponse);
+  if (!synthesisOutcome.ok) {
+    throw aiCallError(synthesisOutcome);
   }
-
-  let rawDna: Record<string, unknown>;
-  try {
-    rawDna = parseJsonFromModelOutput(synthesisResponse.content);
-  } catch (err) {
-    throw Object.assign(
-      new Error(`AI response was not valid JSON (design_dna_synthesis): ${err instanceof Error ? err.message : String(err)}`),
-      { status: 502 }
-    );
-  }
-
-  const validatedDna = DesignDNAContentSchema.safeParse(rawDna);
-  if (!validatedDna.success) {
-    throw schemaError('design_dna_synthesis', validatedDna.error.message);
-  }
+  const dnaContent = synthesisOutcome.data;
 
   const confidenceScore =
-    validatedDna.data.confidenceScore ?? analyses.reduce((sum, a) => sum + a.confidence, 0) / analyses.length;
+    dnaContent.confidenceScore ?? analyses.reduce((sum, a) => sum + a.confidence, 0) / analyses.length;
 
   const designDna = await store.designDna.create({
     id: uuid(),
     clientId: client.id,
     status: 'generated',
-    brandPersonality: validatedDna.data.brandPersonality,
-    preferredLayouts: validatedDna.data.preferredLayouts,
-    visualRules: validatedDna.data.visualRules,
-    typographyRules: validatedDna.data.typographyRules,
-    colorUsageRules: validatedDna.data.colorUsageRules,
-    logoUsageRules: validatedDna.data.logoUsageRules,
-    imageTreatmentRules: validatedDna.data.imageTreatmentRules,
-    contentTone: validatedDna.data.contentTone,
-    avoidList: validatedDna.data.avoidList,
-    approvalBias: validatedDna.data.approvalBias,
-    recommendedPromptStyle: validatedDna.data.recommendedPromptStyle,
+    brandPersonality: dnaContent.brandPersonality,
+    preferredLayouts: dnaContent.preferredLayouts,
+    visualRules: dnaContent.visualRules,
+    typographyRules: dnaContent.typographyRules,
+    colorUsageRules: dnaContent.colorUsageRules,
+    logoUsageRules: dnaContent.logoUsageRules,
+    imageTreatmentRules: dnaContent.imageTreatmentRules,
+    contentTone: dnaContent.contentTone,
+    avoidList: dnaContent.avoidList,
+    approvalBias: dnaContent.approvalBias,
+    recommendedPromptStyle: dnaContent.recommendedPromptStyle,
     confidenceScore,
     referencesUsed: analyses.map((a) => a.designReferenceId),
     sourceAnalysisCount: analyses.length,

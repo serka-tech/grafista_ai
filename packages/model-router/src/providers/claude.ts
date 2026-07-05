@@ -62,6 +62,11 @@ export class ClaudeAdapter implements ProviderAdapter {
         latencyMs: Date.now() - start,
       };
     } catch (err) {
+      // Anthropic SDK APIError carries the upstream HTTP status structurally —
+      // same propagation as OpenAIAdapter so the router's retry policy can
+      // classify without string parsing.
+      const status = (err as { status?: unknown })?.status;
+      const httpStatus = typeof status === 'number' ? status : undefined;
       return {
         success: false,
         provider: 'claude',
@@ -70,6 +75,7 @@ export class ClaudeAdapter implements ProviderAdapter {
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         latencyMs: Date.now() - start,
         error: err instanceof Error ? err.message : String(err),
+        ...(httpStatus !== undefined ? { httpStatus } : {}),
       };
     }
   }

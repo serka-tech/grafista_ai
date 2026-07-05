@@ -17,7 +17,13 @@ import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
  * (used by POST /api/clients/:clientId/content-ideas) and, for the DesignDNA-context proof
  * point, 'style_analysis' / 'design_dna_synthesis' (used by the design-dna analyze route).
  */
-const aiControl = vi.hoisted(() => ({ mode: 'success' as 'success' | 'failure' | 'invalid_layout' }));
+// `layoutCalls` counts layout_generation calls so the N1 retry tests can prove the
+// service really made a second attempt; 'invalid_then_valid' simulates the exact
+// manual-demo-pass N1 flake (first response schema-violating, retry valid).
+const aiControl = vi.hoisted(() => ({
+  mode: 'success' as 'success' | 'failure' | 'invalid_layout' | 'invalid_then_valid',
+  layoutCalls: 0,
+}));
 
 vi.mock('@grafista/model-router', () => {
   const STYLE_ANALYSIS_CONTENT = {
@@ -118,7 +124,11 @@ vi.mock('@grafista/model-router', () => {
       else if (req.taskType === 'design_dna_synthesis') content = DESIGN_DNA_CONTENT;
       else if (req.taskType === 'content_ideation') content = CONTENT_IDEATION_CONTENT;
       else if (req.taskType === 'layout_generation') {
-        content = aiControl.mode === 'invalid_layout' ? INVALID_LAYOUT_CONTENT : LAYOUT_ALTERNATIVES;
+        aiControl.layoutCalls += 1;
+        if (aiControl.mode === 'invalid_layout') content = INVALID_LAYOUT_CONTENT;
+        else if (aiControl.mode === 'invalid_then_valid') {
+          content = aiControl.layoutCalls === 1 ? INVALID_LAYOUT_CONTENT : LAYOUT_ALTERNATIVES;
+        } else content = LAYOUT_ALTERNATIVES;
       } else content = {};
 
       return {
@@ -191,6 +201,7 @@ async function createApprovedDesignBrief(clientName: string) {
 
 beforeEach(() => {
   aiControl.mode = 'success';
+  aiControl.layoutCalls = 0;
 });
 
 describe('1. Unauthenticated access', () => {
@@ -307,9 +318,37 @@ describe('8. Invalid AI JSON output (schema violation)', () => {
     const owner = await loginAs(TEST_USERS.OWNER);
     const res = await owner.post(`/api/design-briefs/${brief.id}/layout-plans`);
     expect(res.status).toBe(502);
+    // Phase 3 Step 3: the service now attempts ONE automatic schema retry before
+    // 502ing — a persistently invalid response therefore costs exactly 2 AI calls.
+    expect(aiControl.layoutCalls).toBe(2);
 
     const rows = await pool.query('SELECT * FROM layout_plans WHERE design_brief_id = $1', [brief.id]);
     expect(rows.rows.length).toBe(0);
+  });
+});
+
+// Phase 3 Step 3 — the N1 fix itself (docs/manual-demo-pass.md): a schema-validation
+// flake on the FIRST response must be absorbed by one automatic in-service retry,
+// so the user sees a normal 201 instead of a 502 they have to retry by hand.
+describe('8b. Schema-validation flake recovers via automatic retry (N1)', () => {
+  it('first invalid + second valid response -> 201 with persisted alternatives from exactly 2 AI calls', async () => {
+    const { brief } = await createApprovedDesignBrief('Layout Plans N1 Retry Client');
+
+    aiControl.mode = 'invalid_then_valid';
+    const owner = await loginAs(TEST_USERS.OWNER);
+    const res = await owner.post(`/api/design-briefs/${brief.id}/layout-plans`);
+
+    expect(res.status).toBe(201);
+    expect(aiControl.layoutCalls).toBe(2);
+    expect(res.body.data.length).toBeGreaterThanOrEqual(2);
+    for (const plan of res.body.data) {
+      expect(plan.status).toBe('generated');
+    }
+
+    // The retry's valid alternatives are the ONLY persisted rows — nothing
+    // half-done from the schema-violating first attempt.
+    const rows = await pool.query('SELECT * FROM layout_plans WHERE design_brief_id = $1', [brief.id]);
+    expect(rows.rows.length).toBe(res.body.data.length);
   });
 });
 

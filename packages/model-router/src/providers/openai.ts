@@ -101,6 +101,11 @@ export class OpenAIAdapter implements ProviderAdapter {
         latencyMs: Date.now() - start,
       };
     } catch (err) {
+      // OpenAI SDK APIError carries the upstream HTTP status structurally —
+      // surface it so the router's retry policy can classify (429 vs 401 vs
+      // 5xx) instead of parsing it back out of the message string.
+      const status = (err as { status?: unknown })?.status;
+      const httpStatus = typeof status === 'number' ? status : undefined;
       return {
         success: false,
         provider: 'openai',
@@ -109,6 +114,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         latencyMs: Date.now() - start,
         error: err instanceof Error ? err.message : String(err),
+        ...(httpStatus !== undefined ? { httpStatus } : {}),
       };
     }
   }

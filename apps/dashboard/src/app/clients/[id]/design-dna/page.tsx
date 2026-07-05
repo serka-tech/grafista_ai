@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, friendlyAiErrorMessage } from '@/lib/api';
 
 const STATUS_BADGES: Record<string, { class: string; label: string }> = {
   draft: { class: 'badge-neutral', label: 'Taslak' },
@@ -78,7 +78,7 @@ export default function DesignDNAPage({ params }: { params: { id: string } }) {
       await api.analyzeDesignDNA(clientId);
       await loadAll();
     } catch (err: any) {
-      setAnalyzeError(err.message ?? 'Analiz başarısız oldu.');
+      setAnalyzeError(friendlyAiErrorMessage(err, 'Analiz başarısız oldu.'));
     } finally {
       setAnalyzing(false);
     }

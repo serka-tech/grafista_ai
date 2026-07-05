@@ -12,7 +12,11 @@ import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
  * factory) lets individual tests switch between a canned success response and a
  * simulated provider failure.
  */
-const aiControl = vi.hoisted(() => ({ mode: 'success' as 'success' | 'failure' }));
+const aiControl = vi.hoisted(() => ({
+  mode: 'success' as 'success' | 'failure' | 'invalid_synthesis_then_valid',
+  // Counts design_dna_synthesis calls so the schema-retry test can prove a second attempt happened.
+  synthesisCalls: 0,
+}));
 
 vi.mock('@grafista/model-router', () => {
   const STYLE_ANALYSIS_CONTENT = {
@@ -63,7 +67,18 @@ vi.mock('@grafista/model-router', () => {
         };
       }
 
-      const content = req.taskType === 'style_analysis' ? STYLE_ANALYSIS_CONTENT : DESIGN_DNA_CONTENT;
+      let content: unknown;
+      if (req.taskType === 'style_analysis') {
+        content = STYLE_ANALYSIS_CONTENT;
+      } else {
+        aiControl.synthesisCalls += 1;
+        // Schema-violating first synthesis response (brandPersonality must be an array),
+        // valid on the automatic retry — the N1 schema-flake pattern.
+        content =
+          aiControl.mode === 'invalid_synthesis_then_valid' && aiControl.synthesisCalls === 1
+            ? { ...DESIGN_DNA_CONTENT, brandPersonality: 'not-an-array' }
+            : DESIGN_DNA_CONTENT;
+      }
       return {
         success: true,
         provider: 'openai',
@@ -104,6 +119,7 @@ async function uploadReference(clientId: string, filename: string) {
 
 beforeEach(() => {
   aiControl.mode = 'success';
+  aiControl.synthesisCalls = 0;
 });
 
 describe('1. Unauthenticated access', () => {
@@ -195,6 +211,25 @@ describe('6. Mocked AI failure surfaces a structured 502 and persists nothing', 
 
     const dnaRows = await pool.query('SELECT * FROM design_dna WHERE client_id = $1', [clientId]);
     expect(dnaRows.rows.length).toBe(0);
+  });
+});
+
+// Phase 3 Step 3 — same N1 schema-flake auto-retry pattern as layout generation,
+// applied to the synthesis call of the Design DNA pipeline.
+describe('6b. Synthesis schema flake recovers via automatic retry', () => {
+  it('first invalid + second valid synthesis -> 201 with a persisted DNA from exactly 2 synthesis calls', async () => {
+    const clientId = await createClient('Design DNA N1 Retry Client');
+    await uploadReference(clientId, 'reference-n1.png');
+
+    aiControl.mode = 'invalid_synthesis_then_valid';
+    const owner = await loginAs(TEST_USERS.OWNER);
+    const res = await owner.post(`/api/clients/${clientId}/design-dna/analyze`);
+
+    expect(res.status).toBe(201);
+    expect(aiControl.synthesisCalls).toBe(2);
+
+    const dnaRows = await pool.query('SELECT * FROM design_dna WHERE client_id = $1', [clientId]);
+    expect(dnaRows.rows.length).toBe(1);
   });
 });
 

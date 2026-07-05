@@ -22,7 +22,9 @@ import { assertReadyForVisualProduction } from '../services/production-gate.js';
  * layout-plans.test.ts's own helper chain) in addition to 'creative_qa'.
  */
 const aiControl = vi.hoisted(() => ({
-  mode: 'success' as 'success' | 'failure' | 'invalid_creative_qa',
+  mode: 'success' as 'success' | 'failure' | 'invalid_creative_qa' | 'invalid_then_valid',
+  // Counts creative_qa calls so the schema-retry tests can prove a second attempt happened.
+  qaCalls: 0,
 }));
 
 vi.mock('@grafista/model-router', () => {
@@ -167,7 +169,11 @@ vi.mock('@grafista/model-router', () => {
       else if (req.taskType === 'content_ideation') content = CONTENT_IDEATION_CONTENT;
       else if (req.taskType === 'layout_generation') content = LAYOUT_ALTERNATIVES;
       else if (req.taskType === 'creative_qa') {
-        content = aiControl.mode === 'invalid_creative_qa' ? INVALID_CREATIVE_QA_CONTENT : CREATIVE_QA_SUCCESS_CONTENT;
+        aiControl.qaCalls += 1;
+        if (aiControl.mode === 'invalid_creative_qa') content = INVALID_CREATIVE_QA_CONTENT;
+        else if (aiControl.mode === 'invalid_then_valid') {
+          content = aiControl.qaCalls === 1 ? INVALID_CREATIVE_QA_CONTENT : CREATIVE_QA_SUCCESS_CONTENT;
+        } else content = CREATIVE_QA_SUCCESS_CONTENT;
       } else content = {};
 
       return {
@@ -283,6 +289,7 @@ async function createFullyReadyLayoutPlan(clientName: string) {
 
 beforeEach(() => {
   aiControl.mode = 'success';
+  aiControl.qaCalls = 0;
 });
 
 describe('1. Unauthenticated access', () => {
@@ -466,9 +473,28 @@ describe('9. Invalid AI JSON output (schema violation)', () => {
     const owner = await loginAs(TEST_USERS.OWNER);
     const res = await owner.post(`/api/layout-plans/${layoutPlanId}/creative-qa`);
     expect(res.status).toBe(502);
+    // Phase 3 Step 3: one automatic schema retry precedes the 502 — 2 AI calls total.
+    expect(aiControl.qaCalls).toBe(2);
 
     const rows = await pool.query('SELECT * FROM creative_qa_reports WHERE layout_plan_id = $1', [layoutPlanId]);
     expect(rows.rows.length).toBe(0);
+  });
+});
+
+// Phase 3 Step 3 — same N1 schema-flake auto-retry pattern as layout generation.
+describe('9b. Schema-validation flake recovers via automatic retry', () => {
+  it('first invalid + second valid response -> 201 with a persisted report from exactly 2 AI calls', async () => {
+    const { layoutPlanId } = await createFullyReadyLayoutPlan('Creative QA N1 Retry Client');
+
+    aiControl.mode = 'invalid_then_valid';
+    const owner = await loginAs(TEST_USERS.OWNER);
+    const res = await owner.post(`/api/layout-plans/${layoutPlanId}/creative-qa`);
+
+    expect(res.status).toBe(201);
+    expect(aiControl.qaCalls).toBe(2);
+
+    const rows = await pool.query('SELECT * FROM creative_qa_reports WHERE layout_plan_id = $1', [layoutPlanId]);
+    expect(rows.rows.length).toBe(1);
   });
 });
 

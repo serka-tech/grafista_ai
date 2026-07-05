@@ -27,7 +27,9 @@ import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
  */
 
 const aiControl = vi.hoisted(() => ({
-  mode: 'success' as 'success' | 'failure' | 'invalid_visual_payload',
+  mode: 'success' as 'success' | 'failure' | 'invalid_visual_payload' | 'invalid_then_valid',
+  // Counts image_generation calls so the schema-retry tests can prove a second attempt happened.
+  imageCalls: 0,
 }));
 
 const storageControl = vi.hoisted(() => ({ failPut: false }));
@@ -194,6 +196,7 @@ vi.mock('@grafista/model-router', () => {
 
   class MockModelRouter {
     async complete(req: { taskType: string }) {
+      if (req.taskType === 'image_generation') aiControl.imageCalls += 1;
       // Failure modes only apply to the image_generation call — the chain-building
       // task types must keep succeeding so tests can always reach the gate.
       if (req.taskType === 'image_generation' && aiControl.mode === 'failure') {
@@ -215,7 +218,10 @@ vi.mock('@grafista/model-router', () => {
       else if (req.taskType === 'layout_generation') content = LAYOUT_ALTERNATIVES;
       else if (req.taskType === 'creative_qa') content = CREATIVE_QA_SUCCESS_CONTENT;
       else if (req.taskType === 'image_generation') {
-        content = aiControl.mode === 'invalid_visual_payload' ? INVALID_VISUAL_PAYLOAD : VISUAL_GENERATION_SUCCESS_CONTENT;
+        if (aiControl.mode === 'invalid_visual_payload') content = INVALID_VISUAL_PAYLOAD;
+        else if (aiControl.mode === 'invalid_then_valid') {
+          content = aiControl.imageCalls === 1 ? INVALID_VISUAL_PAYLOAD : VISUAL_GENERATION_SUCCESS_CONTENT;
+        } else content = VISUAL_GENERATION_SUCCESS_CONTENT;
       } else content = {};
 
       return {
@@ -319,6 +325,7 @@ async function createQaClearedLayoutPlan(clientName: string) {
 
 beforeEach(() => {
   aiControl.mode = 'success';
+  aiControl.imageCalls = 0;
   storageControl.failPut = false;
 });
 
@@ -556,11 +563,40 @@ describe('6. Provider failure', () => {
       const res = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
       expect(res.status).toBe(502);
       expect(res.body.message).toMatch(/schema validation/);
+      // Phase 3 Step 3: one automatic schema retry precedes the 502 (2 AI calls), and
+      // the 'failed' row is written exactly ONCE — only after the FINAL attempt.
+      expect(aiControl.imageCalls).toBe(2);
 
       const rows = await pool.query('SELECT * FROM generated_outputs WHERE layout_plan_id = $1', [layoutPlanId]);
       expect(rows.rows.length).toBe(1);
       expect(rows.rows[0].status).toBe('failed');
       expect(rows.rows[0].error_message).toMatch(/schema validation/);
+    },
+    30_000
+  );
+
+  it(
+    'schema-flake that recovers on the automatic retry produces a normal 201 with NO failed rows',
+    async () => {
+      const { layoutPlanId } = await createQaClearedLayoutPlan('Visual Gen N1 Retry Client');
+
+      aiControl.mode = 'invalid_then_valid';
+      const owner = await loginAs(TEST_USERS.OWNER);
+      const res = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+
+      expect(res.status).toBe(201);
+      expect(aiControl.imageCalls).toBe(2);
+      expect(res.body.total).toBeGreaterThanOrEqual(1);
+      for (const output of res.body.data as Array<Record<string, unknown>>) {
+        expect(output.status).toBe('generated');
+      }
+
+      // The absorbed first attempt must NOT leave a phantom 'failed' row behind.
+      const failedRows = await pool.query(
+        "SELECT * FROM generated_outputs WHERE layout_plan_id = $1 AND status = 'failed'",
+        [layoutPlanId]
+      );
+      expect(failedRows.rows.length).toBe(0);
     },
     30_000
   );

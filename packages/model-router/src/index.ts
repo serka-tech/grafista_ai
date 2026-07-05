@@ -1,4 +1,5 @@
 export { ModelRouter } from './router.js';
+export type { ModelRouterOptions } from './router.js';
 export type {
   AIProvider,
   AITaskType,
@@ -9,7 +10,20 @@ export type {
   ProviderConfig,
   ModelConfig,
   TaskRouting,
+  ProviderErrorKind,
 } from './types.js';
+export {
+  classifyProviderError,
+  executeWithClassifiedRetry,
+  retryDelayMs,
+  DEFAULT_RETRY_POLICIES,
+} from './provider-errors.js';
+export type {
+  ProviderErrorClassification,
+  RetryPolicy,
+  DelayFn,
+  ClassifiedRetryOptions,
+} from './provider-errors.js';
 export {
   normalizeAspectRatio,
   KIE_SUPPORTED_ASPECT_RATIOS,

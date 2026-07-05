@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, resolveApiFileUrl } from '@/lib/api';
+import { api, friendlyAiErrorMessage, resolveApiFileUrl } from '@/lib/api';
 
 const OUTPUT_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
@@ -136,9 +136,15 @@ function formatFileSize(bytes: unknown): string | null {
 // get the exact string when they need it.
 function friendlyErrorSummary(raw: string): string {
   const lower = raw.toLowerCase();
-  if (lower.includes('schema validation')) return 'AI yanıtı beklenen formatta değildi.';
+  if (lower.includes('kie_ai_api_key') || lower.includes('kie_ai_base_url'))
+    return 'Görsel sağlayıcı yapılandırılmamış.';
+  if (lower.includes('configuration error') || lower.includes('is not set') || lower.includes('no provider available'))
+    return 'API anahtarı eksik veya geçersiz.';
+  if (lower.includes('rate limit') || lower.includes('too many requests'))
+    return 'AI sağlayıcı şu an yoğun — kısa bir süre sonra tekrar deneyin.';
+  if (lower.includes('schema validation')) return 'AI yanıtı beklenen formatta dönmedi, tekrar denenebilir.';
   if (lower.includes('provider') || lower.includes('createtask') || lower.includes('attempts failed') || lower.includes('ai response'))
-    return 'AI sağlayıcısında bir hata oluştu.';
+    return 'Provider geçici olarak yanıt vermedi. Tekrar deneyebilirsiniz.';
   return 'Bir hata oluştu.';
 }
 
@@ -976,7 +982,7 @@ export function VisualOutputsPanel({
       const message = err.status === 409
         ? (err.message ?? 'Görsel üretmek için Creative QA raporunun onaylı veya geçmiş (passed) olması gerekir.')
         : err.status === 502
-          ? 'Görsel üretim tamamlanamadı — AI sağlayıcı hatası. Çıktı kaydedilmedi.'
+          ? `${friendlyAiErrorMessage(err, 'Görsel üretim başlatılamadı.')} Başarısız deneme kayıt altına alındı.`
           : (err.message ?? 'Görsel üretim başlatılamadı.');
       setGenerateError(message);
     } finally {

@@ -16,17 +16,19 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import { ModelRouter, type AIResponse } from '@grafista/model-router';
+import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, visualGenerationTemplate } from '@grafista/prompt-engine';
 import {
   VisualGenerationPayloadSchema,
   type CreativeQAReport,
   type GeneratedOutput,
   type VisualGenerationImage,
+  type VisualGenerationPayload,
 } from '@grafista/schemas';
 import { assertReadyForVisualProduction } from './production-gate.js';
 import { store } from '../data/store.js';
 import { getStorageProvider } from '../storage/factory.js';
+import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 
 const modelRouter = new ModelRouter();
 
@@ -37,35 +39,6 @@ export interface VisualGenerationResult {
   outputs: GeneratedOutput[];
 }
 
-/** Tolerates markdown code fences around the model's JSON output (same cleanup as layout-generation.ts / creative-qa.ts). */
-function parseJsonFromModelOutput(content: string): unknown {
-  const cleaned = content.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  return JSON.parse(cleaned);
-}
-
-function logAiCall(label: string, response: AIResponse): void {
-  if (response.success) {
-    console.log(
-      `[visual-generation] ${label} ok — provider=${response.provider} model=${response.model} ` +
-        `tokens(in/out/total)=${response.usage.inputTokens}/${response.usage.outputTokens}/${response.usage.totalTokens} ` +
-        `estimatedCost=${response.usage.estimatedCost ?? 'n/a'} latencyMs=${response.latencyMs}`
-    );
-  } else {
-    console.error(
-      `[visual-generation] ${label} FAILED — provider=${response.provider} latencyMs=${response.latencyMs} error=${response.error}`
-    );
-  }
-}
-
-/** Raised with a `.status` property so the central errorHandler renders the right HTTP status. */
-function providerError(response: AIResponse): Error & { status: number } {
-  return Object.assign(new Error(response.error ?? 'AI provider error'), { status: 502 });
-}
-
-function schemaError(context: string, issues: string): Error & { status: number } {
-  return Object.assign(new Error(`AI response failed schema validation (${context}): ${issues}`), { status: 502 });
-}
-
 function notFound(message: string): Error & { status: number } {
   return Object.assign(new Error(message), { status: 404 });
 }
@@ -74,6 +47,12 @@ function notFound(message: string): Error & { status: number } {
  * tolerance layout-generation.ts extends to array wrappers). */
 function normalizePayloadShape(raw: unknown): unknown {
   return Array.isArray(raw) ? { images: raw } : raw;
+}
+
+/** Validation step for callAiForJson — runs AFTER the normalizePayloadShape transform. */
+function validateVisualPayload(raw: unknown): ValidateResult<VisualGenerationPayload> {
+  const validated = VisualGenerationPayloadSchema.safeParse(raw);
+  return validated.success ? { ok: true, data: validated.data } : { ok: false, error: validated.error.message };
 }
 
 /** Picks the QA report whose clearance opened the gate: a human 'approved' report wins
@@ -202,16 +181,33 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
   // No explicit `provider` here (unlike the text services): image_generation has its
   // own routing entry (primary 'openai', fallback 'kie-ai') and AI_DEFAULT_PROVIDER
   // only knows text providers — forcing it would break the image fallback chain.
-  const aiResponse = await modelRouter.complete({
-    taskType: 'image_generation',
-    systemPrompt: prompt.system,
-    userPrompt: prompt.user,
-    outputFormat: 'json',
-    maxTokens: prompt.metadata.maxTokens,
-    temperature: prompt.metadata.temperature,
-    metadata: { aspectRatio: `${layoutPlan.canvas.width}:${layoutPlan.canvas.height}` },
+  //
+  // Phase 3 Step 3: limited schema-retry via callAiForJson (same N1 pattern as
+  // layout-generation), with one deliberate persistence rule — the 'failed'
+  // generated_outputs row is written ONLY after the FINAL attempt fails, so an
+  // attempt that recovers on retry leaves no failed row behind. The aspect
+  // ratio still goes out raw ("W:H" pixels); the KieAIAdapter boundary
+  // normalizes it (Step 13 hotfix A — unchanged).
+  const outcome = await callAiForJson<VisualGenerationPayload>({
+    router: modelRouter,
+    request: {
+      taskType: 'image_generation',
+      systemPrompt: prompt.system,
+      userPrompt: prompt.user,
+      outputFormat: 'json',
+      maxTokens: prompt.metadata.maxTokens,
+      temperature: prompt.metadata.temperature,
+      metadata: { aspectRatio: `${layoutPlan.canvas.width}:${layoutPlan.canvas.height}` },
+    },
+    context: 'image_generation',
+    logPrefix: 'visual-generation',
+    transform: normalizePayloadShape,
+    validate: validateVisualPayload,
   });
-  logAiCall('image_generation', aiResponse);
+
+  // Last attempt's response — provider/model/latency for every persisted row
+  // (success or failure) come from the attempt that actually concluded the run.
+  const aiResponse = outcome.response;
 
   const baseRow = {
     clientId: client.id,
@@ -239,31 +235,19 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
     });
   }
 
-  if (!aiResponse.success) {
-    await recordRunFailure(aiResponse.error ?? 'AI provider error');
-    throw providerError(aiResponse);
-  }
-
-  let raw: unknown;
-  try {
-    raw = normalizePayloadShape(parseJsonFromModelOutput(aiResponse.content));
-  } catch (err) {
-    const message = `AI response was not valid JSON (image_generation): ${err instanceof Error ? err.message : String(err)}`;
-    await recordRunFailure(message);
-    throw Object.assign(new Error(message), { status: 502 });
-  }
-
-  const validated = VisualGenerationPayloadSchema.safeParse(raw);
-  if (!validated.success) {
-    await recordRunFailure(`AI response failed schema validation (image_generation): ${validated.error.message}`);
-    throw schemaError('image_generation', validated.error.message);
+  if (!outcome.ok) {
+    // FAILURES ARE PERSISTED (module contract) — but only after the final
+    // attempt: a schema flake that succeeds on the automatic retry must not
+    // leave a phantom 'failed' row behind.
+    await recordRunFailure(outcome.errorMessage);
+    throw aiCallError(outcome);
   }
 
   // Per image: bytes -> storage -> row. A failure for ONE image records that image as
   // 'failed' (never 'generated') and continues with the rest — partial success is
   // meaningful, and every failure remains visible via its own row + error_message.
   const outputs: GeneratedOutput[] = [];
-  for (const [i, image] of validated.data.images.entries()) {
+  for (const [i, image] of outcome.data.images.entries()) {
     const alternativeIndex = alternativeIndexBase + i + 1;
     const name = `${layoutPlan.format} visual — alternative ${alternativeIndex}`;
 

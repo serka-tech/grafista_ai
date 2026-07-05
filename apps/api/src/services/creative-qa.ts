@@ -14,7 +14,7 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import { ModelRouter, type AIResponse } from '@grafista/model-router';
+import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, creativeQATemplate } from '@grafista/prompt-engine';
 import {
   CreativeQAReportContentSchema,
@@ -25,6 +25,7 @@ import {
 } from '@grafista/schemas';
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
+import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 
 const modelRouter = new ModelRouter();
 
@@ -33,12 +34,6 @@ export const DEFAULT_PASS_THRESHOLD = 75;
 
 export interface CreativeQaResult {
   report: CreativeQAReport;
-}
-
-/** Tolerates markdown code fences around the model's JSON output (same cleanup as layout-generation.ts). */
-function parseJsonFromModelOutput(content: string): unknown {
-  const cleaned = content.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  return JSON.parse(cleaned);
 }
 
 /** Names of the 11 named per-check fields on CreativeQAReportContent (see packages/schemas/src/qa.ts),
@@ -103,27 +98,10 @@ function normalizeQaCheckStatuses(raw: unknown): unknown {
   return result;
 }
 
-function logAiCall(label: string, response: AIResponse): void {
-  if (response.success) {
-    console.log(
-      `[creative-qa] ${label} ok — provider=${response.provider} model=${response.model} ` +
-        `tokens(in/out/total)=${response.usage.inputTokens}/${response.usage.outputTokens}/${response.usage.totalTokens} ` +
-        `estimatedCost=${response.usage.estimatedCost ?? 'n/a'} latencyMs=${response.latencyMs}`
-    );
-  } else {
-    console.error(
-      `[creative-qa] ${label} FAILED — provider=${response.provider} latencyMs=${response.latencyMs} error=${response.error}`
-    );
-  }
-}
-
-/** Raised with a `.status` property so the central errorHandler renders the right HTTP status. */
-function providerError(response: AIResponse): Error & { status: number } {
-  return Object.assign(new Error(response.error ?? 'AI provider error'), { status: 502 });
-}
-
-function schemaError(context: string, issues: string): Error & { status: number } {
-  return Object.assign(new Error(`AI response failed schema validation (${context}): ${issues}`), { status: 502 });
+/** Validation step for callAiForJson — runs AFTER the deterministic normalizeQaCheckStatuses transform. */
+function validateCreativeQaContent(raw: unknown): ValidateResult<CreativeQAReportContent> {
+  const validated = CreativeQAReportContentSchema.safeParse(raw);
+  return validated.success ? { ok: true, data: validated.data } : { ok: false, error: validated.error.message };
 }
 
 function conflict(message: string): Error & { status: number } {
@@ -215,38 +193,31 @@ export async function runCreativeQa(layoutPlanId: string, requestedBy: string): 
     })
     .build();
 
-  const aiResponse = await modelRouter.complete({
-    taskType: 'creative_qa',
-    provider: env.AI_DEFAULT_PROVIDER,
-    systemPrompt: prompt.system,
-    userPrompt: prompt.user,
-    outputFormat: 'json',
-    maxTokens: prompt.metadata.maxTokens,
-    temperature: prompt.metadata.temperature,
+  // Phase 3 Step 3: same limited schema-retry as layout-generation (N1 pattern) —
+  // the deterministic normalizeQaCheckStatuses transform still runs BEFORE
+  // validation on every attempt, exactly as the Step 5B fix established.
+  const outcome = await callAiForJson<CreativeQAReportContent>({
+    router: modelRouter,
+    request: {
+      taskType: 'creative_qa',
+      provider: env.AI_DEFAULT_PROVIDER,
+      systemPrompt: prompt.system,
+      userPrompt: prompt.user,
+      outputFormat: 'json',
+      maxTokens: prompt.metadata.maxTokens,
+      temperature: prompt.metadata.temperature,
+    },
+    context: 'creative_qa',
+    logPrefix: 'creative-qa',
+    transform: normalizeQaCheckStatuses,
+    validate: validateCreativeQaContent,
   });
-  logAiCall('creative_qa', aiResponse);
 
-  if (!aiResponse.success) {
-    throw providerError(aiResponse);
+  if (!outcome.ok) {
+    throw aiCallError(outcome);
   }
 
-  let raw: unknown;
-  try {
-    raw = parseJsonFromModelOutput(aiResponse.content);
-  } catch (err) {
-    throw Object.assign(
-      new Error(`AI response was not valid JSON (creative_qa): ${err instanceof Error ? err.message : String(err)}`),
-      { status: 502 }
-    );
-  }
-
-  raw = normalizeQaCheckStatuses(raw);
-
-  const validated = CreativeQAReportContentSchema.safeParse(raw);
-  if (!validated.success) {
-    throw schemaError('creative_qa', validated.error.message);
-  }
-  const content = validated.data;
+  const { data: content, response: aiResponse } = outcome;
 
   const passed = content.overallScore >= DEFAULT_PASS_THRESHOLD;
   const status: CreativeQAReportStatus = passed ? 'passed' : 'failed';
