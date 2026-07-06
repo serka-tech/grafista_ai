@@ -439,8 +439,58 @@ kontrolü); queue-depth özeti global/tüm-client'lar arası (client-scoped
 değil, kasıtlı — bu bir ops görünümü); çoklu-worker koordinasyonu hâlâ test
 edilmedi (§7'nin kendi kabul ettiği sınır, bu adımın kapsamı dışı).
 
+---
+
+## 14. Implementation status update (Docker Compose Staging Skeleton + Staging Smoke Script — Production Step 2)
+
+**KISMEN UYGULANDI** — §11'in dört adaydan seçtiği "Docker Compose/Staging
+Deployment Skeleton + Production Smoke Script (birlikte)" sırasının somut
+teslimatı. Tam tasarım kararları/kapsam için
+[`docs/staging-compose.md`](./staging-compose.md) — burada yalnız KISA,
+dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- Repo'da artık gerçek, statik olarak gözden geçirilmiş, ÇALIŞTIRILABİLİR
+  bir Docker Compose staging iskeleti var — `apps/api/Dockerfile`
+  (multi-stage: pnpm build + Node 20/Chromium runtime, non-root user),
+  `docker-compose.staging.yml` (repo kökü: `postgres` + `api` servisleri,
+  healthcheck'ler, in-process worker — ayrı worker container YOK, Redis/
+  BullMQ YOK), `.env.staging.example`. §3'ün "repo'da hiçbir platform ipucu
+  yok" bulgusu artık kısmen kapandı: platform config'i ilk kez var.
+- İlk kez gerçek bir staging smoke MEKANİZMASI var —
+  `apps/api/src/scripts/smoke-staging.ts` — canlı bir dağıtımın
+  `/api/health` + `/api/health/ready`'sine HTTP üzerinden vurup `app`/
+  `ready`/`providers`/`queue`/`demoFlow` bölümlerini PASS/WARN/SKIP/FAIL
+  olarak raporluyor (`degraded`'ı asla otomatik FAIL saymadan — bu
+  belgenin ve `docs/deployment-runbook.md` §8'in kendi ilkesiyle tutarlı).
+
+**Bu adımın KAPATMADIĞI şey — abartılmıyor:**
+
+- **Gerçek bir production deployment DEĞİL** — bu hâlâ bir STAGING
+  validation iskeleti, gerçekleştirilmiş hiçbir production dağıtımı yok.
+- **Hiçbir CI/CD bunu otomatik ÇALIŞTIRMIYOR** — `staging:up`/
+  `smoke:staging` bugün tamamen elle tetiklenen komutlar; `.github/`
+  hâlâ repo'da yok (§12'nin bulgusu değişmedi).
+- **Çoklu-worker yatay ölçek koordinasyonu hâlâ test edilmedi** — bu
+  skeleton tek bir `api` container'ı çalıştırıyor; "2 instance = 2 worker
+  aynı tabloyu poll ediyor" senaryosu hâlâ hiçbir gerçek ortamda
+  egzersiz edilmedi (§7'nin bulgusu aynen geçerli).
+- **Tam authenticated bir HTTP end-to-end walkthrough YOK** —
+  `smoke-staging.ts`'in `demoFlow` bölümü bunu bilinçli olarak SKIP ile
+  işaretleyip `demo-flow.test.ts`'e yönlendiriyor, yeni bir HTTP test
+  framework'ü inşa etmiyor.
+- **Docker bu adımı yazan oturumda hiç gerçek bir Docker daemon'a karşı
+  çalıştırılmadı** — sandbox'ta Docker yoktu (`docker --version` "command
+  not found" döndü). Doğrulama tamamen statik (dosya/YAML syntax review) —
+  gerçek bir `docker compose up` denemesi hâlâ bir insan tarafından
+  yapılmalı.
+
 ## İlgili dokümanlar
 
+- [`docs/staging-compose.md`](./staging-compose.md) — bu §14'ün tam
+  teslimatı: Dockerfile/Compose/env/smoke script tasarım kararları, ne
+  doğrulanıp ne doğrulanmadığı, ve Docker-yok dürüst notu.
 - [`docs/phase-3-final-state.md`](./phase-3-final-state.md) §6 — bu
   belgenin var olma nedeni ve kapanış kararı.
 - [`docs/render-queue-worker-plan.md`](./render-queue-worker-plan.md) —

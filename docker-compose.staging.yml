@@ -1,0 +1,99 @@
+# Grafista AI Studio — STAGING Docker Compose skeleton
+#
+# "Production Step 2" deliverable — a minimal, safe, LOCAL/STAGING VALIDATION
+# skeleton, NOT a production deployment. See docs/staging-compose.md for the
+# full write-up (what this validates, what it does not, and the honest
+# "never run against real Docker" caveat for this authoring session).
+#
+# Topology matches the already-decided choice in
+# docs/production-readiness-review.md §3/§4 and docs/deployment-runbook.md
+# §2 — this file does not re-derive that decision, it implements it:
+#   - Docker Compose, single host.
+#   - The `api` container IS the render-queue worker (in-process
+#     setInterval-based polling loop started from
+#     apps/api/src/index.ts's startRenderWorkerLoop() when
+#     RENDER_QUEUE_ENABLED=true). There is NO separate worker
+#     service/container here — that would misrepresent the actual
+#     architecture.
+#   - NO Redis / BullMQ / Temporal anywhere — this project has zero such
+#     dependency (confirmed throughout every prior queue/worker doc:
+#     docs/render-queue-worker-plan.md, docs/production-readiness-review.md,
+#     docs/deployment-runbook.md §7).
+#   - NO MinIO/S3 service in this first skeleton — STORAGE_PROVIDER=local
+#     is the default here (see .env.staging.example); a real S3-compatible
+#     service can be added later (a `minio` service block here + switching
+#     STORAGE_PROVIDER=s3) — documented as a known gap/swap path in
+#     docs/staging-compose.md, not implemented in this step.
+#
+# Usage (see root package.json's `staging:up` / `staging:down` scripts, and
+# docs/staging-compose.md for the full walkthrough including migrate/seed):
+#   cp .env.staging.example .env.staging   # fill in AUTH_SECRET at minimum
+#   pnpm run staging:up
+#   pnpm run staging:down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      # Disposable, local-only credentials scoped to THIS compose network —
+      # not reachable outside it (no `ports:` mapping below), and not reused
+      # anywhere else. Not a production secret. If you ever expose this
+      # service beyond the compose network, replace these first.
+      POSTGRES_USER: grafista
+      POSTGRES_PASSWORD: grafista_staging_local_only
+      POSTGRES_DB: grafista
+    volumes:
+      - grafista_staging_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grafista -d grafista"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    # No `ports:` mapping on purpose — only the `api` service (same compose
+    # network, reachable at hostname `postgres`) needs to reach this
+    # database. Uncomment below only if you need a host-side `psql` for
+    # local debugging:
+    # ports:
+    #   - "5432:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env.staging
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Deliberately GET /api/health (liveness — static, no dependency
+      # checks), NOT GET /api/health/ready (readiness/dependency gate).
+      # /api/health/ready can legitimately report `status: "degraded"` for
+      # reasons that do NOT mean the container itself is broken — e.g. a
+      # missing AI provider key while intentionally running in
+      # AI_DEFAULT_PROVIDER=fake demo mode, or a single stale-locked render
+      # job the sweep will recover on its next tick (see
+      # docs/deployment-runbook.md §8: "degraded is not automatically a
+      # blocker"). Using /api/health/ready as a hard Docker healthcheck gate
+      # would make Docker restart/mark-unhealthy a perfectly fine container
+      # for a non-blocking reason — a misuse of that endpoint's intended
+      # semantics. Use `pnpm --filter @grafista/api run smoke:staging`
+      # (apps/api/src/scripts/smoke-staging.ts) against /api/health/ready
+      # for the richer, human-judged dependency-readiness signal instead.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  grafista_staging_pgdata:

@@ -242,6 +242,22 @@ Hiçbir örnek/placeholder değer verilmiyor, yalnız isim ve tek satırlık ama
 
 ## 5. First deployment sequence
 
+> **Docker Compose staging alternatifi (Production Step 2, YENİ):** aşağıdaki
+> 18 adımlık bare-metal/manuel sıra hâlâ geçerli ve bu belgenin birincil
+> prosedürü — ama STAGING için artık ikinci bir yol da var:
+> `docker-compose.staging.yml` (repo kökü) + `apps/api/Dockerfile` +
+> `pnpm run staging:up`/`staging:down`. Bu, aşağıdaki adım 1-11'i (checkout →
+> install → env → migrate → API start → health check) tek bir container
+> stack'ine sarar; adım 12-17 (seed/smoke) hâlâ container İÇİNDE elle
+> çalıştırılır (`docker compose exec api ...`) — otomatik zincirlenmiş
+> DEĞİL, bilinçli bir tercih (bu belgenin §6'sının "migration otomatik bir CI
+> adımı değil" ilkesiyle tutarlı). Tam detay, tasarım kararları ve
+> sınırlamalar için bkz. [`docs/staging-compose.md`](./staging-compose.md) —
+> o belge burada TEKRARLANMIYOR, yalnız çapraz referans veriliyor. Bu
+> alternatif hiçbir zaman gerçek bir Docker daemon'a karşı çalıştırılıp
+> doğrulanmadı (yazıldığı ortamda Docker yoktu) — `docs/staging-compose.md`
+> bunu açıkça işaretliyor.
+
 Aşağıdaki adımlar gerçek script isimleriyle — hiçbiri icat edilmedi, her
 biri `package.json`/`apps/api/package.json`'da doğrudan doğrulandı.
 
@@ -454,18 +470,28 @@ script yok, boşluklar açıkça işaretli:
 | OpenAI smoke | `smoke:providers`'ın `openai` bölümü — tek bir chat completion, auth+routing doğrulaması |
 | KIE smoke | `smoke:providers`'ın `kie` bölümü — gerçek bir görsel üretimi, byte indirme+storage+doğrulama |
 | Render/export smoke | `smoke:providers`'ın `render` bölümü — gerçek Playwright/Chromium PNG render |
-| Artifact download smoke | **Dedike bir mekanizma YOK** — bugün yalnız manuel: dashboard'dan bir export indirip dosyanın format/magic-byte beklentisine uyduğunu elle kontrol etmek |
+| Artifact download smoke | **Dedike bir mekanizma YOK** — bugün yalnız manuel: dashboard'dan bir export indirip dosyanın format/magic-byte beklentisine uyduğunu elle kontrol etmek. `smoke-staging.ts` (aşağıya bkz.) bunu KAPATMIYOR — bilinçli olarak dışarıda bırakıldı (bkz. `demoFlow` satırı) |
 | Analytics event smoke | **Dedike bir mekanizma YOK** — `analytics-events.test.ts` var ama bu bir unit/integration test, "deploy sonrası smoke" olarak adlandırılmış/otomatikleştirilmiş bir akış değil |
 | Revision history smoke | **Dedike bir mekanizma YOK** — aynı şekilde `revision-entries.test.ts` var, ayrı bir smoke script yok |
-| Queue worker heartbeat smoke | `apps/api/src/__tests__/render-health-ready.test.ts` (15 test) — heartbeat yazımı, stale-lock recovery, `/api/health/ready`'nin `renderQueue`/`workerHeartbeat` check'lerinin doğru dönmesi; bir test dosyası olarak bugün en yakın "queue/worker smoke" karşılığı, ama gerçek bir deploy sonrası CLI script/otomasyon DEĞİL |
+| Queue worker heartbeat smoke | `apps/api/src/__tests__/render-health-ready.test.ts` (15 test) — heartbeat yazımı, stale-lock recovery, `/api/health/ready`'nin `renderQueue`/`workerHeartbeat` check'lerinin doğru dönmesi. **KISMEN formalize edildi (Production Step 2):** `apps/api/src/scripts/smoke-staging.ts`'in `queue` bölümü artık AYRI bir "deploy sonrası çalıştır" CLI komutu olarak bu iki check'i (canlı `/api/health/ready`'den) okuyup PASS/WARN/FAIL/SKIP raporluyor — ama bu YENİ bir doğrulama mekanizması değil, var olan endpoint'in kendi hesapladığı sonucu HTTP üzerinden relay ediyor; asıl davranışsal doğrulama hâlâ `render-health-ready.test.ts`'te |
 
-**Sonuç:** üç madde (fake-provider demo, real-provider connectivity,
-heartbeat/queue davranışı) için gerçek, çalışan bir mekanizma zaten var —
-ama HİÇBİRİ tek bir "deploy sonrası çalıştır" komutuna birleştirilmedi;
-üçü de ayrı ayrı elle tetiklenir. Artifact download / analytics / revision
-smoke'ları için bugün gerçek bir dedike mekanizma yok — bu, §13'ün
-"Production Smoke Script" adayının tam olarak neyi formalize edeceğini
-gösteriyor.
+**Production Step 2 güncellemesi (bu belgenin kendisi tarafından formalize
+edildi — YENİ bir bulgu değil, §13'ün önerdiği adımın somut teslimatı):**
+`apps/api/src/scripts/smoke-staging.ts` artık gerçek bir "deploy sonrası
+çalıştır" komutu olarak var — `app` (liveness), `ready` (tam
+`/api/health/ready` özeti, `degraded`'ı WARN olarak, ASLA otomatik FAIL
+olarak işlemez), `providers` (anahtar presence/absence relay), `queue`
+(renderQueue/workerHeartbeat relay, kapalıyken SKIP) bölümleri. Bu, aşağıdaki
+üç maddeyi (fake-provider demo, real-provider connectivity, heartbeat/queue
+davranışı) TEK bir komuta bağlamadı — üçü hâlâ ayrı elle tetiklenir
+(`vitest run demo-flow.test.ts`, `smoke:providers`, `smoke:staging`) — ama
+`smoke:staging`'in kendisi, canlı bir staging dağıtımına karşı çalıştırılan
+İLK gerçek HTTP tabanlı smoke mekanizmasıdır. **Artifact download / analytics
+/ revision smoke'ları için bugün hâlâ gerçek bir dedike mekanizma yok** —
+`smoke:staging`'in `demoFlow` bölümü bunu bilinçli olarak SKIP ile işaretler
+ve `demo-flow.test.ts`'e yönlendirir, tam bir authenticated HTTP walkthrough
+inşa etmez (bkz. [`docs/staging-compose.md`](./staging-compose.md)). Tam
+detay için o belgeye bakın — burada tekrarlanmıyor.
 
 ---
 
@@ -621,6 +647,10 @@ hâlâ en düşük öncelik, talep doğmadan gündeme alınmaz.
 
 ## İlgili dokümanlar
 
+- [`docs/staging-compose.md`](./staging-compose.md) — Production Step 2:
+  bu runbook'un §2/§13'ünün önerdiği Docker Compose staging skeleton +
+  `smoke-staging.ts`'in gerçek teslimatı — tasarım kararları, ne kapsıyor/ne
+  kapsamıyor, ve "Docker bu ortamda hiç çalıştırılamadı" dürüst notu.
 - [`docs/production-readiness-review.md`](./production-readiness-review.md) —
   bu runbook'un §2'sinin doğrudan girdisi (topoloji kararı) ve §7/§8'in
   temel dayanağı (healthcheck/heartbeat/stale-lock uygulama detayları).

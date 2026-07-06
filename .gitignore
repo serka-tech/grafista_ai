@@ -12,6 +12,7 @@ out/
 .env
 .env.local
 .env.production
+.env.staging
 
 # IDE
 .vscode/settings.json

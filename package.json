@@ -13,7 +13,9 @@
     "test:stable": "pnpm --filter @grafista/api exec vitest run --maxWorkers=2",
     "lint": "pnpm -r run lint",
     "clean": "pnpm -r run clean",
-    "check:release": "pnpm run typecheck && pnpm run lint && pnpm run test:stable && pnpm run build"
+    "check:release": "pnpm run typecheck && pnpm run lint && pnpm run test:stable && pnpm run build",
+    "staging:up": "docker compose -f docker-compose.staging.yml up -d --build",
+    "staging:down": "docker compose -f docker-compose.staging.yml down"
   },
   "engines": {
     "node": ">=18.0.0",
