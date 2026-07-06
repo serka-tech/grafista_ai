@@ -11,11 +11,15 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "test:stable": "pnpm --filter @grafista/api exec vitest run --maxWorkers=2",
+    "test:ci": "pnpm --filter @grafista/api exec vitest run --maxWorkers=1",
     "lint": "pnpm -r run lint",
     "clean": "pnpm -r run clean",
     "check:release": "pnpm run typecheck && pnpm run lint && pnpm run test:stable && pnpm run build",
     "staging:up": "docker compose -f docker-compose.staging.yml up -d --build",
-    "staging:down": "docker compose -f docker-compose.staging.yml down"
+    "staging:down": "docker compose -f docker-compose.staging.yml down",
+    "ci:stable": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test:ci",
+    "ci:staging": "bash scripts/ci-staging.sh",
+    "ci:all": "pnpm run ci:stable && pnpm run ci:staging"
   },
   "engines": {
     "node": ">=18.0.0",

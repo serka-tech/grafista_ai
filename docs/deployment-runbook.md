@@ -281,6 +281,27 @@ Hiçbir örnek/placeholder değer verilmiyor, yalnız isim ve tek satırlık ama
 > değil, ama tekrarlanabilir ve script'lenebilir tek bir ek adım. Tam detay
 > için bkz. [`docs/staging-compose.md`](./staging-compose.md)'deki
 > "Production Step 2C" bölümü.
+>
+> **Production Step 3 sonucu (CI Stable Test Profile, YENİ):** Step 2C'nin
+> "clone → install → host build → staging:up" akışı artık script'lendi —
+> root `package.json`'a `ci:stable` (`typecheck && lint && build &&
+> test:ci`, Docker/secret YOK), `ci:staging` (→ `scripts/ci-staging.sh`: host
+> `build` → `staging:up` → health poll → `db:migrate` → `smoke:staging`,
+> `staging:down` bir `trap ... EXIT` ile BAŞARI/HATA fark etmeksizin her zaman
+> çalışıyor — iki ayrı zorlanmış-hata testiyle doğrulandı) ve `ci:all`
+> eklendi. `test:ci` (yeni, `--maxWorkers=1`) — mevcut `test:stable`
+> (`--maxWorkers=2`, dokunulmadı) yerine — bu adımın KENDİ doğrulaması
+> sırasında CANLI bulunan bir sorun yüzünden eklendi: `ci:staging` her
+> denemede PASS oldu, ama test suite bu makinede bugün 5 tam-suite
+> denemesinin sadece 1'inde temiz geçti (worker sayısından/retry'dan
+> bağımsız, her seferinde FARKLI rastgele testler, izolede hepsi PASS) —
+> önceden belgelenen "yük hassasiyeti" teknik borcuyla tutarlı, YENİ bir
+> regresyon değil, bu adımın kapsamında ÇÖZÜLMEDİ. Repo'da hiç GitHub
+> remote'u olmadığından (`git remote -v` boş) bir `.github/workflows/ci.yml`
+> şimdilik EKLENMEDİ — bilinçli tercih, gerekçesi ve drop-in-hazır workflow
+> YAML'ı [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'de. Tam
+> dürüst detay (hangi testler, kaç deneme, ne denendi) o belgede — burada
+> TEKRARLANMIYOR.
 
 Aşağıdaki adımlar gerçek script isimleriyle — hiçbiri icat edilmedi, her
 biri `package.json`/`apps/api/package.json`'da doğrudan doğrulandı.

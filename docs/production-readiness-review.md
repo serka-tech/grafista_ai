@@ -495,6 +495,28 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   build edilip image'a taşınmasıyla aşıldı). Tam detay:
   [`docs/staging-compose.md`](./staging-compose.md)'nin "Production Step
   2B" bölümü — burada TEKRARLANMIYOR.
+- **GÜNCELLEME (Production Step 3 — CI Stable Test Profile):** "Hiçbir
+  CI/CD bunu otomatik ÇALIŞTIRMIYOR" bulgusu artık KISMEN kapandı —
+  `pnpm run ci:stable` (typecheck/lint/build/`test:ci`, Docker/secret YOK)
+  ve `pnpm run ci:staging` (→ `scripts/ci-staging.sh`: host build →
+  `staging:up` → health poll → migrate → `smoke:staging`, `staging:down`
+  `trap ... EXIT` ile başarı/hata farketmeksizin garanti — iki zorlanmış-hata
+  testiyle doğrulandı) script'lendi. `ci:staging` gerçek Docker'a karşı her
+  denemede PASS oldu. **Yeni, dürüst bulgu — abartılmıyor:** `ci:stable`'ın
+  test adımı bu makinede bugün 5 tam-suite denemesinden sadece 1'inde temiz
+  geçti (worker sayısı `--maxWorkers=1/2` veya `--retry` fark etmeksizin,
+  her seferinde FARKLI rastgele testler, hepsi izolede PASS) — önceden
+  belgelenen "yük hassasiyeti" teknik borcuyla tutarlı, bu adımın YOL AÇTIĞI
+  bir regresyon değil ve bu adımın kapsamında ÇÖZÜLMEDİ (çözümü test
+  izolasyon mimarisinin yeniden tasarımını gerektirir — ayrı, daha büyük bir
+  iş). **Hâlâ kapanmadı:** repo'da GitHub remote'u olmadığından (`git remote
+  -v` boş) bir `.github/workflows/` dosyası HENÜZ eklenmedi — drop-in-hazır
+  YAML [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'de duruyor;
+  §12'nin ".github/ yok" bulgusu bu anlamda hâlâ teknik olarak geçerli, ama
+  artık "hiç script yok" değil "script var, otomatik tetikleyici yok"
+  durumu. Tam dürüst detay (hangi testler, kaç deneme):
+  [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — burada
+  TEKRARLANMIYOR.
 - **GÜNCELLEME (Production Step 2C — reprodüksiyon doğrulaması):** Step
   2B'nin workaround'ı gerçek Docker'a karşı iki senaryoda test edildi: (A)
   mevcut repo'da `staging:down` → `staging:up`, hiç `--no-cache`/restart
