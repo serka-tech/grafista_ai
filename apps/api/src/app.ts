@@ -29,8 +29,14 @@ import { analyticsRouter } from './routes/analytics.js';
 import { revisionsRouter } from './routes/revisions.js';
 import { healthRouter } from './routes/health.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { installDebugRoutesMiddleware } from './middleware/debug-routes.js';
 
 export const app: Express = express();
+
+// Opt-in diagnostic logging for the intermittent bare-405 flake (Production Step 5).
+// No-op unless CI_DEBUG_ROUTES=1 is set — see middleware/debug-routes.ts doc comment.
+// Mounted first, before cors/cookie-parser/json, so it reflects the raw incoming request.
+installDebugRoutesMiddleware(app);
 
 // Middleware
 app.use(cors({ origin: process.env.API_CORS_ORIGIN ?? 'http://localhost:3000', credentials: true }));

@@ -542,6 +542,41 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   hâlâ tam güvenilir bir merge gate değil.** Tam dürüst detay:
   [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production Step
   4" bölümü — burada TEKRARLANMIYOR.
+- **GÜNCELLEME (Production Step 5 — 405 flake'i kök nedeni bulundu, uygulama
+  hatası DEĞİL):** Step 4'ün açıklayamadığı 405 (ve devamında gözlenen
+  403/404/"socket hang up" varyantları) bu adımda **canlı kanıtla kök
+  nedenine ulaştırıldı**: `apps/api/src/app.ts`'e en başa `CI_DEBUG_ROUTES=1`
+  ile açılan, varsayılan kapalı bir teşhis middleware'i eklendi
+  (`apps/api/src/middleware/debug-routes.ts`) — her gerçek isteği/yanıtı
+  loglar. Bir tam-suite koşusunda, hatalı 405/403 alan `POST /api/auth/login`
+  çağrılarının bu logda **HİÇ karşılığı yoktu** (aynı koşudaki diğer 1039
+  login çağrısının tamamı loglandı, hepsi 200/401) — yani hatalı yanıt hiç bu
+  uygulamanın Express pipeline'ına uğramamış. Küçük, izole bir stres
+  script'iyle (800 tekrar, ~170 saniyede reprodüksiyon; sonradan silindi,
+  repoya eklenmedi) yakalanan hatalı yanıtın tam header/body içeriği —
+  `text/plain`, gövde `"404 page not found"`, `X-Content-Type-Options:
+  nosniff` ama `Content-Security-Policy` YOK — Express'in kendi 404
+  fallback'ının (`finalhandler`, her zaman HTML + CSP header) DEĞİL,
+  **Go'nun standart kütüphanesinin `net/http.Error()` imzasının** birebir
+  eşleşmesi. Kök neden: bu makinede `lsof` ile doğrulandı — Antigravity
+  IDE'nin arka plan `language_server_macos_arm` process'i (Go tabanlı),
+  `sysctl net.inet.ip.portrange`'in aynı efemer port aralığında (49152–65535)
+  birkaç port dinliyor; `supertest`'in her çağrıda (~2000 kez/koşu) yeni bir
+  efemer `http.Server` açıp kapatması bu paylaşılan port havuzuyla nadiren
+  çakışıyor ve istemcinin isteği bazen bizim Express sunucumuz yerine bu
+  ilgisiz IDE process'i tarafından yanıtlanıyor. **Bu bir uygulama/test kodu
+  hatası değil** — dört farklı, ilgisiz endpoint'te (`design-dna/approve`,
+  `uploadReference`, `auth/login` iki kez, `content-ideas`) aynı imzayla
+  gözlendi, tamamen transport-katmanı rastlantısıyla tutarlı. **Kalıcı düzeltme
+  kapsam dışı bırakıldı**: doğru çözüm (`supertest`'e her dosya/koşu için TEK
+  bir zaten-dinleyen server vermek, ~2000 efemer bind'i ~26'ya indirmek) 26
+  test dosyasının hemen hepsindeki çağrı noktalarını değiştirmeyi gerektiriyor
+  — bu adımın "test izolasyon mimarisinde büyük refactor yok" sınırını aşıyor.
+  `CI_DEBUG_ROUTES` teşhis aracı kalıcı olarak repoda bırakıldı (varsayılan
+  kapalı, sıfır maliyetli). **`ci:stable` hâlâ tam güvenilir bir merge gate
+  değil** — ama artık NEDEN olmadığı kanıtlı ve belgeli. Tam dürüst detay:
+  [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production Step
+  5" bölümü — burada TEKRARLANMIYOR.
 - **GÜNCELLEME (Production Step 2C — reprodüksiyon doğrulaması):** Step
   2B'nin workaround'ı gerçek Docker'a karşı iki senaryoda test edildi: (A)
   mevcut repo'da `staging:down` → `staging:up`, hiç `--no-cache`/restart

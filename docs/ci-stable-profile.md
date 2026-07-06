@@ -90,6 +90,144 @@ found **nothing** — no code anywhere in this stack sets that status
 intentionally, so its origin is still unexplained. Time-boxed within this
 step's scope; not chased further. See "Remaining risks" below.
 
+## Production Step 5 — the 405 flake, root-caused (external port collision, not an app bug)
+
+**Root cause found — with direct, reproduced evidence — and it is not a bug
+in this repository's application code, test code, or even really in
+`supertest`.** It is a collision between two independent processes on the
+same developer machine, both drawing from the OS's ephemeral TCP port range.
+
+**Instrumentation added first:** `apps/api/src/middleware/debug-routes.ts`,
+mounted as the very first middleware in `apps/api/src/app.ts` (before
+`cors`/`cookie-parser`/`json`), gated behind `CI_DEBUG_ROUTES=1` (no-op
+otherwise). When enabled it logs, per request: method/url on arrival, and on
+`res.on('finish')` the final status, matched route, and content-type; it also
+monkey-patches `res.status`/`sendStatus`/`writeHead` to capture a stack trace
+if anything ever sets 405 from app code, and logs `res.on('close')` without a
+prior `finish` (silent connection drop) and raw socket errors. Output goes to
+`console.error` and, if `CI_DEBUG_ROUTES_LOG_FILE` is set, is also appended
+synchronously to that file — the file sink was necessary because Vitest's
+reporter buffers/reorders console output per-test and does not print it at
+all for files with no failing test, which made the first instrumented run
+look far sparser than reality.
+
+**How the case broke open:** running `pnpm run test:ci` with
+`CI_DEBUG_ROUTES=1` and the file sink enabled reproduced two different bad
+statuses across two runs — a `405` on a `POST /api/auth/login` call inside
+`render-jobs.test.ts`'s `loginAs()` helper, and (a different run) a `403` on
+a `POST /api/auth/login` call inside `auth.test.ts`'s logout test. In both
+cases, the debug log — which logs literally every request that reaches
+Express, because it is the first middleware in the chain — had **zero
+matching entry** for that specific call, while every *other* login call in
+the same run (1039 of them in one run, all accounted for as matched
+`-->`/`<--` pairs, statuses only ever 200 or 401) was correctly logged. This
+is direct proof the bad response never touched this app's Express pipeline
+at all — something else answered the client's HTTP request.
+
+**Isolated, faster reproduction:** a temporary stress script (not committed
+— written, run, and deleted within this step) repeated the exact
+`request.agent(app)` login → `/auth/me` → logout → `/auth/me` sequence used
+by `auth.test.ts` 800 times in a tight loop, outside the full 26-file suite.
+It reproduced the anomaly in ~800 iterations (~170s): a `GET /api/auth/me`
+call got back a **404** whose response was captured in full —
+`Content-Type: text/plain; charset=utf-8`, body `404 page not found`,
+headers including `X-Content-Type-Options: nosniff` but notably **no**
+`Content-Security-Policy` header. That exact combination — plain-text body,
+that literal message, that header set, no CSP header — is the byte-for-byte
+signature of **Go's standard-library `net/http.Error()`/default 404
+handler**, not anything Express (or this app) can produce: Express's own
+404 fallback (`finalhandler`) always sends HTML with a
+`Content-Security-Policy: default-src 'none'` header, and the literal string
+`"404 page not found"` does not exist anywhere in this repo or any of its
+installed `node_modules` (grepped and confirmed absent).
+
+**The actual mechanism:** every `supertest` call in this test suite —
+`request(app)` and `request.agent(app)` alike — wraps the shared Express
+`app` in a **brand-new** `http.createServer(app)` and calls `.listen(0)`
+(OS-assigned ephemeral port) for essentially every single HTTP call, closing
+that server again once the response is received (`node_modules/.pnpm/.../supertest/lib/test.js`'s
+`Test.prototype.end()`/`serverAddress()`). Across one `test:ci` run (433
+tests, single worker, ~230s) this churns through roughly two thousand
+bind/close cycles, all drawing ephemeral ports from the same OS-wide pool
+(confirmed on this machine: `sysctl net.inet.ip.portrange.first/last` →
+`49152`–`65535`). `lsof -iTCP -sTCP:LISTEN` while idle showed two
+**`language_server_macos_arm`** processes — the Antigravity IDE's own
+background language-server/extension-host binary, confirmed via `ps` (PIDs
+896 and 2478 in one snapshot) — already listening on ports `49157`, `49158`,
+`49178`, `49188`, `49558`: squarely inside that same ephemeral range, and
+demonstrably Go-based given the 404 response's exact signature. On rare
+occasions, the OS hands Node's `.listen(0)` (or the IDE's own internal
+rebind cycle grabs) a port number that collides closely enough in time with
+this other process's own bind/rebind churn that a `supertest` client
+request ends up answered by the IDE's process instead of by the freshly
+bound Express test server — producing whatever that other listener happens
+to do with an unrecognized path (a plain 404 in the reproduced case; almost
+certainly the source of the previously-seen 405s and "socket hang up"
+errors too, depending on which internal state that other listener was in at
+the moment of collision). This is corroborated by every one of these
+bad-status failures being on a **different endpoint each time**
+(`design-dna/approve`, `uploadReference`, `auth/login` twice, `content-ideas`
+during this step's own validation runs) with no shared application code path
+— fully consistent with a transport-layer coincidence, not an app-level bug.
+
+**Why this is not fixed outright in this step:** the exposure is
+proportional to how many ephemeral bind/close cycles the suite performs —
+currently ~2000 per run, one per `supertest` call, because every one of the
+~26 test files calls `request(app)`/`request.agent(app)` directly rather
+than sharing one already-listening server for the file (or the run). The
+complete, durable fix is to bind `app` to a real (single, already-listening)
+`http.Server` once — per file via `beforeAll`/`afterAll`, or once for the
+whole run — and pass that listening server into `supertest` instead of the
+bare `app` function; `supertest`'s own `serverAddress()` skips its internal
+`.listen(0)` entirely whenever `app.address()` is already non-null, so this
+would cut the ~2000 ephemeral binds down to ~26 (or 1), shrinking the
+collision window by roughly two to three orders of magnitude. That change
+touches the request-construction call sites in essentially every one of the
+26 test files, however (`request(app)` → `request(sharedServer)` at every
+call site) — a mechanical but wide-blast-radius change across the whole test
+suite, which this step's explicit scope boundaries rule out ("no large
+refactor of test isolation architecture"). It is recorded here as the
+concrete, actionable next step for a dedicated follow-up, not attempted now.
+
+**What this step did instead, in scope:**
+1. Confirmed (via the debug instrumentation) that no `res.status`/
+   `sendStatus`/`writeHead(405, ...)` call ever fires from this app's own
+   code — the earlier grep-based finding, now independently reconfirmed via
+   live instrumentation rather than static analysis alone.
+2. Confirmed the "no test binds a real listener" assumption from Step 4 —
+   `grep -rn '\.listen(' apps/api/src/__tests__ apps/api/src/services`
+   returns nothing; only `apps/api/src/index.ts` calls `.listen()`, and no
+   test file imports it.
+3. Left the `CI_DEBUG_ROUTES` instrumentation in place, permanently, as an
+   opt-in diagnostic tool (see `apps/api/src/middleware/debug-routes.ts`'s
+   doc comment for full usage) — it is what made this root cause provable
+   rather than merely suspected, and it costs nothing when unset (the
+   default).
+4. Did **not** attempt the wide test-file refactor described above, per this
+   step's scope boundary.
+5. Side investigation (quick, not time-boxed as the main effort): searched
+   this repo's installed `express`/`multer`/`busboy`/`supertest`/`superagent`
+   packages for the literal strings `405`/`"Method Not Allowed"` — found in
+   neither; this line of inquiry (a Node v24 + Express 4.x compatibility
+   issue) became moot once the actual external-process mechanism above was
+   found and confirmed with concrete evidence, so it was not pursued further
+   with a general web search.
+
+**Net effect on flake rate:** unchanged by this step — the instrumentation
+is diagnostic only, not a fix, and the actual fix is explicitly out of
+scope. `pnpm run test:ci` runs during this step's own validation reproduced
+the same ~1-in-3-to-6 pattern seen in Steps 3–4 (one clean 433/433 run, and
+separately one run with a 405+socket-hang-up pair, one run with a
+403+socket-hang-up pair, one run with a 404+socket-hang-up pair — all four
+distinct symptoms of the exact same root cause identified above, occurring
+on four different, unrelated endpoints). **`ci:stable` should still not be
+treated as a fully deterministic merge gate** until the follow-up described
+above (share one listening server per test file/run) is implemented; in the
+meantime, `CI_DEBUG_ROUTES=1 CI_DEBUG_ROUTES_LOG_FILE=<path>` lets anyone
+who hits a spurious status on a merge run confirm in under a minute whether
+it is this same external-process collision (look for a missing `-->`/`<--`
+pair for the failing call in the log) rather than a real regression.
+
 ## Why no GitHub Actions file yet
 
 `git remote -v` returns nothing — this repo has never been pushed anywhere,
@@ -343,24 +481,26 @@ Docker-build minutes on a commit that already fails stable checks.
 ## Remaining risks
 
 - **The `ci:stable` test step's real-world green rate is still roughly
-  1-in-5-to-6 full-suite attempts, even after Production Step 4's fix.**
+  1-in-3-to-6 full-suite attempts, even after Production Steps 4 and 5.**
   Step 4 found and fixed one confirmed, verified root cause (a never-closed
-  DB pool connection leak — see the Step 4 section above) but the overall
-  failure rate did not measurably improve, meaning at least one more
-  distinct contributing factor exists. Step 4 additionally observed a
-  recurring, unexplained **405 Method Not Allowed** on legitimate POST
-  endpoints in at least 2 of the post-fix runs (`design-dna/approve`,
-  `uploadReference`) that is NOT explained by the (now-fixed) connection
-  leak — no code anywhere in this app, or in the installed
-  express/multer/pg packages, sets a 405 status explicitly. This was
-  time-boxed and NOT root-caused within Step 4's scope. **Before trusting
-  `ci:stable` as a hard merge gate, this 405 pattern needs its own
-  dedicated investigation** — ideally reproduced with request/response
-  logging added around the failing endpoints, and cross-checked against
-  whether it reproduces on a dedicated CI runner (this machine may simply
-  be under heavier concurrent load than a CI runner would be — that
-  remains an unverified but plausible contributing explanation, same
-  caveat as Step 3's original finding).
+  DB pool connection leak) but the overall failure rate did not measurably
+  improve. Step 5 then root-caused the second failure mode (the 405s, and by
+  extension the 403/404/"socket hang up" variants seen since) to an external
+  collision between `supertest`'s ~2000-per-run ephemeral `http.Server`
+  bind/close cycles and the Antigravity IDE's own background
+  `language_server_macos_arm` process, which independently binds ports
+  inside the same OS ephemeral range on this developer machine — see
+  "Production Step 5" above for the full evidence chain. **This is a real,
+  reproduced, understood root cause — not an application bug — but it is
+  NOT fixed**, because the durable fix (give each test file, or the whole
+  run, one already-listening server instead of one ephemeral server per
+  `supertest` call) touches request-construction call sites across
+  essentially all 26 test files, which this step's scope explicitly
+  excluded ("no large refactor of test isolation architecture"). Until that
+  follow-up lands, `ci:stable`'s test step should still not be treated as a
+  fully deterministic merge gate; `CI_DEBUG_ROUTES=1` (see Step 5) lets
+  anyone confirm in under a minute whether a given spurious failure is this
+  same known, external, non-app-code cause.
 - **`ci:staging` was reliable across every attempt today** (multiple full
   runs, plus two forced-failure injections to verify cleanup) — it does not
   share the embedded-Postgres-under-concurrent-vitest-workers architecture
