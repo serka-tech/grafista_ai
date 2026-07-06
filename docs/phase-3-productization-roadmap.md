@@ -7,7 +7,8 @@
 > the closure record's own analysis recommends deferring it in favor of a
 > Production Readiness Review / Deployment-Monitoring Plan as the next real
 > step; Photoshop/PSD remains a legitimate, low-priority, optional future
-> item exactly as scoped here, just not the immediate next step.
+> item exactly as scoped here, just not the immediate next step. That
+> review is now done: [`docs/production-readiness-review.md`](./production-readiness-review.md).
 
 > **Status (historical): Step 1 is DONE (see its status note below); Steps
 > 2–7 remain planned.** Phase 2

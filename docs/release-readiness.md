@@ -1,5 +1,13 @@
 # Grafista AI Studio — Release Readiness & Local Deployment Checklist
 
+> **Phase 3 follow-up:** this checklist's env/service inventory and
+> test-flakiness note were both cross-checked and expanded into a full
+> production-readiness plan — see
+> [`docs/production-readiness-review.md`](./production-readiness-review.md)
+> for the deployment topology recommendation, monitoring/logging gaps, and
+> the recommended next implementation step (healthcheck + worker
+> heartbeat/stale-lock recovery).
+
 Phase 2 Step 11. This is a checklist document, not a new feature. It
 consolidates what's already true about running the MVP demo locally — the
 step-by-step mechanics live in `docs/mvp-demo-flow.md`; this document is the
