@@ -51,6 +51,7 @@ export const PERMISSIONS = [
   'render_jobs:cancel',
   'export_artifacts:read',
   'analytics:read',
+  'revisions:read',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

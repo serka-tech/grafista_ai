@@ -65,6 +65,18 @@ layoutPlansRouter.post(
     if (!approved) {
       return res.status(409).json({ error: 'Layout plan is not in an approvable state', status: existing.status });
     }
+
+    // Phase 3 Step 6B — revision history (best-effort, never blocks the response).
+    await store.revisionEntries.recordBestEffort({
+      clientId: approved.clientId,
+      entityType: 'layout_plan',
+      entityId: approved.id,
+      revisionType: 'layout_plan_approved',
+      actorUserId: req.user!.id,
+      beforeSnapshot: { status: existing.status },
+      afterSnapshot: { status: approved.status, approvedBy: approved.approvedBy ?? null },
+    });
+
     res.json({ data: approved });
   })
 );
@@ -86,6 +98,20 @@ layoutPlansRouter.post(
     if (!rejected) {
       return res.status(409).json({ error: 'Layout plan is not in a rejectable state', status: existing.status });
     }
+
+    // Phase 3 Step 6B — revision history (best-effort, never blocks the response). Mirrors
+    // the repo's own notes ? 'needs_revision' : 'rejected' branching exactly.
+    await store.revisionEntries.recordBestEffort({
+      clientId: rejected.clientId,
+      entityType: 'layout_plan',
+      entityId: rejected.id,
+      revisionType: notes ? 'layout_plan_needs_revision' : 'layout_plan_rejected',
+      actorUserId: req.user!.id,
+      beforeSnapshot: { status: existing.status },
+      afterSnapshot: { status: rejected.status },
+      reason: notes ?? null,
+    });
+
     res.json({ data: rejected });
   })
 );

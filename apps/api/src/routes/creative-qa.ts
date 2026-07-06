@@ -90,6 +90,18 @@ creativeQaRouter.post(
       status: approved.status,
     });
 
+    // Phase 3 Step 6B — revision history (best-effort, never blocks the response). A
+    // separate call alongside the analyticsEvents one above — the two never interfere.
+    await store.revisionEntries.recordBestEffort({
+      clientId: approved.clientId,
+      entityType: 'creative_qa_report',
+      entityId: approved.id,
+      revisionType: 'creative_qa_report_approved',
+      actorUserId: req.user!.id,
+      beforeSnapshot: { status: existing.status, score: existing.overallScore ?? null },
+      afterSnapshot: { status: approved.status, approvedBy: approved.approvedBy ?? null, score: approved.overallScore ?? null },
+    });
+
     res.json({ data: approved });
   })
 );
@@ -111,6 +123,21 @@ creativeQaRouter.post(
     if (!rejected) {
       return res.status(409).json({ error: 'Creative QA report is not in a rejectable state', status: existing.status });
     }
+
+    // Phase 3 Step 6B — revision history (best-effort, never blocks the response). Mirrors
+    // the repo's own notes ? 'needs_revision' : 'rejected' branching exactly. No
+    // analyticsEvents call exists for reject today — this is the only new call site here.
+    await store.revisionEntries.recordBestEffort({
+      clientId: rejected.clientId,
+      entityType: 'creative_qa_report',
+      entityId: rejected.id,
+      revisionType: notes ? 'creative_qa_report_needs_revision' : 'creative_qa_report_rejected',
+      actorUserId: req.user!.id,
+      beforeSnapshot: { status: existing.status, score: existing.overallScore ?? null },
+      afterSnapshot: { status: rejected.status, rejectedBy: rejected.rejectedBy ?? null, score: rejected.overallScore ?? null },
+      reason: notes ?? null,
+    });
+
     res.json({ data: rejected });
   })
 );

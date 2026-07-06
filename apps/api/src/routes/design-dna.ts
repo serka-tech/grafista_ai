@@ -70,6 +70,18 @@ designDnaRouter.post(
     if (!approved) {
       return res.status(409).json({ error: 'Design DNA is not in an approvable state', status: latest.status });
     }
+
+    // Phase 3 Step 6B — revision history (best-effort, never blocks the response).
+    await store.revisionEntries.recordBestEffort({
+      clientId: approved.clientId,
+      entityType: 'design_dna',
+      entityId: approved.id,
+      revisionType: 'design_dna_approved',
+      actorUserId: req.user!.id,
+      beforeSnapshot: { status: latest.status, revisionNotes: latest.revisionNotes ?? null },
+      afterSnapshot: { status: approved.status, approvedBy: approved.approvedBy ?? null },
+    });
+
     res.json({ data: approved });
   })
 );
@@ -92,6 +104,19 @@ designDnaRouter.post(
     if (!revised) {
       return res.status(409).json({ error: 'Design DNA is not in a revisable state', status: latest.status });
     }
+
+    // Phase 3 Step 6B — revision history (best-effort, never blocks the response).
+    await store.revisionEntries.recordBestEffort({
+      clientId: revised.clientId,
+      entityType: 'design_dna',
+      entityId: revised.id,
+      revisionType: 'design_dna_needs_revision',
+      actorUserId: req.user!.id,
+      beforeSnapshot: { status: latest.status, revisionNotes: latest.revisionNotes ?? null },
+      afterSnapshot: { status: revised.status, revisionNotes: revised.revisionNotes ?? null },
+      reason: notes ?? null,
+    });
+
     res.json({ data: revised });
   })
 );

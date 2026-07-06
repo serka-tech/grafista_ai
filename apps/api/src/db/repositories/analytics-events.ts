@@ -41,7 +41,7 @@ function keyWords(key: string): string[] {
     .filter(Boolean);
 }
 
-function isDenylistedKey(key: string): boolean {
+export function isDenylistedKey(key: string): boolean {
   const words = keyWords(key);
   if (words.length === 0) return false;
   if (words.some((w) => w === 'secret' || w === 'password' || w === 'authorization' || w === 'auth')) return true;
@@ -52,7 +52,7 @@ function isDenylistedKey(key: string): boolean {
   return false;
 }
 
-function assertMetadataSafe(metadata: Record<string, unknown>): void {
+export function assertMetadataSafe(metadata: Record<string, unknown>): void {
   for (const key of Object.keys(metadata)) {
     if (isDenylistedKey(key)) {
       throw new Error(`analytics_events.metadata contains a denylisted key: "${key}"`);

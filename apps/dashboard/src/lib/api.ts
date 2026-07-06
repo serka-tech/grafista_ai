@@ -117,6 +117,9 @@ export const api = {
   // Analytics (Phase 3 Step 6A)
   getClientAnalyticsSummary: (clientId: string) => fetchAPI<{ data: any }>(`/api/clients/${clientId}/analytics/summary`),
 
+  // Revision History (Phase 3 Step 6B)
+  getClientRecentRevisions: (clientId: string) => fetchAPI<{ data: any[] }>(`/api/clients/${clientId}/revisions/recent`),
+
   // Design DNA
   getDesignDNA: (clientId: string) => fetchAPI<{ data: any }>(`/api/clients/${clientId}/design-dna`),
   analyzeDesignDNA: (clientId: string) => fetchAPI<any>(`/api/clients/${clientId}/design-dna/analyze`, { method: 'POST' }),

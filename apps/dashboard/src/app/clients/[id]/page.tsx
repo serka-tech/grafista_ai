@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { AnalyticsSummaryPanel } from '@/components/analytics-summary-panel';
+import { RevisionHistoryPanel } from '@/components/revision-history-panel';
 
 export default function ClientProfilePage({ params }: { params: { id: string } }) {
   const [client, setClient] = useState<any>(null);
@@ -55,6 +56,7 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
       </div>
 
       <AnalyticsSummaryPanel clientId={params.id} />
+      <RevisionHistoryPanel clientId={params.id} />
 
       {/* Hızlı İş Akışları */}
       <div className="card" style={{ marginTop: '24px' }}>

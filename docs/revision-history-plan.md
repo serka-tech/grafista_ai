@@ -1,5 +1,23 @@
 # Grafista AI Studio — Revision History Plan (Phase 3 Step 6B)
 
+> **Step 6B implemented** (this commit): `revision_entries` table
+> (`database/migrations/024_revision_entries.sql`), `revisionEntriesRepo`
+> (`apps/api/src/db/repositories/revision-entries.ts`), `GET
+> /api/clients/:clientId/revisions/recent`, and the dashboard
+> `revision-history-panel.tsx`. Entity/action set shipped, exactly as
+> planned in §3: `design_dna` (`approved`, `needs_revision`), `layout_plan`
+> (`approved`, `rejected`, `needs_revision`), `creative_qa_report`
+> (`approved`, `rejected`, `needs_revision`) — 8 revision types across 6 real
+> route call sites, all wired with `recordBestEffort()` (never blocks the
+> approve/reject/revise HTTP response). `ProductionJob`/`RenderJob` revisions
+> are deferred, per §2/§3's reasoning — not implemented in this step. Known
+> limitations: no full diff engine (`diffSummary` was deliberately dropped,
+> §6); `beforeSnapshot`/`afterSnapshot` are small, selective field subsets
+> (`status`/`notes`/`score`/`approvedBy`/`rejectedBy`), never the full
+> `layout_json`/`qa_json`/`design_dna` blob; best-effort recording can
+> silently no-op under a DB issue (see `recordBestEffort`'s `console.warn`,
+> same tradeoff Step 6A already accepted for `analytics_events`).
+
 > Bu belge, [`docs/analytics-revision-history-plan.md`](./analytics-revision-history-plan.md)'nin
 > (Step 6A teslimatı — `analytics_events`, `GET /api/clients/:id/analytics/summary`,
 > `analytics-summary-panel.tsx`) doğrudan devamıdır. §1-§7'deki gap analizi,
