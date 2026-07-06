@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, friendlyAiErrorMessage, resolveApiFileUrl } from '@/lib/api';
+import { api, friendlyAiErrorMessage, pollRenderJob, resolveApiFileUrl, TERMINAL_RENDER_JOB_STATUSES } from '@/lib/api';
 
 const OUTPUT_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
@@ -44,16 +44,20 @@ const PRODUCTION_JOB_STATUS_BADGES: Record<string, { class: string; label: strin
   rejected: { class: 'badge-danger', label: 'Reddedildi' },
 };
 
-// Render job lifecycle (Phase 2 Step 9A) — see packages/schemas/src/render-job.ts
-// (RenderJobStatusEnum). No 'approved'/'rejected' states here — a render is a
-// downstream, already-approved-upstream artifact request, not another human
-// approval gate.
+// Render job lifecycle (Phase 2 Step 9A; 'queued' added in Phase 3 Step 5A —
+// see packages/schemas/src/render-job.ts's RenderJobStatusEnum). No
+// 'approved'/'rejected' states here — a render is a downstream,
+// already-approved-upstream artifact request, not another human approval
+// gate. 'queued' only ever appears when the backend's render queue is
+// enabled (RENDER_QUEUE_ENABLED) — a sync-mode render never rests in that
+// state long enough to be observed.
 const RENDER_JOB_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
+  queued: { class: 'badge-warning', label: 'Sırada' },
   rendering: { class: 'badge-info', label: 'Render Alınıyor' },
   rendered: { class: 'badge-success', label: 'Render Hazır' },
   failed: { class: 'badge-danger', label: 'Hata Oluştu' },
-  cancelled: { class: 'badge-neutral', label: 'İptal Edildi' },
+  cancelled: { class: 'badge-neutral', label: 'İptal edildi' },
 };
 
 // Render quality warnings (Phase 2 Step 9B) — see RenderJob.renderWarnings in
@@ -185,6 +189,9 @@ type OutputActionState = {
   renderError: string | null;
   selectedPreset: string;
   selectedExportFormat: string;
+  // Render cancel (Phase 3 Step 5A).
+  cancellingRender: boolean;
+  cancelRenderError: string | null;
 };
 
 function emptyOutputActionState(): OutputActionState {
@@ -207,6 +214,8 @@ function emptyOutputActionState(): OutputActionState {
     renderError: null,
     selectedPreset: 'instagram_post',
     selectedExportFormat: 'png',
+    cancellingRender: false,
+    cancelRenderError: null,
   };
 }
 
@@ -249,6 +258,7 @@ function OutputCard({
   const canApproveProductionJob = permissions.includes('production_jobs:approve');
   const canRejectProductionJob = permissions.includes('production_jobs:reject');
   const canRender = permissions.includes('render_jobs:create');
+  const canCancelRender = permissions.includes('render_jobs:cancel');
 
   useEffect(() => {
     // Jobs only ever exist for successfully generated outputs; skip the
@@ -308,6 +318,24 @@ function OutputCard({
       active = false;
     };
   }, [productionJob?.id, productionJob?.status, loadRenderHistory]);
+
+  // Render job polling (Phase 3 Step 5A) — only while the LATEST render job
+  // is non-terminal (queued/rendering/pending); a sync-mode render already
+  // comes back terminal so this never even starts a timer in that case.
+  // Stops itself as soon as the job reaches a terminal status (see
+  // pollRenderJob in lib/api.ts) — no big polling framework, just one
+  // setInterval-equivalent per card while it's actually needed.
+  useEffect(() => {
+    if (!renderJob?.id || TERMINAL_RENDER_JOB_STATUSES.has(renderJob.status)) return;
+    const stop = pollRenderJob(renderJob.id, (updated) => {
+      setRenderJob(updated);
+      if (TERMINAL_RENDER_JOB_STATUSES.has(updated?.status)) {
+        // Refresh artifacts/history once the job actually finished.
+        loadRenderHistory().catch(() => {});
+      }
+    });
+    return stop;
+  }, [renderJob?.id, renderJob?.status, loadRenderHistory]);
 
   const statusInfo = OUTPUT_STATUS_BADGES[output.status] ?? { class: 'badge-neutral', label: output.status };
   const approvalInfo = APPROVAL_STATUS_BADGES[output.approvalStatus] ?? { class: 'badge-neutral', label: output.approvalStatus };
@@ -460,6 +488,30 @@ function OutputCard({
       patch({ renderError: err.message ?? 'Render işlemi başarısız oldu.' });
     } finally {
       patch({ rendering: false });
+    }
+  }
+
+  // Render cancel (Phase 3 Step 5A). Only shown for a non-terminal renderJob
+  // (queued/pending -> cancelled immediately server-side; rendering ->
+  // cancellation requested, the polling effect above picks up the eventual
+  // 'cancelled' status once the worker observes it).
+  const canCancelThisRender = renderJob != null && !TERMINAL_RENDER_JOB_STATUSES.has(renderJob.status);
+  const cancelRenderTitle = !canCancelRender
+    ? 'Bu işlemi çalıştırmak için yetkiniz yok'
+    : renderJob?.status === 'rendering'
+      ? 'Render devam ediyor — iptal isteği bir sonraki kontrolde uygulanır'
+      : 'Bu render işlemini iptal et';
+
+  async function handleCancelRender() {
+    if (!renderJob?.id) return;
+    patch({ cancellingRender: true, cancelRenderError: null });
+    try {
+      const res = await api.cancelRenderJob(renderJob.id);
+      setRenderJob(res.data);
+    } catch (err: any) {
+      patch({ cancelRenderError: err.message ?? 'İptal işlemi başarısız oldu.' });
+    } finally {
+      patch({ cancellingRender: false });
     }
   }
 
@@ -764,7 +816,25 @@ function OutputCard({
                 className={`badge ${(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { class: 'badge-neutral' }).class}`}
               >
                 {(RENDER_JOB_STATUS_BADGES[renderJob.status] ?? { label: renderJob.status }).label}
+                {renderJob.status === 'rendering' && renderJob.cancellationRequested ? ' (iptal isteniyor)' : ''}
               </span>
+            )}
+
+            {canCancelThisRender && (
+              <button
+                className="btn btn-danger btn-sm"
+                disabled={!canCancelRender || state.cancellingRender || (renderJob.status === 'rendering' && renderJob.cancellationRequested)}
+                title={cancelRenderTitle}
+                onClick={handleCancelRender}
+              >
+                {state.cancellingRender
+                  ? '⏳ İptal Ediliyor...'
+                  : renderJob.status === 'rendering'
+                    ? renderJob.cancellationRequested
+                      ? 'İptal İstendi'
+                      : 'İptal İste'
+                    : 'İptal Et'}
+              </button>
             )}
 
             {renderJob?.status === 'rendered' &&
@@ -911,6 +981,7 @@ function OutputCard({
         <ProviderErrorNote message={renderJob.errorMessage ?? 'Render işlemi başarısız oldu.'} />
       )}
       <ErrorNote message={state.renderError} />
+      <ErrorNote message={state.cancelRenderError} />
 
       {productionJob?.status === 'rejected' && productionJob.rejectionReason && (
         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>

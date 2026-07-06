@@ -12,7 +12,17 @@ import { z } from 'zod';
 //   pending -> rendering -> rendered
 //                      \-> failed     (errorMessage set)
 //   cancelled                          (manual abort, any pre-terminal state)
-export const RenderJobStatusEnum = z.enum(['pending', 'rendering', 'rendered', 'failed', 'cancelled']);
+//
+// Phase 3 Step 5A (render queue/worker, see docs/render-queue-worker-plan.md)
+// adds 'queued': a job created while the Postgres-backed render queue is
+// enabled (RENDER_QUEUE_ENABLED=true) starts life 'queued' instead of
+// synchronously rendering inline — a worker later claims it (-> 'rendering')
+// via apps/api/src/services/render-worker.ts. A retryable failure also
+// returns a job to 'queued' with a future nextRunAt (see the queue fields
+// below) rather than going straight to 'failed'. Sync mode (queue disabled,
+// the pre-existing/default behavior) never uses 'queued' — it still creates
+// 'pending' and resolves the whole pipeline inline, exactly as before.
+export const RenderJobStatusEnum = z.enum(['pending', 'queued', 'rendering', 'rendered', 'failed', 'cancelled']);
 export type RenderJobStatus = z.infer<typeof RenderJobStatusEnum>;
 
 // ─── Render preset / format ────────────────────────────────
@@ -114,6 +124,22 @@ export const RenderJobSchema = z.object({
   // Server-attached, never invented by the model.
   requestedBy: z.string().uuid(),
   errorMessage: z.string().max(2000).optional(),
+
+  // ─── Phase 3 Step 5A — render queue/worker fields (ADDITIVE) ───
+  // All optional: rows created before this step (or created in sync/queue-
+  // disabled mode) may leave several of these null/never-set. See
+  // docs/render-queue-worker-plan.md §5 for the full rationale and
+  // apps/api/src/services/render-worker.ts for the code that sets them.
+  queuedAt: z.string().datetime().optional(),
+  startedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  attemptCount: z.number().int().nonnegative().optional(),
+  maxAttempts: z.number().int().positive().optional(),
+  nextRunAt: z.string().datetime().optional(),
+  lockedBy: z.string().max(200).optional(),
+  lockedAt: z.string().datetime().optional(),
+  cancellationRequested: z.boolean().optional(),
+  cancelledAt: z.string().datetime().optional(),
 
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

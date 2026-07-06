@@ -15,6 +15,10 @@
 import { pool } from '../pool.js';
 import type { RenderJob, RenderJobStatus, RenderWarning, RequestedFormat } from '@grafista/schemas';
 
+function toIso(value: unknown): string | undefined {
+  return value instanceof Date ? value.toISOString() : undefined;
+}
+
 function mapRow(row: Record<string, unknown>): RenderJob {
   return {
     id: row.id as string,
@@ -34,6 +38,18 @@ function mapRow(row: Record<string, unknown>): RenderJob {
     requestedBy: row.requested_by as string,
     errorMessage: (row.error_message as string) ?? undefined,
 
+    // Phase 3 Step 5A — render queue/worker fields (ADDITIVE, all optional).
+    queuedAt: toIso(row.queued_at),
+    startedAt: toIso(row.started_at),
+    finishedAt: toIso(row.finished_at),
+    attemptCount: row.attempt_count != null ? Number(row.attempt_count) : undefined,
+    maxAttempts: row.max_attempts != null ? Number(row.max_attempts) : undefined,
+    nextRunAt: toIso(row.next_run_at),
+    lockedBy: (row.locked_by as string) ?? undefined,
+    lockedAt: toIso(row.locked_at),
+    cancellationRequested: row.cancellation_requested != null ? Boolean(row.cancellation_requested) : undefined,
+    cancelledAt: toIso(row.cancelled_at),
+
     createdAt: (row.created_at as Date).toISOString(),
     updatedAt: (row.updated_at as Date).toISOString(),
   };
@@ -41,26 +57,42 @@ function mapRow(row: Record<string, unknown>): RenderJob {
 
 export const renderJobsRepo = {
   /**
-   * Persists one render job row (status 'pending'). Unlike production_jobs,
+   * Persists one render job row. Unlike production_jobs,
    * manifestSnapshot/templateContractSnapshot are already known at creation
    * time (copied from the production job), so they're inserted directly here
    * rather than deferred to a later updateStatus() call.
+   *
+   * Phase 3 Step 5A — `opts.queued` (default false, preserving the exact
+   * pre-Step-5A row shape/behavior for every existing caller): when true
+   * (RENDER_QUEUE_ENABLED=true, see render-engine.ts), the row starts life
+   * 'queued' with `queuedAt`/`nextRunAt` set to now and `maxAttempts` from
+   * `opts.maxAttempts` (falls back to the column default, 3) — a worker
+   * claims it later (see claimNext()). When false, the row starts 'pending'
+   * exactly as it always has, and the synchronous caller drives it straight
+   * through 'rendering' -> 'rendered'/'failed' itself; `next_run_at`/
+   * `max_attempts` are set too but are inert in that path since no worker
+   * ever reads them.
    */
-  async create(data: {
-    id: string;
-    clientId: string;
-    productionJobId: string;
-    requestedFormat: RequestedFormat;
-    manifestSnapshot?: Record<string, unknown>;
-    templateContractSnapshot?: Record<string, unknown>;
-    requestedBy: string;
-  }): Promise<RenderJob> {
+  async create(
+    data: {
+      id: string;
+      clientId: string;
+      productionJobId: string;
+      requestedFormat: RequestedFormat;
+      manifestSnapshot?: Record<string, unknown>;
+      templateContractSnapshot?: Record<string, unknown>;
+      requestedBy: string;
+    },
+    opts?: { queued?: boolean; maxAttempts?: number }
+  ): Promise<RenderJob> {
+    const queued = opts?.queued ?? false;
+    const status = queued ? 'queued' : 'pending';
     const { rows } = await pool.query(
       `INSERT INTO render_jobs (
          id, client_id, production_job_id, requested_format, manifest_snapshot,
-         template_contract_snapshot, status, requested_by
+         template_contract_snapshot, status, requested_by, queued_at, next_run_at, max_attempts
        )
-       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),COALESCE($10, 3))
        RETURNING *`,
       [
         data.id,
@@ -69,7 +101,10 @@ export const renderJobsRepo = {
         JSON.stringify(data.requestedFormat),
         data.manifestSnapshot ? JSON.stringify(data.manifestSnapshot) : null,
         data.templateContractSnapshot ? JSON.stringify(data.templateContractSnapshot) : null,
+        status,
         data.requestedBy,
+        queued ? new Date().toISOString() : null,
+        opts?.maxAttempts ?? null,
       ]
     );
     return mapRow(rows[0]);
@@ -126,5 +161,165 @@ export const renderJobsRepo = {
       ]
     );
     return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
+  // ─── Phase 3 Step 5A — render queue/worker methods ─────────
+
+  /**
+   * Atomically claims the single oldest claimable job (status 'pending' or
+   * 'queued', not cancellation-requested, `next_run_at` due) for `workerId`
+   * and moves it straight to 'rendering' — a single statement, so it is
+   * correct under real concurrent callers without an explicit app-level
+   * transaction. The inner `SELECT ... FOR UPDATE SKIP LOCKED` is Postgres-
+   * native mutual exclusion: two workers (or two ticks) racing this query at
+   * the same instant can never claim the same row — the loser's SELECT skips
+   * the locked candidate row entirely and (with only one claimable job
+   * available) comes back empty, so its outer UPDATE's `WHERE id = (SELECT
+   * id FROM candidate)` matches nothing and returns no row.
+   *
+   * Sets started_at/locked_by/locked_at, increments attempt_count, and
+   * (only the first time) queued_at — a job created in sync/'pending' mode
+   * never reaches this method at all (see render-engine.ts), so queued_at
+   * stays null for those rows exactly as it always has.
+   */
+  async claimNext(workerId: string): Promise<RenderJob | undefined> {
+    const { rows } = await pool.query(
+      `WITH candidate AS (
+         SELECT id FROM render_jobs
+         WHERE status IN ('pending', 'queued')
+           AND cancellation_requested = FALSE
+           AND (next_run_at IS NULL OR next_run_at <= NOW())
+         ORDER BY created_at ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       UPDATE render_jobs
+       SET status = 'rendering',
+           started_at = NOW(),
+           locked_by = $1,
+           locked_at = NOW(),
+           attempt_count = attempt_count + 1,
+           queued_at = COALESCE(queued_at, NOW())
+       WHERE id = (SELECT id FROM candidate)
+       RETURNING *`,
+      [workerId]
+    );
+    return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
+  /** Success — terminal 'rendered', clears the lock, clears any stale error. */
+  async markRendered(
+    id: string,
+    fields: { rendererName?: string; rendererVersion?: string; renderWarnings?: RenderWarning[] }
+  ): Promise<RenderJob | undefined> {
+    const { rows } = await pool.query(
+      `UPDATE render_jobs
+       SET status = 'rendered',
+           finished_at = NOW(),
+           locked_by = NULL,
+           locked_at = NULL,
+           error_message = NULL,
+           renderer_name = COALESCE($2, renderer_name),
+           renderer_version = COALESCE($3, renderer_version),
+           render_warnings = COALESCE($4, render_warnings)
+       WHERE id = $1
+       RETURNING *`,
+      [
+        id,
+        fields.rendererName ?? null,
+        fields.rendererVersion ?? null,
+        fields.renderWarnings ? JSON.stringify(fields.renderWarnings) : null,
+      ]
+    );
+    return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
+  /**
+   * Retryable failure — back to 'queued' (NOT 'failed'), clears the lock,
+   * records the attempt's error, and schedules the next eligible claim time.
+   * attempt_count is left as-is (already incremented by claimNext()).
+   */
+  async markRetry(id: string, fields: { errorMessage: string; nextRunAt: Date }): Promise<RenderJob | undefined> {
+    const { rows } = await pool.query(
+      `UPDATE render_jobs
+       SET status = 'queued',
+           locked_by = NULL,
+           locked_at = NULL,
+           error_message = $2,
+           next_run_at = $3
+       WHERE id = $1
+       RETURNING *`,
+      [id, fields.errorMessage, fields.nextRunAt.toISOString()]
+    );
+    return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
+  /** Retries exhausted (or a non-retryable error class) — terminal 'failed'. */
+  async markFailed(id: string, fields: { errorMessage: string }): Promise<RenderJob | undefined> {
+    const { rows } = await pool.query(
+      `UPDATE render_jobs
+       SET status = 'failed',
+           finished_at = NOW(),
+           locked_by = NULL,
+           locked_at = NULL,
+           error_message = $2
+       WHERE id = $1
+       RETURNING *`,
+      [id, fields.errorMessage]
+    );
+    return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
+  /** Worker observed `cancellationRequested` after a 'rendering' attempt finished — terminal 'cancelled'. */
+  async markCancelled(id: string): Promise<RenderJob | undefined> {
+    const { rows } = await pool.query(
+      `UPDATE render_jobs
+       SET status = 'cancelled',
+           finished_at = NOW(),
+           cancelled_at = NOW(),
+           locked_by = NULL,
+           locked_at = NULL
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return rows[0] ? mapRow(rows[0]) : undefined;
+  },
+
+  /**
+   * Cancel request (POST /render-jobs/:id/cancel), atomic single statement:
+   *   - old status 'pending'/'queued' -> cancelled directly (finished_at/
+   *     cancelled_at set now; nothing was ever claimed, so there is no
+   *     lock/in-flight work to interrupt).
+   *   - old status 'rendering'       -> cancellation_requested = true only;
+   *     status stays 'rendering' until the worker observes the flag right
+   *     after its current attempt finishes (see render-worker.ts). Real
+   *     in-flight interruption of the renderer/storage call is NOT
+   *     performed — documented limitation, see docs/render-queue-worker-plan.md §12.
+   *   - old status 'rendered'/'failed'/'cancelled' -> no-op (the CASE
+   *     branches all fall through to the current value); the caller
+   *     distinguishes this from a real transition via the returned
+   *     `oldStatus` and turns it into a 409.
+   * The `old` CTE is evaluated once, before the UPDATE's SET list runs, so
+   * comparing against it (rather than the correlated column, which would
+   * refer to the row's OLD value anyway per standard SQL UPDATE semantics)
+   * makes the "was this a real transition" logic explicit and easy to read.
+   */
+  async requestCancellation(id: string): Promise<{ job: RenderJob; oldStatus: RenderJobStatus } | undefined> {
+    const { rows } = await pool.query(
+      `WITH old AS (SELECT status FROM render_jobs WHERE id = $1)
+       UPDATE render_jobs
+       SET
+         status = CASE WHEN (SELECT status FROM old) IN ('pending', 'queued') THEN 'cancelled' ELSE render_jobs.status END,
+         cancellation_requested = CASE WHEN (SELECT status FROM old) = 'rendering' THEN TRUE ELSE render_jobs.cancellation_requested END,
+         cancelled_at = CASE WHEN (SELECT status FROM old) IN ('pending', 'queued') THEN NOW() ELSE render_jobs.cancelled_at END,
+         finished_at = CASE WHEN (SELECT status FROM old) IN ('pending', 'queued') THEN NOW() ELSE render_jobs.finished_at END
+       WHERE id = $1
+       RETURNING *, (SELECT status FROM old) AS old_status`,
+      [id]
+    );
+    if (!rows[0]) return undefined;
+    const oldStatus = rows[0].old_status as RenderJobStatus;
+    return { job: mapRow(rows[0]), oldStatus };
   },
 };

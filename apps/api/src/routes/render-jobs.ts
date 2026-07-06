@@ -3,6 +3,7 @@ import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { renderProductionJob } from '../services/render-engine.js';
+import { cancelRenderJob } from '../services/render-worker.js';
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
 import { assertClientAccessible } from '../auth/client-access.js';
@@ -99,7 +100,13 @@ renderJobsRouter.post(
         { preset: preset as (typeof RenderPresetEnum.options)[number], exportFormat: exportFormat as (typeof ExportFormatEnum.options)[number] },
         req.user!.id
       );
-      return res.status(201).json({ data: renderJob });
+      // Phase 3 Step 5A — sync mode (default, RENDER_QUEUE_ENABLED off)
+      // always returns a TERMINAL job here ('rendered'; a failure throws
+      // instead, see the catch below) -> 201, unchanged from before this
+      // step. Queue mode returns a freshly-created, non-terminal 'queued'
+      // job -> 202 Accepted (see docs/render-queue-worker-plan.md §7).
+      const statusCode = renderJob.status === 'queued' ? 202 : 201;
+      return res.status(statusCode).json({ data: renderJob });
     } catch (err) {
       // ── NOT-RENDER-READY 409 ── mirrors production-jobs.ts's approve/reject
       // 409 convention of echoing the job's current status, without touching
@@ -196,6 +203,31 @@ renderJobsRouter.get(
     // Phase 3 Step 4 — client isolation hardening.
     await assertClientAccessible(req.user!.id, job.clientId);
     res.json({ data: job });
+  })
+);
+
+// POST /api/render-jobs/:id/cancel (Phase 3 Step 5A) — requests cancellation
+// of a non-terminal render job. `render_jobs:cancel` already existed as a
+// permission key (020_render_jobs_permissions.sql) even though no code path
+// used it before this step. pending/queued jobs are cancelled immediately;
+// a 'rendering' job gets cancellationRequested=true and is finalized to
+// 'cancelled' by the worker on its next observation (see render-worker.ts —
+// real in-flight Playwright/storage interruption is NOT performed, a
+// documented MVP limitation). An already-terminal job (rendered/failed/
+// cancelled) is an explicit 409, never a silent no-op.
+renderJobsRouter.post(
+  '/render-jobs/:id/cancel',
+  requireAuth,
+  requirePermission('render_jobs:cancel'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const job = await store.renderJobs.getById(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Render job not found' });
+    // Phase 3 Step 4 — client isolation hardening, same guard every other
+    // route in this file already applies.
+    await assertClientAccessible(req.user!.id, job.clientId);
+
+    const updated = await cancelRenderJob(job.id, req.user!.id);
+    res.json({ data: updated });
   })
 );
 

@@ -206,6 +206,11 @@ export const api = {
     fetchAPI<{ data: any[]; total: number }>(`/api/render-jobs/${renderJobId}/artifacts`),
   listRenderJobsForProductionJob: (productionJobId: string) =>
     fetchAPI<{ data: any[]; total: number }>(`/api/production-jobs/${productionJobId}/render-jobs`),
+  // Phase 3 Step 5A — render queue/worker. Cancels a non-terminal render job
+  // (pending/queued -> cancelled immediately; rendering -> cancellation
+  // requested, finalized by the worker on its next observation).
+  cancelRenderJob: (renderJobId: string) =>
+    fetchAPI<{ data: any }>(`/api/render-jobs/${renderJobId}/cancel`, { method: 'POST' }),
 
   // Outputs
   getOutputs: () => fetchAPI<{ data: any[] }>('/api/outputs'),
@@ -240,3 +245,54 @@ export const api = {
   cancelWorkflowRun: (id: string) =>
     fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/cancel`, { method: 'POST' }),
 };
+
+// ─── Render job polling (Phase 3 Step 5A) ──────────────────
+// Backend render jobs can now be non-terminal (queued/rendering) when the
+// server-side render queue is enabled — see docs/render-queue-worker-plan.md
+// §8. A rendered/failed/cancelled job never changes again, so polling stops
+// there; queued/rendering jobs are polled again after `intervalMs`.
+export const TERMINAL_RENDER_JOB_STATUSES = new Set(['rendered', 'failed', 'cancelled']);
+
+/**
+ * Starts polling GET /render-jobs/:id every `intervalMs` (default 2500ms)
+ * until the job reaches a terminal status, calling `onUpdate` with every
+ * fetched job (including the terminal one). Returns a `stop()` function —
+ * callers MUST call it on unmount/cleanup (e.g. from a `useEffect` cleanup)
+ * to avoid polling after the component using it is gone. A transient fetch
+ * failure is swallowed and retried on the next tick rather than stopping the
+ * poll outright — mirrors this file's other "don't let one transient failure
+ * break the UI" idioms.
+ */
+export function pollRenderJob(
+  renderJobId: string,
+  onUpdate: (job: any) => void,
+  options?: { intervalMs?: number }
+): () => void {
+  const intervalMs = options?.intervalMs ?? 2500;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const res = await api.getRenderJob(renderJobId);
+      if (stopped) return;
+      onUpdate(res.data);
+      if (TERMINAL_RENDER_JOB_STATUSES.has(res.data?.status)) {
+        stopped = true;
+        return;
+      }
+    } catch {
+      // Transient poll failure — keep trying until stop() is called or the
+      // job eventually resolves.
+    }
+    if (!stopped) timer = setTimeout(tick, intervalMs);
+  };
+
+  timer = setTimeout(tick, intervalMs);
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
+}
