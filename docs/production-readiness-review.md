@@ -495,6 +495,27 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   build edilip image'a taşınmasıyla aşıldı). Tam detay:
   [`docs/staging-compose.md`](./staging-compose.md)'nin "Production Step
   2B" bölümü — burada TEKRARLANMIYOR.
+- **GÜNCELLEME (Production Step 2C — reprodüksiyon doğrulaması):** Step
+  2B'nin workaround'ı gerçek Docker'a karşı iki senaryoda test edildi: (A)
+  mevcut repo'da `staging:down` → `staging:up`, hiç `--no-cache`/restart
+  olmadan — PASS; (B) tamamen temiz bir `git clone`'da, belgelenmiş "clone →
+  `pnpm install` → host'ta `pnpm run build` → `staging:up`" akışıyla — PASS.
+  İkisi de `smoke:staging`'de `2 pass, 2 warn, 1 skip, 0 fail` verdi ve
+  `--no-cache`/Docker Desktop restart hiçbir senaryoda gerekmedi. **Risk
+  seviyesi düşürüldü:** "`docker compose build` bare bir clone'dan
+  reprodüksiyonlu değil" riski artık bir hard blocker DEĞİL — "belgelenmiş,
+  script'lenebilir tek-ek-adımlı bir host-build-first akışıyla
+  reprodüksiyonlu, CI Step 3 için kabul edilebilir" olarak yeniden
+  sınıflandırılıyor, ANCAK şu şartla: CI pipeline'ı Docker build'den ÖNCE bu
+  host build adımını (`pnpm run build` veya en az `pnpm --filter
+  "@grafista/{schemas,model-router,prompt-engine}" run build`) içermeli —
+  aksi halde aynı boşluğa düşer. Step 2B'nin altta yatan Docker Desktop
+  overlayfs/containerd-snapshotter sorunu KÖK NEDENİ HÂLÂ BULUNMADI ve
+  workaround HÂLÂ YÜRÜRLÜKTE (kaldırılmadı) — Step 2C bunu yeniden
+  tetiklemeye çalışmadı, sadece mevcut workaround'ın kendisinin
+  reprodüksiyonlu olduğunu doğruladı. Tam detay:
+  [`docs/staging-compose.md`](./staging-compose.md)'nin "Production Step
+  2C" bölümü — burada TEKRARLANMIYOR.
 
 ## İlgili dokümanlar
 

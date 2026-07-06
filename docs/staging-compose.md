@@ -229,6 +229,78 @@ for this class of bug — then remove this workaround by restoring
 `--filter @grafista/api... run build` and re-excluding
 `packages/*/dist` once a clean rebuild is reliably green.
 
+## Production Step 2C — reproducibility verification (done)
+
+Step 2B fixed two real bugs and shipped one workaround (see above). Step 2C's
+job was to verify — with actual evidence, not assumption — whether the
+staging build is now reproducible **without ad hoc workarounds** (no Docker
+Desktop restart, no `--no-cache`, no manual file touching), in two scenarios.
+No code was changed in this step; this is a verification-only pass.
+
+**Scenario A — current repo, `staging:down` → `staging:up`, no workarounds:**
+PASS. `docker compose -f docker-compose.staging.yml build` (via `pnpm run
+staging:up`, no `--no-cache`) succeeded; both `postgres` and `api` reached
+`healthy`; `/api/health` → `200 {"status":"ok"}`; `/api/health/ready` →
+`200`, `degraded` overall with only `providers` (missing `kie` key, expected)
+degraded — `database`/`storage`/`renderQueue`/`workerHeartbeat`/`playwright`
+all `ok` (the persisted Docker volume already had migrations applied from a
+prior session, confirmed via `renderQueue`/`workerHeartbeat` both already
+`ok` before re-running `db:migrate` — no re-migration was needed); `pnpm
+--filter @grafista/api run smoke:staging` → `2 pass, 2 warn, 1 skip, 0 fail`.
+
+**Scenario B — fresh `git clone` into scratch, documented host-build-first
+flow:** PASS, via the documented (not zero-step) flow: clone → `pnpm install
+--frozen-lockfile` → `pnpm run build` (host-side; confirmed all 3 of
+`packages/schemas`, `packages/model-router`, `packages/prompt-engine`
+produced real `index.js` + `index.d.ts`, not silently-empty output) → `cp
+.env.staging.example .env.staging` with a generated `AUTH_SECRET` (via
+`openssl rand -hex 32`, never printed) → `pnpm run staging:up` (no
+`--no-cache`, no restart) → `docker compose ... ps` (both healthy) →
+`db:migrate` (fresh volume this time, all 25 migrations applied cleanly,
+same expected `pgvector`-on-alpine skip warning as Step 2B) →
+`/api/health` → `200 ok`; `/api/health/ready` → `200 degraded`, this time
+with `storage` also transiently `degraded` ("upload directory is not yet
+accessible (created on first upload)" — expected on a brand-new volume, not
+a bug) alongside the same expected `providers` degradation; `smoke:staging`
+→ `2 pass, 2 warn, 1 skip, 0 fail`, identical to scenario A. Compose's
+directory-derived project name (`grafista-ai-studio-clone`) did not collide
+with the main repo's (`grafista-ai-studio`), so no `-p` override was needed.
+The clone's containers, volume, network, and built image were all removed
+afterward, and the scratch clone directory was deleted.
+
+**Is a Docker Desktop restart or `--no-cache` still required? No, for
+either scenario, as tested.** Both scenarios passed with a plain `pnpm run
+staging:up` (which runs `docker compose ... up -d --build`, no `--no-cache`
+flag) and no Docker Desktop restart. This is **not** evidence that the
+underlying Docker Desktop overlayfs/containerd-snapshotter flakiness
+described in Step 2B is resolved or root-caused — it wasn't re-provoked
+because this run never needed the in-container `tsc` build of the 3
+workspace packages to begin with (the shipped workaround's whole point is
+to avoid that in-container build). **The Step 2B workaround is therefore
+still in place and still required** — `.dockerignore` still intentionally
+lets `packages/*/dist` through, and `apps/api/Dockerfile`'s build step still
+runs only `pnpm --filter @grafista/api run build`. Nothing here justifies
+removing it; that would require directly re-testing the in-container
+`tsc`-on-`COPY`'d-source path (e.g. reverting to `--filter @grafista/api...
+run build` and re-excluding `packages/*/dist`) and observing it succeed
+reliably, which Step 2C deliberately did not attempt (out of scope — would
+re-introduce the exact instability being routed around).
+
+**Net effect: reproducible via a documented host-build-first flow, not a
+zero-step "just clone and build" story.** A fresh clone (or a CI runner)
+must run a host-side `pnpm run build` before `docker compose build` for the
+3 packages' `dist/` to exist and be picked up by `COPY . .` — this is one
+extra, well-defined, scripted step, not a fragile manual workaround. Given
+that, this is an acceptable, repeatable path for CI Step 3, provided CI's
+pipeline includes that host build step before the Docker build (see
+`docs/production-readiness-review.md` for the updated risk framing).
+
+Validation re-run in the main repo after both scenarios: `pnpm run
+typecheck` — PASS; `pnpm run lint` — PASS (same 2 pre-existing
+`react-hooks/exhaustive-deps` warnings as Step 2B, unrelated); one more full
+`staging:up` → `smoke:staging` (`2 pass, 2 warn, 1 skip, 0 fail`) →
+`staging:down` cycle — PASS.
+
 ## Known gaps (carried forward honestly)
 
 - **No MinIO/real-S3 service wired up** — `STORAGE_PROVIDER=local` only,
@@ -247,16 +319,23 @@ for this class of bug — then remove this workaround by restoring
   smaller image.
 - **Real production deployment is explicitly out of scope** — this is a
   staging validation skeleton only.
-- **`docker compose build` is not yet reproducible from a bare `git
-  clone`** — see the Step 2B write-up above. It depends on
+- **`docker compose build` is NOT reproducible from a bare `git clone` with
+  zero extra steps** — but Step 2C verified it IS reproducible via a
+  documented host-build-first flow (clone → `pnpm install` → `pnpm run
+  build` → `staging:up`, see Step 2C write-up above). It still depends on
   `packages/schemas`, `packages/model-router` and `packages/prompt-engine`
-  already being built on the HOST first, a workaround for an unresolved
-  Docker Desktop file-system issue on this machine, not a proper fix.
+  already being built on the HOST first — a workaround for an unresolved
+  Docker Desktop file-system issue on this machine, not a proper fix. This
+  workaround has NOT been removed and should not be until the underlying
+  issue is actually root-caused (Step 2C did not re-attempt that).
 - **CI/CD would need updating too** — any pipeline that runs `docker
-  compose build` from a fresh checkout hits the same gap above; it would
-  need a `pnpm run build` (or at least `pnpm --filter
+  compose build` from a fresh checkout hits the same gap above; it needs a
+  `pnpm run build` (or at least `pnpm --filter
   "@grafista/{schemas,model-router,prompt-engine}" run build`) step before
-  the Docker build until the underlying issue is root-caused.
+  the Docker build until the underlying issue is root-caused. Step 2C
+  confirmed this exact flow works reliably on this machine, so it's a
+  legitimate one-added-step CI recipe, not a hard blocker — see
+  `docs/production-readiness-review.md`.
 
 ## Recommended immediate next action for a human
 

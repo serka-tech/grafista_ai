@@ -267,6 +267,20 @@ Hiçbir örnek/placeholder değer verilmiyor, yalnız isim ve tek satırlık ama
 > kararları ve sınırlamalar için bkz.
 > [`docs/staging-compose.md`](./staging-compose.md) — o belge burada
 > TEKRARLANMIYOR, yalnız çapraz referans veriliyor.
+>
+> **Production Step 2C sonucu (reprodüksiyon doğrulaması, YENİ):** İki senaryo
+> gerçek Docker'a karşı test edildi — (A) mevcut repo'da `staging:down` →
+> `staging:up`, hiç `--no-cache` ya da Docker Desktop restart olmadan: PASS.
+> (B) tamamen temiz bir `git clone`'da, belgelenmiş "önce host'ta `pnpm run
+> build`, sonra `staging:up`" akışıyla: PASS. İki senaryoda da `smoke:staging`
+> `2 pass, 2 warn, 1 skip, 0 fail` verdi. Sonuç: `--no-cache` veya Docker
+> Desktop restart artık HİÇBİR senaryoda gerekmiyor — ama Step 2B'nin
+> workaround'ı (3 paketin `dist/`'inin host'ta önceden build edilmiş olması
+> şartı) hâlâ YÜRÜRLÜKTE ve kaldırılmadı; bu yüzden temiz bir clone/CI runner
+> için akış hâlâ "clone → install → host build → staging:up" — sıfır adımlı
+> değil, ama tekrarlanabilir ve script'lenebilir tek bir ek adım. Tam detay
+> için bkz. [`docs/staging-compose.md`](./staging-compose.md)'deki
+> "Production Step 2C" bölümü.
 
 Aşağıdaki adımlar gerçek script isimleriyle — hiçbiri icat edilmedi, her
 biri `package.json`/`apps/api/package.json`'da doğrudan doğrulandı.
