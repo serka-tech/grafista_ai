@@ -1,6 +1,15 @@
 # Grafista AI Studio — Phase 3 Productization Roadmap
 
-> **Status: IN PROGRESS — Step 1 is DONE (see its status note below); Steps
+> **Status: Phase 3 CLOSED — Steps 1–6B all implemented (commits `f41c9f0`
+> through `8c0d15d`).** See [`docs/phase-3-final-state.md`](./phase-3-final-state.md)
+> for the full closure record, verification snapshot, and Step 7 planning
+> decision. Step 7 (below) as originally scoped was Photoshop/PSD handoff —
+> the closure record's own analysis recommends deferring it in favor of a
+> Production Readiness Review / Deployment-Monitoring Plan as the next real
+> step; Photoshop/PSD remains a legitimate, low-priority, optional future
+> item exactly as scoped here, just not the immediate next step.
+
+> **Status (historical): Step 1 is DONE (see its status note below); Steps
 > 2–7 remain planned.** Phase 2
 > closed at commit `a8e5949` with a 12/12 real-provider dashboard demo pass;
 > see [`docs/phase-2-final-state.md`](./phase-2-final-state.md) for the

@@ -104,18 +104,26 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
 - all five failure/gate paths verified live (409/403/401 with actionable
   messages); UX polish list (10 items, F1–F10) recorded — no UI changes made
 
-### Phase 3 — Productization
+### Phase 3 — Productization ✅ (Steps 1–6B complete, CLOSED)
 
 > Detailed 7-step plan (Phase 3 Step 1–7, with prioritization):
-> `docs/phase-3-productization-roadmap.md`.
+> `docs/phase-3-productization-roadmap.md`. Closure record + Step 7
+> decision: `docs/phase-3-final-state.md`.
 
-- [ ] Revision history & version control
-- [ ] Analytics dashboard (approval rates, generation stats)
-- [ ] Customer/project cost tracking
-- [ ] Client isolation hardening (move past the global-permission MVP model)
-- [ ] Render queue/worker (async renders; synchronous today by design)
-- [ ] Optional Photoshop/PSD handoff adapter (consumes the existing template contract)
-- [ ] Deployment & monitoring
+- [x] Revision history & version control — MVP scope: `design_dna`,
+      `layout_plan`, `creative_qa_report` only (Step 6B)
+- [x] Analytics dashboard (approval rates, generation stats) — Step 6A
+- [ ] Customer/project cost tracking — `estimatedCost` in analytics metadata
+      exists but is not real billing (known limitation, see closure record §5)
+- [x] Client isolation hardening (move past the global-permission MVP model) — Step 4
+- [x] Render queue/worker (async renders; opt-in via `RENDER_QUEUE_ENABLED`) — Step 5A
+- [ ] Optional Photoshop/PSD handoff adapter (consumes the existing template
+      contract) — still Step 7 as originally scoped, but **deferred**: the
+      closure record recommends a Production Readiness Review /
+      Deployment-Monitoring Plan first (see `docs/phase-3-final-state.md` §6)
+- [ ] Deployment & monitoring — **recommended as the actual next step**, not
+      yet started; no deployment or monitoring has ever been performed for
+      this project
 - Other earlier Phase-3 candidates (kept as backlog, not committed): real-time
   approval notifications, A/B content suggestions, campaign calendar, Figma
   plugin, template library, multi-user collaboration polish
