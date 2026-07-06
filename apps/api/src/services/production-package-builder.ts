@@ -577,6 +577,18 @@ export async function buildProductionPackage(generatedOutputId: string, requeste
     console.log(
       `[production-package] package ready — jobId=${ready.id} key=${stored.key} sizeBytes=${body.length}`
     );
+
+    // Phase 3 Step 6A — analytics event (best-effort).
+    await store.analyticsEvents.recordBestEffort({
+      clientId: ready.clientId,
+      entityType: 'production_job',
+      entityId: ready.id,
+      eventType: 'production_package_created',
+      actorUserId: requestedBy,
+      status: ready.status,
+      metadata: { sizeBytes: body.length },
+    });
+
     return ready;
   } catch (err) {
     // FAILURES ARE PERSISTED (visual-generation.ts contract): the job row is

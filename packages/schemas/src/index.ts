@@ -14,3 +14,4 @@ export * from './generated-output.js';
 export * from './workflow.js';
 export * from './production-job.js';
 export * from './render-job.js';
+export * from './analytics.js';

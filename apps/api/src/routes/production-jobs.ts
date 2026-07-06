@@ -179,6 +179,17 @@ productionJobsRouter.post(
         status: existing.status,
       });
     }
+
+    // Phase 3 Step 6A — analytics event (best-effort).
+    await store.analyticsEvents.recordBestEffort({
+      clientId: approved.clientId,
+      entityType: 'production_job',
+      entityId: approved.id,
+      eventType: 'production_job_approved',
+      actorUserId: req.user!.id,
+      status: approved.status,
+    });
+
     res.json({ data: approved });
   })
 );
@@ -210,6 +221,17 @@ productionJobsRouter.post(
         status: existing.status,
       });
     }
+
+    // Phase 3 Step 6A — analytics event (best-effort).
+    await store.analyticsEvents.recordBestEffort({
+      clientId: rejected.clientId,
+      entityType: 'production_job',
+      entityId: rejected.id,
+      eventType: 'production_job_rejected',
+      actorUserId: req.user!.id,
+      status: rejected.status,
+    });
+
     res.json({ data: rejected });
   })
 );

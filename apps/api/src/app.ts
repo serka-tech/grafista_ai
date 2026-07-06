@@ -25,6 +25,7 @@ import { outputsRouter } from './routes/outputs.js';
 import { settingsRouter } from './routes/settings.js';
 import { workflowsRouter } from './routes/workflows.js';
 import { workflowRunsRouter } from './routes/workflow-runs.js';
+import { analyticsRouter } from './routes/analytics.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 export const app: Express = express();
@@ -69,6 +70,7 @@ app.use('/api', outputsRouter);
 app.use('/api', settingsRouter);
 app.use('/api/workflows', workflowsRouter);
 app.use('/api/workflow-runs', workflowRunsRouter);
+app.use('/api/clients', analyticsRouter);
 
 // Error handler
 app.use(errorHandler);

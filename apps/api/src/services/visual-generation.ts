@@ -227,7 +227,7 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
 
   /** Persists a 'failed' row so the failure is visible in the DB, then lets the caller rethrow. */
   async function recordRunFailure(errorMessage: string): Promise<void> {
-    await store.generatedOutputs.create({
+    const failedRow = await store.generatedOutputs.create({
       ...baseRow,
       id: uuid(),
       name: `Visual generation failed — ${layoutPlan!.format}`,
@@ -235,6 +235,28 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
       status: 'failed',
       errorMessage,
       generationTimeMs: aiResponse.latencyMs,
+    });
+
+    // Phase 3 Step 6A — analytics event (best-effort). AI-call-level failure
+    // (outcome.ok === false): provider/model/attempts come from the last
+    // attempt's AIResponse, matching what ai-call-helper.ts already logs.
+    await store.analyticsEvents.recordBestEffort({
+      clientId: baseRow.clientId,
+      entityType: 'generated_output',
+      entityId: failedRow.id,
+      eventType: 'visual_generation_failed',
+      actorUserId: requestedBy,
+      provider: aiResponse.provider,
+      model: aiResponse.model,
+      status: 'failed',
+      durationMs: aiResponse.latencyMs ?? null,
+      metadata: {
+        attempts: outcome.attempts,
+        errorKind: aiResponse.errorKind ?? null,
+        tokenInput: aiResponse.usage?.inputTokens ?? null,
+        tokenOutput: aiResponse.usage?.outputTokens ?? null,
+        estimatedCost: aiResponse.usage?.estimatedCost ?? null,
+      },
     });
   }
 
@@ -288,6 +310,26 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
             : { width: layoutPlan.canvas.width, height: layoutPlan.canvas.height },
         generationTimeMs: aiResponse.latencyMs,
       });
+
+      // Phase 3 Step 6A — analytics event (best-effort).
+      await store.analyticsEvents.recordBestEffort({
+        clientId: client.id,
+        entityType: 'generated_output',
+        entityId: persisted.id,
+        eventType: 'visual_generation_succeeded',
+        actorUserId: requestedBy,
+        provider: aiResponse.provider,
+        model: aiResponse.model,
+        status: 'generated',
+        durationMs: aiResponse.latencyMs ?? null,
+        metadata: {
+          attempts: outcome.attempts,
+          tokenInput: aiResponse.usage?.inputTokens ?? null,
+          tokenOutput: aiResponse.usage?.outputTokens ?? null,
+          estimatedCost: aiResponse.usage?.estimatedCost ?? null,
+        },
+      });
+
       outputs.push(persisted);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -303,6 +345,24 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
         errorMessage,
         generationTimeMs: aiResponse.latencyMs,
       });
+
+      // Phase 3 Step 6A — analytics event (best-effort). Per-image storage/
+      // download failure — same event type as the AI-call-level failure
+      // above (both are "visual generation didn't produce a usable image"),
+      // but this one has no retry/attempts count of its own.
+      await store.analyticsEvents.recordBestEffort({
+        clientId: client.id,
+        entityType: 'generated_output',
+        entityId: failedRow.id,
+        eventType: 'visual_generation_failed',
+        actorUserId: requestedBy,
+        provider: aiResponse.provider,
+        model: aiResponse.model,
+        status: 'failed',
+        durationMs: aiResponse.latencyMs ?? null,
+        metadata: { errorKind: 'storage_or_download_failure' },
+      });
+
       outputs.push(failedRow);
     }
   }

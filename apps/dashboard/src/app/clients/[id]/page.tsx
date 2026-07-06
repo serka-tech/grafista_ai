@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { AnalyticsSummaryPanel } from '@/components/analytics-summary-panel';
 
 export default function ClientProfilePage({ params }: { params: { id: string } }) {
   const [client, setClient] = useState<any>(null);
@@ -52,6 +53,8 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
           </a>
         ))}
       </div>
+
+      <AnalyticsSummaryPanel clientId={params.id} />
 
       {/* Hızlı İş Akışları */}
       <div className="card" style={{ marginTop: '24px' }}>

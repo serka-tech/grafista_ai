@@ -251,6 +251,24 @@ export async function renderProductionJob(
     }
 
     console.log(`[render-engine] render ready — jobId=${rendered.id}`);
+
+    // Phase 3 Step 6A — analytics event (best-effort). Sync (non-queue) path.
+    await store.analyticsEvents.recordBestEffort({
+      clientId: rendered.clientId,
+      entityType: 'render_job',
+      entityId: rendered.id,
+      eventType: 'render_job_rendered',
+      actorUserId: requestedBy,
+      status: rendered.status,
+      metadata: {
+        preset: rendered.requestedFormat.preset,
+        format: rendered.requestedFormat.exportFormat,
+        width: rendered.requestedFormat.width,
+        height: rendered.requestedFormat.height,
+        warningCount: renderWarnings.length,
+      },
+    });
+
     return rendered;
   } catch (err) {
     // FAILURES ARE PERSISTED (same contract as production-package-builder.ts):
@@ -258,6 +276,21 @@ export async function renderProductionJob(
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error(`[render-engine] render FAILED — jobId=${job.id} error=${errorMessage}`);
     await store.renderJobs.updateStatus(job.id, 'failed', { errorMessage });
+
+    // Phase 3 Step 6A — analytics event (best-effort). Sync (non-queue) path.
+    await store.analyticsEvents.recordBestEffort({
+      clientId: job.clientId,
+      entityType: 'render_job',
+      entityId: job.id,
+      eventType: 'render_job_failed',
+      actorUserId: requestedBy,
+      status: 'failed',
+      metadata: {
+        preset: job.requestedFormat.preset,
+        format: job.requestedFormat.exportFormat,
+      },
+    });
+
     throw err;
   }
 }

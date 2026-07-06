@@ -278,6 +278,22 @@ renderJobsRouter.get(
     // Phase 3 Step 4 — client isolation hardening.
     await assertClientAccessible(req.user!.id, artifact.clientId);
 
+    // Phase 3 Step 6A — analytics event (best-effort). Recorded right after
+    // the guard passes (never on 404/403), applies to BOTH the S3-redirect
+    // and local-stream branches below.
+    await store.analyticsEvents.recordBestEffort({
+      clientId: artifact.clientId,
+      entityType: 'export_artifact',
+      entityId: artifact.id,
+      eventType: 'export_artifact_downloaded',
+      actorUserId: req.user!.id,
+      metadata: {
+        format: artifact.format,
+        sizeBytes: artifact.sizeBytes,
+        renderJobId: artifact.renderJobId,
+      },
+    });
+
     const filename = `export-${artifact.id}.${artifact.format}`;
 
     const access = await getFileAccess(

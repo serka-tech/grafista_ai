@@ -79,6 +79,17 @@ creativeQaRouter.post(
     if (!approved) {
       return res.status(409).json({ error: 'Creative QA report is not in an approvable state', status: existing.status });
     }
+
+    // Phase 3 Step 6A — analytics event (best-effort, never blocks the response).
+    await store.analyticsEvents.recordBestEffort({
+      clientId: approved.clientId,
+      entityType: 'creative_qa_report',
+      entityId: approved.id,
+      eventType: 'creative_qa_approved',
+      actorUserId: req.user!.id,
+      status: approved.status,
+    });
+
     res.json({ data: approved });
   })
 );

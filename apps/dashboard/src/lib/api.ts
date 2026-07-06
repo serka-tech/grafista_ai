@@ -114,6 +114,9 @@ export const api = {
   uploadDesignReference: (clientId: string, formData: FormData) =>
     uploadAPI<{ data: any }>(`/api/clients/${clientId}/design-references`, formData),
 
+  // Analytics (Phase 3 Step 6A)
+  getClientAnalyticsSummary: (clientId: string) => fetchAPI<{ data: any }>(`/api/clients/${clientId}/analytics/summary`),
+
   // Design DNA
   getDesignDNA: (clientId: string) => fetchAPI<{ data: any }>(`/api/clients/${clientId}/design-dna`),
   analyzeDesignDNA: (clientId: string) => fetchAPI<any>(`/api/clients/${clientId}/design-dna/analyze`, { method: 'POST' }),

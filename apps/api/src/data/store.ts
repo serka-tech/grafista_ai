@@ -24,6 +24,7 @@ import { generatedOutputsRepo } from '../db/repositories/generated-outputs.js';
 import { productionJobsRepo } from '../db/repositories/production-jobs.js';
 import { renderJobsRepo } from '../db/repositories/render-jobs.js';
 import { exportArtifactsRepo } from '../db/repositories/export-artifacts.js';
+import { analyticsEventsRepo } from '../db/repositories/analytics-events.js';
 import { workflowRunsRepo } from '../db/repositories/workflow-runs.js';
 import { workflowStepsRepo } from '../db/repositories/workflow-steps.js';
 import { workflowStepOutputsRepo } from '../db/repositories/workflow-step-outputs.js';
@@ -44,6 +45,7 @@ export const store = {
   productionJobs: productionJobsRepo,
   renderJobs: renderJobsRepo,
   exportArtifacts: exportArtifactsRepo,
+  analyticsEvents: analyticsEventsRepo,
   workflowRuns: workflowRunsRepo,
   workflowSteps: workflowStepsRepo,
   workflowStepOutputs: workflowStepOutputsRepo,

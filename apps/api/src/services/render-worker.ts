@@ -66,7 +66,23 @@ export async function enqueueRenderJob(data: {
   templateContractSnapshot?: Record<string, unknown>;
   requestedBy: string;
 }): Promise<RenderJob> {
-  return store.renderJobs.create(data, { queued: true, maxAttempts: getRenderJobMaxAttempts() });
+  const job = await store.renderJobs.create(data, { queued: true, maxAttempts: getRenderJobMaxAttempts() });
+
+  // Phase 3 Step 6A — analytics event (best-effort, nice-to-have per the plan).
+  await store.analyticsEvents.recordBestEffort({
+    clientId: job.clientId,
+    entityType: 'render_job',
+    entityId: job.id,
+    eventType: 'render_job_queued',
+    actorUserId: data.requestedBy,
+    status: job.status,
+    metadata: {
+      preset: job.requestedFormat.preset,
+      format: job.requestedFormat.exportFormat,
+    },
+  });
+
+  return job;
 }
 
 /**
@@ -100,17 +116,59 @@ export async function processRenderJob(renderJobId: string, workerId: string): P
     // still ran to completion — it is not interrupted mid-flight.
     const fresh = await store.renderJobs.getById(renderJobId);
     if (fresh?.cancellationRequested) {
-      return await store.renderJobs.markCancelled(renderJobId);
+      const cancelled = await store.renderJobs.markCancelled(renderJobId);
+      if (cancelled) {
+        await store.analyticsEvents.recordBestEffort({
+          clientId: cancelled.clientId,
+          entityType: 'render_job',
+          entityId: cancelled.id,
+          eventType: 'render_job_cancelled',
+          actorUserId: null,
+          status: cancelled.status,
+        });
+      }
+      return cancelled;
     }
 
-    return await store.renderJobs.markRendered(renderJobId, result);
+    const rendered = await store.renderJobs.markRendered(renderJobId, result);
+    if (rendered) {
+      // Phase 3 Step 6A — analytics event (best-effort). Queue/worker path
+      // (the sync path's own 'rendered' event is recorded in render-engine.ts).
+      await store.analyticsEvents.recordBestEffort({
+        clientId: rendered.clientId,
+        entityType: 'render_job',
+        entityId: rendered.id,
+        eventType: 'render_job_rendered',
+        actorUserId: null,
+        status: rendered.status,
+        metadata: {
+          preset: rendered.requestedFormat.preset,
+          format: rendered.requestedFormat.exportFormat,
+          width: rendered.requestedFormat.width,
+          height: rendered.requestedFormat.height,
+          warningCount: result.renderWarnings.length,
+        },
+      });
+    }
+    return rendered;
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error(`[render-worker] attempt failed — jobId=${renderJobId} workerId=${workerId} error=${errorMessage}`);
 
     const fresh = await store.renderJobs.getById(renderJobId);
     if (fresh?.cancellationRequested) {
-      return await store.renderJobs.markCancelled(renderJobId);
+      const cancelled = await store.renderJobs.markCancelled(renderJobId);
+      if (cancelled) {
+        await store.analyticsEvents.recordBestEffort({
+          clientId: cancelled.clientId,
+          entityType: 'render_job',
+          entityId: cancelled.id,
+          eventType: 'render_job_cancelled',
+          actorUserId: null,
+          status: cancelled.status,
+        });
+      }
+      return cancelled;
     }
 
     const classification = classifyProviderError({ error: errorMessage });
@@ -127,7 +185,24 @@ export async function processRenderJob(renderJobId: string, workerId: string): P
       return await store.renderJobs.markRetry(renderJobId, { errorMessage, nextRunAt });
     }
 
-    return await store.renderJobs.markFailed(renderJobId, { errorMessage });
+    const failed = await store.renderJobs.markFailed(renderJobId, { errorMessage });
+    if (failed) {
+      // Phase 3 Step 6A — analytics event (best-effort). Queue/worker path
+      // (the sync path's own 'failed' event is recorded in render-engine.ts).
+      await store.analyticsEvents.recordBestEffort({
+        clientId: failed.clientId,
+        entityType: 'render_job',
+        entityId: failed.id,
+        eventType: 'render_job_failed',
+        actorUserId: null,
+        status: failed.status,
+        metadata: {
+          preset: failed.requestedFormat.preset,
+          format: failed.requestedFormat.exportFormat,
+        },
+      });
+    }
+    return failed;
   }
 }
 
@@ -187,6 +262,23 @@ export async function cancelRenderJob(renderJobId: string, requestedBy: string):
   if (result.oldStatus === 'rendered' || result.oldStatus === 'failed' || result.oldStatus === 'cancelled') {
     throw Object.assign(new Error(`Render job is already '${result.oldStatus}' — cannot cancel`), { status: 409 });
   }
+
+  // Phase 3 Step 6A — analytics event (best-effort, nice-to-have per the
+  // plan). Only fires when this call actually transitioned the row straight
+  // to 'cancelled' (old status pending/queued) — the 'rendering' branch sets
+  // cancellationRequested only, and its own 'render_job_cancelled' event is
+  // recorded later by processRenderJob's observation, not here (no double-fire).
+  if (result.job.status === 'cancelled') {
+    await store.analyticsEvents.recordBestEffort({
+      clientId: result.job.clientId,
+      entityType: 'render_job',
+      entityId: result.job.id,
+      eventType: 'render_job_cancelled',
+      actorUserId: requestedBy,
+      status: result.job.status,
+    });
+  }
+
   return result.job;
 }
 

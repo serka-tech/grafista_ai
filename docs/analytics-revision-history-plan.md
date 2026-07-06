@@ -1,5 +1,23 @@
 # Grafista AI Studio — Analytics + Revision History Plan (Phase 3 Step 6)
 
+> **Step 6A implemented** (this commit): `analytics_events` table
+> (`database/migrations/023_analytics_events.sql`), `analyticsEventsRepo`
+> (`apps/api/src/db/repositories/analytics-events.ts`), `GET
+> /api/clients/:id/analytics/summary`, and the dashboard
+> `analytics-summary-panel.tsx`. Event set implemented: `creative_qa_approved`,
+> `visual_generation_succeeded`, `visual_generation_failed`,
+> `production_package_created`, `production_job_approved`,
+> `production_job_rejected`, `render_job_queued`, `render_job_rendered`,
+> `render_job_failed`, `render_job_cancelled`, `export_artifact_downloaded`
+> (a slightly narrower set than §8.1's original draft list — no
+> `projects`/`campaigns` dimension exists in this schema, so none was added).
+> `RevisionEntry` (§8.2) is still deferred to Step 6B, untouched. Known
+> limitations: `estimatedCost` in metadata is whatever `AIResponse.usage`
+> already reports, not a real billing figure; there are no date-range
+> filters or charts yet (summary is all-time); recording is best-effort and
+> can silently no-op under a DB issue (see `recordBestEffort`'s
+> `console.warn`, §9/§14 below).
+
 Status: **PLANNING ONLY — no code, no migration, no dependency added in this step.**
 Bu belge Phase 3 Step 6'nın teslimatıdır. `docs/render-queue-worker-plan.md`
 ile aynı disiplinle: mevcut durum özeti, gap analizi, karar matrisi, veri
