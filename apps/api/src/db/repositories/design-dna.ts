@@ -239,6 +239,23 @@ export const designDnaRepo = {
   },
 
   /**
+   * Batched form of hasForClient for list endpoints — one query instead of one
+   * round trip per client (GET /api/clients previously did N sequential
+   * hasForClient() calls via Promise.all, one per row; as a test/dev database
+   * accumulates more client rows over time, that N+1 pattern scales query
+   * count — and DB pool connection checkouts — directly with total client
+   * count instead of staying constant per request).
+   */
+  async hasForClientIds(clientIds: string[]): Promise<Set<string>> {
+    if (clientIds.length === 0) return new Set();
+    const { rows } = await pool.query<{ client_id: string }>(
+      'SELECT DISTINCT client_id FROM design_dna WHERE client_id = ANY($1)',
+      [clientIds]
+    );
+    return new Set(rows.map((r) => r.client_id));
+  },
+
+  /**
    * Approves the given DNA version. Only succeeds from 'generated' or 'waiting_for_approval'
    * ('draft' isn't approvable — nothing was generated yet; 'approved' is already terminal for
    * this transition; approving out of 'needs_revision' should go through a fresh analysis run

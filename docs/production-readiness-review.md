@@ -517,6 +517,31 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   durumu. Tam dürüst detay (hangi testler, kaç deneme):
   [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — burada
   TEKRARLANMIYOR.
+- **GÜNCELLEME (Production Step 4 — Test Isolation & Stable CI Reliability
+  Hardening):** Step 3'ün flakiness bulgusu 4 paralel ajanla araştırıldı;
+  **gerçek, doğrulanmış bir kök neden bulunup düzeltildi**:
+  `apps/api/src/db/pool.ts`'in module-level `pg.Pool` singleton'ı hiçbir test
+  dosyasında kapatılmıyordu — Vitest'in `isolate:true` varsayımıyla her dosya
+  kendi pool'unu yaratıp aynı (paylaşılan) worker process'inde terk ediyor,
+  bağlantılar paylaşılan tek embedded Postgres'e karşı birikip rastgele bir
+  anda tükeniyordu. Fix: `vitest.config.ts`'e `setupFiles` ile her dosya
+  sonunda otomatik `closePool()` + `pool.ts`'e `connectionTimeoutMillis` +
+  `GET /api/clients`'teki gerçek bir N+1 anti-pattern'in (`Promise.all` ile
+  client başına ayrı sorgu) tek batch sorguya çevrilmesi. **`pg_stat_activity`
+  ile canlı izlenerek doğrulandı** — bağlantı sayısı bir tam koşu boyunca
+  sabit kaldı (önceden büyüyordü varsayımı artık gözlemle kanıtlandı).
+  **Dürüst sonuç — abartılmıyor:** bu düzeltme genel flakiness oranını
+  ÖLÇÜLEBİLİR şekilde iyileştirmedi (fix sonrası 6 tam-suite denemeden yine
+  sadece 1'i temiz) — en az bir farklı, henüz kök nedeni bulunamamış katkı
+  faktörü daha var: en az 2 denemede meşru bir POST endpoint'i (`design-dna/
+  approve`, `uploadReference`) beklenmedik bir **405 Method Not Allowed**
+  döndürdü; bu, düzeltilen pool-leak mekanizmasıyla açıklanamıyor (bir
+  denemede bağlantı sayısının sabit kaldığı DOĞRULANMIŞKEN bile 405 oluştu),
+  ve `error-handler.ts`/`express`/`multer`/`pg` kaynak kodunda hiçbir yerde
+  405 set edilmiyor — kaynağı bu adımın kapsamında bulunamadı. **`ci:stable`
+  hâlâ tam güvenilir bir merge gate değil.** Tam dürüst detay:
+  [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production Step
+  4" bölümü — burada TEKRARLANMIYOR.
 - **GÜNCELLEME (Production Step 2C — reprodüksiyon doğrulaması):** Step
   2B'nin workaround'ı gerçek Docker'a karşı iki senaryoda test edildi: (A)
   mevcut repo'da `staging:down` → `staging:up`, hiç `--no-cache`/restart

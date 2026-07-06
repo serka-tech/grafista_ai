@@ -1,12 +1,94 @@
-# Grafista AI Studio — CI Stable Test Profile (Production Step 3)
+# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4)
 
-> **Status: scripts + this doc only.** No `.github/workflows/` file was
-> added — see "Why no GitHub Actions file yet" below. No code was changed
-> beyond `package.json` (4 new scripts: `ci:stable`, `ci:staging`, `ci:all`,
-> `test:ci`) and one new helper script (`scripts/ci-staging.sh`). Continues
-> [`docs/staging-compose.md`](./staging-compose.md) (Production Step 2/2B/2C)
-> and [`docs/deployment-runbook.md`](./deployment-runbook.md) — neither is
-> re-derived here.
+> **Status: scripts + docs, plus two real source fixes from Production Step
+> 4** (see "Production Step 4" section below for the full, honest account —
+> a genuine root cause was found and fixed, but it did NOT eliminate
+> `ci:stable`'s test-step flakiness; a second, distinct, unexplained failure
+> mode remains). No `.github/workflows/` file was added — see "Why no GitHub
+> Actions file yet" below. Continues [`docs/staging-compose.md`](./staging-compose.md)
+> (Production Step 2/2B/2C) and [`docs/deployment-runbook.md`](./deployment-runbook.md)
+> — neither is re-derived here.
+
+## Production Step 4 — test isolation hardening (partial fix, honestly reported)
+
+**Investigation method:** four parallel, independent, read-only investigation
+agents each chased a distinct hypothesis for why `ci:stable`'s test step
+(`test:ci`, `--maxWorkers=1`) intermittently fails a DIFFERENT random test
+each run, always passing standalone (the Step 3 finding — 1 clean run out of
+5 full-suite attempts):
+
+| Hypothesis | Verdict |
+|---|---|
+| Leaked `setInterval` from the render-queue worker firing across test files | **REFUTED**, high confidence — the interval is never even started during any Vitest run (only `index.ts` calls `startRenderWorkerLoop()`; no test file imports `index.ts`, only `app.ts`, which has zero references to `render-worker.js`). |
+| `db/pool.ts`'s module-level `pg.Pool` singleton never closed, leaking connections across test files sharing a Vitest worker process | **CONFIRMED**, high confidence. |
+| Test fixtures using colliding non-unique identifiers (timestamp/slug collisions) | **REFUTED** for the current codebase — every hardcoded test client name across all 26 files (170+ call sites audited) is globally unique; the one observed "duplicate slug" Postgres log line is the EXPECTED output of a test that deliberately POSTs the same name twice to assert a 409, not a bug. |
+| Vitest's `--maxWorkers`/`isolate` config not actually providing real isolation | **REFUTED** — `--maxWorkers` is a real, correctly-wired flag; `isolate: true` does give each file a fresh JS module registry. (This agent instead found a second, complementary explanation: a never-reset shared database growing across the whole run, an unbounded/N+1-shaped `GET /api/clients` endpoint that gets slower as that shared DB grows, and Vitest's default file-reordering-by-previous-run-duration sequencer cache — meaning WHICH test hits the "worst" point of DB accumulation shifts unpredictably run to run.) |
+
+**Confirmed root cause:** `apps/api/src/db/pool.ts` exports a module-level
+`pg.Pool` singleton. No test file — and no teardown hook anywhere — ever
+called its own exported `closePool()`. Vitest's `isolate: true` default gives
+every one of the 26 test files a fresh module registry, so each file's
+`app.js` import graph re-executes `db/pool.ts`'s top-level `new pg.Pool(...)`
+— but the underlying Vitest worker PROCESS is reused across many files over
+the run (confirmed directly: `ps aux` during a `--maxWorkers=1` run showed
+exactly one long-lived `vitest/dist/workers/forks.js` process handling all
+26 files sequentially, not one process per file). Each file's pool — and its
+already-open Postgres connections — was simply abandoned in that same
+process when the file finished, accumulating connections against the single
+shared embedded-Postgres instance (`global-setup.ts`, one instance for the
+*entire* run) for as long as `pg-pool`'s connections stayed alive.
+
+**Fixes applied:**
+1. `apps/api/src/db/pool.ts` — added `connectionTimeoutMillis: 10_000` to the
+   `pg.Pool` constructor, so a connection that can't be served fails with a
+   clear, fast error instead of hanging indefinitely (pure diagnosability
+   improvement, safe in production too — `max`/`idleTimeoutMillis` left at
+   `pg`'s defaults, not touched).
+2. New `apps/api/src/test/pool-teardown.ts`, registered via
+   `vitest.config.ts`'s new `setupFiles` option — runs `afterAll(() =>
+   closePool())` **inside every test file** (unlike `globalSetup`, which
+   runs once for the whole run), so each file's pool is closed before the
+   next file's fresh import re-creates one in the same worker process.
+3. `apps/api/src/routes/clients.ts` + `apps/api/src/db/repositories/design-dna.ts`
+   — `GET /api/clients` previously ran ONE extra `hasForClient(id)` DB round
+   trip PER client row via `Promise.all(...)` (a genuine N+1 pattern whose
+   cost — and DB pool connection pressure — scales directly with the total
+   number of clients ever created in the run, since the shared test DB is
+   never reset between files). Replaced with one new batched
+   `hasForClientIds(ids)` query (`WHERE client_id = ANY($1)`). Same response
+   shape, same data, purely a performance/connection-pressure fix — not a
+   behavior or feature change.
+
+**Verified, not just asserted:** ran the full suite once while polling
+`pg_stat_activity`'s connection count every 15s via a direct `pg` query
+against the live embedded Postgres instance. Connection count stayed
+**flat at 11** for the entire monitored window — it did not grow over time
+the way an accumulating leak would. This directly confirms the leak
+mechanism above is fixed.
+
+**Honest result — the fix did NOT eliminate `ci:stable`'s flakiness:**
+Across 6 full-suite `test:ci` runs after applying the fix: 1 clean
+(433/433), 5 with 1–4 failures each — a DIFFERENT random test every time
+(`production-jobs`, `analytics-events`, `visual-generation`,
+`render-queue-worker`, `creative-qa`, `layout-plans`, `workflows`,
+`client-isolation`, `render-jobs`, `design-dna` were each hit at least once
+across Step 3's + Step 4's combined ~11 runs), every one passing standalone
+— essentially the same ~1-in-5-to-6 clean rate as Step 3's baseline. The
+specific connection-leak mechanism is fixed and verified, but it was
+evidently not the ONLY contributing cause.
+
+**New, distinct, NOT-yet-root-caused finding from this step's runs:** at
+least twice, a legitimate POST endpoint (`design-dna/approve` in one run,
+the file-upload `uploadReference` helper in another) returned a bare
+**405 Method Not Allowed** instead of its real status. This is not explained
+by the connection-pool mechanism above — one of these 405s was observed
+during the SAME monitored run where `pg_stat_activity` confirmed connections
+stayed bounded, ruling out pool exhaustion as its cause. `grep`ing the
+entire `apps/api/src` tree (app code, `error-handler.ts`, and the installed
+`express`/`multer`/`pg` packages under `node_modules`) for any explicit `405`
+found **nothing** — no code anywhere in this stack sets that status
+intentionally, so its origin is still unexplained. Time-boxed within this
+step's scope; not chased further. See "Remaining risks" below.
 
 ## Why no GitHub Actions file yet
 
@@ -32,8 +114,11 @@ separately-cacheable CI step, matching the existing `check:release`
 script's convention; it is not embedded inside `ci:stable` itself.)
 
 **Why `test:ci` (a NEW script, `--maxWorkers=1`) instead of the existing
-`test:stable` (`--maxWorkers=2`) — and an honest account of what today's
-validation actually found, not a rosier summary:**
+`test:stable` (`--maxWorkers=2`) — and an honest account of what Step 3's
+validation found at the time, not a rosier summary** (Production Step 4,
+above, found and fixed one real root cause since this was written — a
+never-closed DB pool — but did NOT eliminate the flakiness described below;
+read the Step 4 section above first for the current, fuller picture):
 
 `pnpm run test:stable` (`--maxWorkers=2`) was run twice during this step's
 validation. Both runs produced DIFFERENT random failures (2 failures one
@@ -257,14 +342,25 @@ Docker-build minutes on a commit that already fails stable checks.
 
 ## Remaining risks
 
-- **The `ci:stable` test step's real-world green rate on THIS machine today
-  was 1-out-of-5 full-suite attempts** (see the honest account above) — a
-  pre-existing, documented load-sensitivity issue in the shared-embedded-
-  Postgres test architecture, not a new regression from this step and not
-  something this step fixes. Before trusting `ci:stable` as a hard merge
-  gate, run it several times on an actual CI runner (dedicated resources)
-  to see if the failure rate observed here — very possibly specific to this
-  session's ambient machine load — actually reproduces there.
+- **The `ci:stable` test step's real-world green rate is still roughly
+  1-in-5-to-6 full-suite attempts, even after Production Step 4's fix.**
+  Step 4 found and fixed one confirmed, verified root cause (a never-closed
+  DB pool connection leak — see the Step 4 section above) but the overall
+  failure rate did not measurably improve, meaning at least one more
+  distinct contributing factor exists. Step 4 additionally observed a
+  recurring, unexplained **405 Method Not Allowed** on legitimate POST
+  endpoints in at least 2 of the post-fix runs (`design-dna/approve`,
+  `uploadReference`) that is NOT explained by the (now-fixed) connection
+  leak — no code anywhere in this app, or in the installed
+  express/multer/pg packages, sets a 405 status explicitly. This was
+  time-boxed and NOT root-caused within Step 4's scope. **Before trusting
+  `ci:stable` as a hard merge gate, this 405 pattern needs its own
+  dedicated investigation** — ideally reproduced with request/response
+  logging added around the failing endpoints, and cross-checked against
+  whether it reproduces on a dedicated CI runner (this machine may simply
+  be under heavier concurrent load than a CI runner would be — that
+  remains an unverified but plausible contributing explanation, same
+  caveat as Step 3's original finding).
 - **`ci:staging` was reliable across every attempt today** (multiple full
   runs, plus two forced-failure injections to verify cleanup) — it does not
   share the embedded-Postgres-under-concurrent-vitest-workers architecture

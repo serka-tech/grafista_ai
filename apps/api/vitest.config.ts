@@ -17,6 +17,12 @@ export default defineConfig({
     // defaults (node_modules etc) intact rather than replacing them.
     exclude: [...configDefaults.exclude, '**/dist/**'],
     globalSetup: './src/test/global-setup.ts',
+    // Runs INSIDE every test file (unlike globalSetup, which runs once for
+    // the whole run) — closes that file's db/pool.ts Pool singleton after its
+    // own tests finish. See src/test/pool-teardown.ts for why (Production
+    // Step 4: an unclosed pool per file was accumulating Postgres connections
+    // across the run).
+    setupFiles: ['./src/test/pool-teardown.ts'],
     env: {
       OPENAI_API_KEY: 'sk-test-fake-key-for-smoke-tests',
       ANTHROPIC_API_KEY: 'sk-ant-test-fake-key-for-smoke-tests',
