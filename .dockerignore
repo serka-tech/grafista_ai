@@ -1,0 +1,45 @@
+# Host-platform build artifacts — must NOT leak into the Linux build context.
+# Without this, `COPY . .` in apps/api/Dockerfile copies the host's own
+# node_modules (e.g. macOS @esbuild/darwin-arm64) into the image, and
+# `pnpm install --frozen-lockfile` does not always replace already-present
+# native optional-dependency binaries — causing esbuild/tsx to fail at
+# runtime with "you installed esbuild for another platform" inside the
+# Linux container. See docs/deployment-runbook.md staging validation notes.
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# apps/* and root `dist/` are excluded — those get built fresh in-container.
+# packages/*/dist is intentionally NOT excluded (see apps/api/Dockerfile's
+# comment on the build step): this Docker Desktop environment was found to
+# unreliably emit .js/.d.ts output for packages/schemas, packages/model-router
+# and packages/prompt-engine when their tsc build runs against COPY'd (not
+# bind-mounted) source — reproduced consistently across BuildKit and the
+# legacy builder, but never on the host directly. Until that environment
+# issue is root-caused, the pragmatic workaround is to ship each package's
+# already-host-built dist/ in the image and only build @grafista/api fresh
+# in-container. This means `pnpm run build` must have been run on the HOST
+# for packages/schemas, packages/model-router and packages/prompt-engine
+# before `docker compose -f docker-compose.staging.yml build` — see
+# docs/staging-compose.md and docs/deployment-runbook.md.
+/dist/
+apps/*/dist/
+.next/
+out/
+*.tsbuildinfo
+
+.git/
+.env
+.env.local
+.env.production
+.env.staging
+
+uploads/
+generated/
+*.psd
+
+*.log
+logs/
+coverage/
+.nyc_output/
+.test-pgdata/

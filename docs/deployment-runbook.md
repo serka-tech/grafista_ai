@@ -254,9 +254,19 @@ Hiçbir örnek/placeholder değer verilmiyor, yalnız isim ve tek satırlık ama
 > adımı değil" ilkesiyle tutarlı). Tam detay, tasarım kararları ve
 > sınırlamalar için bkz. [`docs/staging-compose.md`](./staging-compose.md) —
 > o belge burada TEKRARLANMIYOR, yalnız çapraz referans veriliyor. Bu
-> alternatif hiçbir zaman gerçek bir Docker daemon'a karşı çalıştırılıp
-> doğrulanmadı (yazıldığı ortamda Docker yoktu) — `docs/staging-compose.md`
-> bunu açıkça işaretliyor.
+> alternatif artık gerçek bir Docker daemon'a karşı çalıştırılıp doğrulandı
+> (Production Step 2B): `staging:up` → migrate → `/api/health`,
+> `/api/health/ready` → `smoke:staging` → `staging:down`/`staging:up`
+> reprodüksiyonu, hepsi yeşil. Bu süreçte 2 gerçek bug bulunup düzeltildi
+> (eksik `.dockerignore`, kullanılmayan `tsconfig` `composite` ayarı) ve 1
+> ortam sorunu (Docker Desktop'ın bu makinedeki dosya sistemi katmanı,
+> `COPY`'lenen kaynak üzerinde `tsc`'nin bazı workspace paketleri için
+> deterministik olmayan şekilde sıfır çıktı üretmesine yol açıyor) kök
+> nedeni tam bulunamadan geçici bir çözümle (host'ta önceden build edilmiş
+> `packages/*/dist`'in image'a taşınması) aşıldı. Tam detay, tasarım
+> kararları ve sınırlamalar için bkz.
+> [`docs/staging-compose.md`](./staging-compose.md) — o belge burada
+> TEKRARLANMIYOR, yalnız çapraz referans veriliyor.
 
 Aşağıdaki adımlar gerçek script isimleriyle — hiçbiri icat edilmedi, her
 biri `package.json`/`apps/api/package.json`'da doğrudan doğrulandı.

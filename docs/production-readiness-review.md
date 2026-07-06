@@ -484,7 +484,17 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   çalıştırılmadı** — sandbox'ta Docker yoktu (`docker --version` "command
   not found" döndü). Doğrulama tamamen statik (dosya/YAML syntax review) —
   gerçek bir `docker compose up` denemesi hâlâ bir insan tarafından
-  yapılmalı.
+  yapılmalı. **GÜNCELLEME (Production Step 2B): bu artık yapıldı** — gerçek
+  Docker Desktop'a karşı `staging:up` → migrate → health/ready → smoke →
+  down/up reprodüksiyonu, hepsi yeşil. Bu sırada 2 gerçek bug bulunup
+  düzeltildi (eksik `.dockerignore`, kullanılmayan `tsconfig` `composite`
+  ayarı) ve 1 ortam sorunu kök nedeni tam bulunamadan bir workaround'la
+  aşıldı (bu makinenin Docker Desktop kurulumu, `COPY`'lenen kaynak
+  üzerinde `tsc`'nin 3 workspace paketi için deterministik olmayan şekilde
+  sıfır çıktı üretmesine yol açıyor — `packages/*/dist`'in host'ta
+  build edilip image'a taşınmasıyla aşıldı). Tam detay:
+  [`docs/staging-compose.md`](./staging-compose.md)'nin "Production Step
+  2B" bölümü — burada TEKRARLANMIYOR.
 
 ## İlgili dokümanlar
 

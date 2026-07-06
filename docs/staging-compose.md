@@ -153,12 +153,84 @@ Exit code: `0` unless at least one section reports `FAIL` (matching
 `smoke-real-providers.ts`'s convention — `WARN`/`SKIP` never affect the exit
 code).
 
+## Production Step 2B — real Docker staging validation (done)
+
+Unlike Step 2's authoring session, this WAS actually run against real
+Docker (Docker Desktop 29.5.2 / Compose v5.1.3, macOS, arm64):
+
+- `pnpm run staging:up` — succeeds; both `postgres` and `api` reach
+  `healthy`.
+- `pnpm --filter @grafista/api run db:migrate` — all 25 migrations applied
+  cleanly against a fresh `postgres:16-alpine` volume (migration 002's
+  `vector` extension is skipped with a warning, as designed — `alpine` does
+  not ship `pgvector`; nothing in this codebase reads/writes vector columns
+  yet).
+- `GET /api/health` → `200 {"status":"ok"}`.
+- `GET /api/health/ready` → `200`, overall `degraded` (never `error`) —
+  `database`/`storage`/`renderQueue`/`workerHeartbeat`/`playwright` all
+  `ok`; only `providers` is `degraded` (`kie` key intentionally absent in
+  `.env.staging.example`'s safe-default demo config).
+- `pnpm --filter @grafista/api run smoke:staging` → `2 pass, 2 warn, 1
+  skip, 0 fail` (the `providers` WARN and `demoFlow` SKIP are both expected
+  or by design, per the table above).
+- Verified reproducible via a full `staging:down` → `staging:up` →
+  smoke cycle, not just the first bring-up.
+- Repo-wide `pnpm run typecheck` and `pnpm run lint` both pass (lint has 2
+  pre-existing `react-hooks/exhaustive-deps` warnings in
+  `apps/dashboard`, unrelated to this step, not treated as failures).
+
+**Two real bugs were found and fixed getting there** (both were latent —
+never exercised because Step 2's authoring session never actually ran
+`docker compose build`):
+
+1. **No `.dockerignore` existed.** `COPY . .` in `apps/api/Dockerfile` was
+   copying the HOST's own `node_modules` (macOS `@esbuild/darwin-arm64`)
+   into the Linux image, and `pnpm install --frozen-lockfile` does not
+   reliably replace an already-present native optional-dependency binary —
+   `db:migrate` (which runs via `tsx`, itself esbuild-backed) failed at
+   startup with esbuild's "installed for another platform" error. Fixed by
+   adding a `.dockerignore` (excludes `node_modules/`, root/`apps/*` `dist/`,
+   env files, etc.).
+2. **`tsconfig.base.json` had `"composite": true`** with no project anywhere
+   actually using TS project references (`grep -rl '"references"'` across
+   every `tsconfig*.json` in the repo: zero hits) — so it was pure dead
+   weight. Combined with `packages/*/tsconfig.json` extending it via a
+   cross-directory `../../tsconfig.base.json` path, this reproducibly made
+   `tsc` silently emit **zero** `.js`/`.d.ts` output (exit code 0, no
+   diagnostics) for `packages/schemas`/`model-router`/`prompt-engine` in a
+   clean build — confirmed on the host too (not Docker-specific), fixed by
+   removing `composite` (kept `incremental`) in `tsconfig.base.json`.
+
+**One environment issue was found and worked around, not root-caused —
+flagged here deliberately instead of hidden:** even after both fixes above,
+a **clean, no-cache** `docker compose build` of `apps/api` still
+nondeterministically produced zero `.js`/`.d.ts` output for
+`packages/schemas`/`model-router`/`prompt-engine` when their source arrived
+via Docker `COPY` — reproduced across both the BuildKit and legacy
+builders, and the SAME `tsc` invocation against a bind-mounted (not
+`COPY`'d) copy of the identical files never once failed, nor did it ever
+fail once directly on the host across many repeated runs. This points at
+this specific Docker Desktop installation's overlayfs/containerd-snapshotter
+layer, not at this repo's code — but that could not be fully confirmed
+within this session's scope. **Workaround shipped instead of a fix:**
+`.dockerignore` deliberately does NOT exclude `packages/*/dist` (unlike
+`apps/*/dist`, which IS excluded), and `apps/api/Dockerfile`'s build step
+now runs `pnpm --filter @grafista/api run build` (only `@grafista/api`
+itself) instead of `--filter @grafista/api... run build` (which would also
+rebuild the 3 workspace packages via `tsc` in-container and hit the
+flakiness above). **Practical consequence: `pnpm run build` must have been
+run successfully on the HOST for `packages/schemas`, `packages/model-router`
+and `packages/prompt-engine` before `docker compose -f
+docker-compose.staging.yml build`** — a fresh `git clone` with no prior
+host build would currently fail this same way. Recommended follow-up:
+retry after a Docker Desktop restart/upgrade, or try switching its
+file-sharing implementation (VirtioFS ↔ gRPC-FUSE) — both are common fixes
+for this class of bug — then remove this workaround by restoring
+`--filter @grafista/api... run build` and re-excluding
+`packages/*/dist` once a clean rebuild is reliably green.
+
 ## Known gaps (carried forward honestly)
 
-- **Never actually run against real Docker in this authoring session** —
-  the very first `docker compose -f docker-compose.staging.yml up --build`
-  has not been performed. Static review + a YAML syntax-only parse is not
-  a substitute for that.
 - **No MinIO/real-S3 service wired up** — `STORAGE_PROVIDER=local` only,
   in this first skeleton.
 - **No CI/CD automation runs any of this** — bringing the stack up and
@@ -175,10 +247,36 @@ code).
   smaller image.
 - **Real production deployment is explicitly out of scope** — this is a
   staging validation skeleton only.
+- **`docker compose build` is not yet reproducible from a bare `git
+  clone`** — see the Step 2B write-up above. It depends on
+  `packages/schemas`, `packages/model-router` and `packages/prompt-engine`
+  already being built on the HOST first, a workaround for an unresolved
+  Docker Desktop file-system issue on this machine, not a proper fix.
+- **CI/CD would need updating too** — any pipeline that runs `docker
+  compose build` from a fresh checkout hits the same gap above; it would
+  need a `pnpm run build` (or at least `pnpm --filter
+  "@grafista/{schemas,model-router,prompt-engine}" run build`) step before
+  the Docker build until the underlying issue is root-caused.
 
 ## Recommended immediate next action for a human
 
-Run the actual first bring-up on a machine with Docker installed:
+Production Step 2B already completed the first real bring-up (see above —
+`staging:up`, migrate, health/ready, smoke, typecheck, lint all passed, and
+the down→up→smoke cycle was re-verified for reproducibility). What's still
+open for a human with hands-on access to Docker Desktop's settings:
+
+```bash
+# Try switching Docker Desktop's file-sharing backend (Settings > General >
+# "Choose file sharing implementation": VirtioFS <-> gRPC-FUSE), or simply
+# restart Docker Desktop, then re-test whether a clean multi-package build
+# now works without the packages/*/dist workaround:
+docker compose -f docker-compose.staging.yml build --no-cache api
+# If packages/schemas etc. now emit .js/.d.ts correctly in a clean COPY-based
+# build, restore `--filter @grafista/api... run build` in
+# apps/api/Dockerfile and re-exclude packages/*/dist in .dockerignore.
+```
+
+For the day-to-day bring-up itself, the flow is unchanged:
 
 ```bash
 cp .env.staging.example .env.staging
@@ -188,6 +286,6 @@ docker compose -f docker-compose.staging.yml ps
 docker compose -f docker-compose.staging.yml logs -f api
 ```
 
-Then follow the migrate/seed/smoke sequence above, and report back what
-actually happened (build errors, healthcheck flakiness, Chromium install
-issues, anything the static review here could not have caught).
+Then follow the migrate/seed/smoke sequence above. This already ran clean
+end-to-end in Production Step 2B (see above) — re-run it after any
+Dockerfile/`.dockerignore`/tsconfig change to confirm it still does.
