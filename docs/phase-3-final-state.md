@@ -3,7 +3,9 @@
 > **Follow-up:** the §6 recommendation below (Production Readiness Review
 > instead of Photoshop/PSD) was carried out — see
 > [`docs/production-readiness-review.md`](./production-readiness-review.md)
-> for the full review and its own recommended next implementation step.
+> for the full review and its own recommended next implementation step,
+> followed by [`docs/deployment-runbook.md`](./deployment-runbook.md) for
+> the step-by-step operational runbook.
 
 > **Status: Phase 3 CLOSED — 2026-07-06, branch `phase-2-checkpoint`, HEAD
 > `8c0d15d`.** This document is the closure record for Phase 3's seven

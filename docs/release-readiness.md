@@ -6,7 +6,8 @@
 > [`docs/production-readiness-review.md`](./production-readiness-review.md)
 > for the deployment topology recommendation, monitoring/logging gaps, and
 > the recommended next implementation step (healthcheck + worker
-> heartbeat/stale-lock recovery).
+> heartbeat/stale-lock recovery). The follow-up step-by-step operational
+> runbook is [`docs/deployment-runbook.md`](./deployment-runbook.md).
 
 Phase 2 Step 11. This is a checklist document, not a new feature. It
 consolidates what's already true about running the MVP demo locally — the

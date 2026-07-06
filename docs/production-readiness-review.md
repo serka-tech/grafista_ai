@@ -1,5 +1,10 @@
 # Grafista AI Studio — Production Readiness Review (Phase 3 Step 7)
 
+> **Follow-up:** §11's "C" recommendation (Deployment Runbook) has been
+> written — see [`docs/deployment-runbook.md`](./deployment-runbook.md)
+> for the environment profiles, first-deployment sequence, and its own
+> recommended next implementation step.
+
 > **Status: REVIEW + PLAN ONLY — no code, no migration, no deployment
 > config, no dependency eklendi bu adımda.** Bu belge
 > [`docs/phase-3-final-state.md`](./phase-3-final-state.md) §6'nın kapanış
