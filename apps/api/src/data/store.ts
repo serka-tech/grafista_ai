@@ -23,6 +23,7 @@ import { creativeQaReportsRepo } from '../db/repositories/creative-qa.js';
 import { generatedOutputsRepo } from '../db/repositories/generated-outputs.js';
 import { productionJobsRepo } from '../db/repositories/production-jobs.js';
 import { renderJobsRepo } from '../db/repositories/render-jobs.js';
+import { renderWorkerHeartbeatsRepo } from '../db/repositories/render-worker-heartbeats.js';
 import { exportArtifactsRepo } from '../db/repositories/export-artifacts.js';
 import { analyticsEventsRepo } from '../db/repositories/analytics-events.js';
 import { revisionEntriesRepo } from '../db/repositories/revision-entries.js';
@@ -45,6 +46,7 @@ export const store = {
   generatedOutputs: generatedOutputsRepo,
   productionJobs: productionJobsRepo,
   renderJobs: renderJobsRepo,
+  renderWorkerHeartbeats: renderWorkerHeartbeatsRepo,
   exportArtifacts: exportArtifactsRepo,
   analyticsEvents: analyticsEventsRepo,
   revisionEntries: revisionEntriesRepo,

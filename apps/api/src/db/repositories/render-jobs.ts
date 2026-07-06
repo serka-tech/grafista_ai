@@ -322,4 +322,108 @@ export const renderJobsRepo = {
     const oldStatus = rows[0].old_status as RenderJobStatus;
     return { job: mapRow(rows[0]), oldStatus };
   },
+
+  // ─── Production Readiness Step — operational queue visibility ─────────
+
+  /**
+   * GLOBAL (not client-scoped) counts by status, across every render_jobs
+   * row — this is deliberately an operational/ops view (see GET
+   * /api/health/ready), not a client-facing feature, so it does NOT filter
+   * by client_id the way every other render_jobs query in this file does.
+   */
+  async countByStatus(): Promise<Record<string, number>> {
+    const { rows } = await pool.query('SELECT status, COUNT(*)::int AS count FROM render_jobs GROUP BY status');
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      counts[row.status as string] = row.count as number;
+    }
+    return counts;
+  },
+
+  /**
+   * A small operational summary folding a few cheap, separate queries
+   * together (readability over a single "perfect" query, per the task's own
+   * guidance) — queue depth by status, how many 'rendering' rows look stale
+   * right now (informational; the sweep is what actually fixes them),
+   * how old the oldest still-waiting job is, and when the last successful
+   * render finished.
+   */
+  async getQueueSummary(staleThresholdMs: number): Promise<{
+    byStatus: Record<string, number>;
+    staleLockedCount: number;
+    oldestQueuedAgeMs: number | null;
+    lastRenderedAt: string | null;
+  }> {
+    const byStatus = await this.countByStatus();
+
+    const staleResult = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM render_jobs
+       WHERE status = 'rendering' AND locked_by IS NOT NULL
+         AND started_at < NOW() - ($1 || ' milliseconds')::interval`,
+      [staleThresholdMs]
+    );
+    const staleLockedCount = staleResult.rows[0]?.count ?? 0;
+
+    const oldestResult = await pool.query(
+      `SELECT EXTRACT(EPOCH FROM (NOW() - MIN(queued_at))) * 1000 AS age_ms
+       FROM render_jobs WHERE status IN ('pending', 'queued')`
+    );
+    const oldestQueuedAgeMs =
+      oldestResult.rows[0]?.age_ms != null ? Math.round(Number(oldestResult.rows[0].age_ms)) : null;
+
+    const lastRenderedResult = await pool.query(
+      `SELECT MAX(finished_at) AS last_rendered_at FROM render_jobs WHERE status = 'rendered'`
+    );
+    const lastRenderedAt = toIso(lastRenderedResult.rows[0]?.last_rendered_at) ?? null;
+
+    return { byStatus, staleLockedCount, oldestQueuedAgeMs, lastRenderedAt };
+  },
+
+  /**
+   * The stale-lock sweep (docs/render-queue-worker-plan.md's originally
+   * planned tooling, implemented here): finds every 'rendering' row whose
+   * `started_at` is older than `staleThresholdMs` and still carries a
+   * `locked_by` (a worker claimed it and never reached a terminal state —
+   * crashed, killed, or otherwise stuck), and recovers each one:
+   *   - attempt_count < max_attempts -> back to 'pending' (NOT 'queued' —
+   *     deliberate per the task's explicit instruction, though claimNext()
+   *     accepts both), locks cleared, next_run_at = NOW() so it is
+   *     immediately eligible again, error_message gets a fixed safe note
+   *     (never raw internal error details).
+   *   - attempt_count >= max_attempts -> terminal 'failed', finished_at set,
+   *     locks cleared, a similar fixed safe note.
+   * The `WHERE status = 'rendering'` clause guarantees 'rendered'/
+   * 'cancelled'/already-'failed' rows are never touched, by construction.
+   */
+  async resetStaleLocks(staleThresholdMs: number): Promise<{ recoveredCount: number; failedCount: number }> {
+    const recoveredResult = await pool.query(
+      `UPDATE render_jobs
+       SET status = 'pending',
+           locked_by = NULL,
+           locked_at = NULL,
+           next_run_at = NOW(),
+           error_message = 'stale lock recovered — job was locked without progress past the configured threshold'
+       WHERE status = 'rendering' AND locked_by IS NOT NULL
+         AND started_at < NOW() - ($1 || ' milliseconds')::interval
+         AND attempt_count < max_attempts
+       RETURNING id`,
+      [staleThresholdMs]
+    );
+
+    const failedResult = await pool.query(
+      `UPDATE render_jobs
+       SET status = 'failed',
+           finished_at = NOW(),
+           locked_by = NULL,
+           locked_at = NULL,
+           error_message = 'stale lock recovered — max attempts already reached'
+       WHERE status = 'rendering' AND locked_by IS NOT NULL
+         AND started_at < NOW() - ($1 || ' milliseconds')::interval
+         AND attempt_count >= max_attempts
+       RETURNING id`,
+      [staleThresholdMs]
+    );
+
+    return { recoveredCount: recoveredResult.rows.length, failedCount: failedResult.rows.length };
+  },
 };

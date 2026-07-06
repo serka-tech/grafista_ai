@@ -68,6 +68,10 @@ Base file: `.env.example` (root). Copy it to `apps/api/.env` and fill in.
 - `AI_DEFAULT_PROVIDER=fake` — single switch, routes every AI call to the deterministic `FakeAIAdapter`. Zero network, zero cost. Production behavior is unchanged unless explicitly set.
 - `RENDERER_PROVIDER=fake` — deterministic render buffers, no Chromium required. Unset/`playwright` (default) does real PNG/JPG/PDF export.
 
+**Render queue / worker (Phase 3 Step 5A + Production Readiness Step)**
+- `RENDER_QUEUE_ENABLED` (`false` default), `RENDER_WORKER_ID`, `RENDER_JOB_MAX_ATTEMPTS` (`3`), `RENDER_JOB_BASE_DELAY_MS` (`2000`), `RENDER_WORKER_POLL_INTERVAL_MS` (`3000`) — all optional, backward-compatible.
+- `RENDER_JOB_STALE_LOCK_MS` (`900000`/15min default) — **new**: how long a `rendering` job can stay locked without progress before the stale-lock sweep recovers it (`pending` if attempts remain, else terminal `failed`). See `docs/production-readiness-review.md` and `GET /api/health/ready`'s `renderQueue` check.
+
 **API / dashboard / ports**
 - `API_PORT` (`4000`), `API_HOST` (`0.0.0.0`), `API_CORS_ORIGIN` (`http://localhost:3000`).
 - `NEXT_PUBLIC_API_URL` (`http://localhost:4000`) — dashboard's API base.

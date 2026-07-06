@@ -46,3 +46,17 @@ export function getRenderWorkerPollIntervalMs(): number {
   const raw = Number(process.env.RENDER_WORKER_POLL_INTERVAL_MS ?? '3000');
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 3000;
 }
+
+/**
+ * RENDER_JOB_STALE_LOCK_MS — default 900000ms (15 min). A 'rendering' job
+ * whose `started_at` is older than this AND still carries a `locked_by` is
+ * considered stale (the worker that claimed it crashed or was killed without
+ * ever reaching a terminal state) — see render-jobs.ts repo's
+ * `resetStaleLocks()` and render-worker.ts's `sweepStaleRenderLocks()`.
+ * Tests override this directly via env before calling the sweep, exactly
+ * like every other knob in this module.
+ */
+export function getRenderJobStaleLockMs(): number {
+  const raw = Number(process.env.RENDER_JOB_STALE_LOCK_MS ?? '900000');
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 900000;
+}

@@ -333,6 +333,14 @@ Mevcut konvansiyonları (embedded Postgres, `RENDERER_PROVIDER=fake`,
   ortasında çökerse job sonsuza kadar kilitli kalabilir — §6'daki periyodik
   stale-lock sweep bunu ele alıyor, ama sweep'in kendisi de bir zamanlama
   bileşeni gerektirir (basit bir `setInterval`, ek bir kütüphane değil).
+  **UYGULANDI (Production Readiness Step):** burada planlanan sweep artık
+  gerçek kod — `renderJobsRepo.resetStaleLocks()` (RENDER_JOB_STALE_LOCK_MS,
+  varsayılan 900000ms/15dk) + `render-worker.ts`'in `sweepStaleRenderLocks()`
+  export'u, her poll tick'te (heartbeat yazımıyla birlikte, ayrı bir
+  interval olmadan) çalışıyor. Ayrıca yeni bir worker heartbeat mekanizması
+  (`render_worker_heartbeats` tablosu) eklendi — "worker canlı mı" artık
+  `GET /api/health/ready`'nin `workerHeartbeat`/`renderQueue` check'lerinden
+  görülebiliyor. Detay: `docs/production-readiness-review.md`.
 - **Tek-process worker, yatay ölçek yok:** Bu MVP yaklaşımı tek worker
   instance'ı varsayar (`SKIP LOCKED` çoklu worker'a teknik olarak izin verir
   ama Step 5A'da tek worker yeterli olmalı) — gerçek yüksek eşzamanlılık

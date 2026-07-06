@@ -39,6 +39,7 @@ import { assertClientAccessible } from '../auth/client-access.js';
 import {
   getRenderJobBaseDelayMs,
   getRenderJobMaxAttempts,
+  getRenderJobStaleLockMs,
   getRenderWorkerId,
   getRenderWorkerPollIntervalMs,
   isRenderQueueEnabled,
@@ -207,18 +208,61 @@ export async function processRenderJob(renderJobId: string, workerId: string): P
 }
 
 /**
+ * Best-effort heartbeat write — NEVER allowed to throw past this call, and
+ * never allowed to block/break the actual render poll tick (Production
+ * Readiness Step — Worker Heartbeat). Callers still await it (so the write
+ * is ordered relative to the rest of the tick for tests), but a failure here
+ * only logs, it never propagates.
+ */
+async function writeHeartbeat(workerId: string, opts?: { status?: 'ok' | 'degraded'; metadata?: Record<string, unknown> }): Promise<void> {
+  try {
+    await store.renderWorkerHeartbeats.upsertHeartbeat(workerId, opts);
+  } catch (err) {
+    console.error('[render-worker] heartbeat write failed (non-fatal)', err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Stale-lock sweep, exposed as a standalone deterministic function (matching
+ * the `runOnePollCycle` convention) so both the setInterval loop AND a test
+ * can call it directly with no timer dependency. Safe to call even when
+ * RENDER_QUEUE_ENABLED is false / no worker loop is running — it is a plain
+ * SQL sweep over render_jobs, independent of the loop's on/off state.
+ */
+export async function sweepStaleRenderLocks(): Promise<{ recoveredCount: number; failedCount: number }> {
+  return store.renderJobs.resetStaleLocks(getRenderJobStaleLockMs());
+}
+
+/**
  * One full poll tick: claim the single oldest claimable job (if any) and run
  * it to completion. Returns the processed job, or null if nothing was
  * claimable right now. This is the function both the `setInterval` loop
  * below AND tests call directly (tests call it as a deterministic
  * "runOnePollCycle" — see the alias export at the bottom — with no real
  * timers involved).
+ *
+ * A heartbeat is written and the stale-lock sweep runs on EVERY tick,
+ * regardless of whether a job was actually claimed — so "worker is alive"
+ * and "stale locks get recovered" both hold even when the queue is empty.
+ * Both are cheap enough that a separate interval/cadence is unnecessary for
+ * MVP (Production Readiness Step — Worker Heartbeat + Stale Lock Recovery).
  */
 export async function processNextRenderJob(workerId: string = getRenderWorkerId()): Promise<RenderJob | null> {
-  const claimed = await store.renderJobs.claimNext(workerId);
-  if (!claimed) return null;
-  const result = await processRenderJob(claimed.id, workerId);
-  return result ?? null;
+  try {
+    const claimed = await store.renderJobs.claimNext(workerId);
+    await sweepStaleRenderLocks();
+    await writeHeartbeat(workerId, { status: 'ok' });
+    if (!claimed) return null;
+    const result = await processRenderJob(claimed.id, workerId);
+    return result ?? null;
+  } catch (err) {
+    // The tick itself threw before completing (e.g. the claim query or the
+    // sweep failed) — never crash the interval; report a degraded heartbeat
+    // (safe, fixed-shape metadata only, no raw stack traces) and rethrow so
+    // the setInterval loop's own catch still logs it as it always has.
+    await writeHeartbeat(workerId, { status: 'degraded', metadata: { note: 'poll tick failed before completion' } });
+    throw err;
+  }
 }
 
 /**

@@ -27,6 +27,7 @@ import { workflowsRouter } from './routes/workflows.js';
 import { workflowRunsRouter } from './routes/workflow-runs.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { revisionsRouter } from './routes/revisions.js';
+import { healthRouter } from './routes/health.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 export const app: Express = express();
@@ -41,15 +42,10 @@ app.use(express.urlencoded({ extended: true }));
 // reachable through the authenticated, permission-checked `/file` routes in
 // brand-assets.ts / design-references.ts (see storage/file-service.ts).
 
-// Health check
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'grafista-ai-studio-api',
-    version: '0.1.0',
-    timestamp: new Date().toISOString(),
-  });
-});
+// Health / readiness — GET /api/health is UNCHANGED (relocated verbatim into
+// health.ts for file organization); GET /api/health/ready is new (Production
+// Readiness Step — see health.ts's own doc comment).
+app.use('/api', healthRouter);
 
 // Routes
 app.use('/api', authRouter);

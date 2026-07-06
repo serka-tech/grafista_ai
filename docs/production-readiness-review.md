@@ -396,6 +396,44 @@ heartbeat/stale-lock recovery"
 
 ---
 
+## 13. Implementation status update (Healthcheck + Worker Heartbeat/Stale Lock Recovery)
+
+**UYGULANDI** — §12'nin prompt'u bu güncellemeyi yazan oturumda hayata
+geçirildi:
+
+- `database/migrations/025_render_worker_heartbeats.sql` — yeni
+  `render_worker_heartbeats` tablosu (worker_id PK, upsert-friendly).
+- `RENDER_JOB_STALE_LOCK_MS` (varsayılan 900000ms/15dk) —
+  `render-queue-env.ts`'e eklendi, `.env.example`/`docs/release-readiness.md`
+  güncellendi.
+- `renderJobsRepo.countByStatus()` / `getQueueSummary()` /
+  `resetStaleLocks()` — global (client-scoped değil) operasyonel görünürlük
+  + gerçek stale-lock sweep (`pending` eğer `attempt_count < max_attempts`,
+  aksi halde terminal `failed`; her ikisinde de sabit, güvenli bir
+  `error_message` notu — ham hata detayı asla yazılmaz).
+- `render-worker.ts`'e `sweepStaleRenderLocks()` (deterministik, testten
+  doğrudan çağrılabilir) + her poll tick'te best-effort heartbeat yazımı
+  (`processNextRenderJob` içinde, tick boş geçse bile çalışır; tick'in
+  kendisi patlarsa `degraded` bir heartbeat yazılıp hata yeniden fırlatılır).
+- `GET /api/health` **DEĞİŞMEDİ** (byte-for-byte aynı) — `apps/api/src/routes/health.ts`'e
+  taşındı, sadece dosya organizasyonu. Yeni `GET /api/health/ready`
+  (auth'suz, hiçbir secret/connection-string döndürmez) — `database`,
+  `storage`, `renderQueue`, `workerHeartbeat`, `providers` (presence-only),
+  `playwright` (shallow — gerçek tarayıcı hiç başlatılmaz) check'leri;
+  overall `status` en kötü check'e eşit.
+- `GET /api/doctor` **eklenmedi** — görevin kendi talimatı gereği,
+  `/health` + `/ready` kapsamı yeterli görülüp scope küçük tutuldu.
+- Yeni test dosyası: `apps/api/src/__tests__/render-health-ready.test.ts`
+  (15 test) — mevcut `render-queue-worker.test.ts`/`analytics-events.test.ts`/
+  `revision-entries.test.ts`/`client-isolation.test.ts` dahil tüm suite
+  (433 test) yeşil kaldı.
+
+**Bilinen sınırlamalar (bilinçli, MVP kapsamı):** storage/playwright
+check'leri sığ (gerçek bağlantı/tarayıcı testi değil, config/presence
+kontrolü); queue-depth özeti global/tüm-client'lar arası (client-scoped
+değil, kasıtlı — bu bir ops görünümü); çoklu-worker koordinasyonu hâlâ test
+edilmedi (§7'nin kendi kabul ettiği sınır, bu adımın kapsamı dışı).
+
 ## İlgili dokümanlar
 
 - [`docs/phase-3-final-state.md`](./phase-3-final-state.md) §6 — bu
