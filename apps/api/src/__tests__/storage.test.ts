@@ -1,10 +1,14 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import request from 'supertest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 const SEED_CLIENT_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
@@ -33,7 +37,7 @@ function resetStorageEnv(): void {
 }
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;
@@ -47,7 +51,7 @@ afterEach(() => {
 describe('Phase 2 Step 3 — S3-compatible storage', () => {
   describe('1. Unauthenticated upload is rejected', () => {
     it('rejects POST brand-assets with 401 when no session cookie is sent', async () => {
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post(`/api/clients/${SEED_CLIENT_ID}/brand-assets`)
         .field('type', 'logo')
         .field('name', 'Anonymous Upload Attempt');
@@ -183,7 +187,7 @@ describe('Phase 2 Step 3 — S3-compatible storage', () => {
         .attach('file', Buffer.from('some-file-bytes'), { filename: 'dl.png', contentType: 'image/png' });
       expect(upload.status).toBe(201);
 
-      const res = await request(app).get(upload.body.data.fileUrl);
+      const res = await request(testServer.server).get(upload.body.data.fileUrl);
       expect(res.status).toBe(401);
     });
 

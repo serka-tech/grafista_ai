@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Phase 2 Step 7 — Visual Generation (direct API surface).
@@ -239,7 +243,7 @@ vi.mock('@grafista/model-router', () => {
 });
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;
@@ -333,11 +337,11 @@ const SOME_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
 describe('1. Unauthenticated access', () => {
   it('rejects POST run, GET list, and GET/approve/reject output routes with 401', async () => {
-    expect((await request(app).post(`/api/layout-plans/${SOME_UUID}/visual-generation`)).status).toBe(401);
-    expect((await request(app).get(`/api/layout-plans/${SOME_UUID}/visual-generation`)).status).toBe(401);
-    expect((await request(app).get(`/api/visual-outputs/${SOME_UUID}`)).status).toBe(401);
-    expect((await request(app).post(`/api/visual-outputs/${SOME_UUID}/approve`)).status).toBe(401);
-    expect((await request(app).post(`/api/visual-outputs/${SOME_UUID}/reject`)).status).toBe(401);
+    expect((await request(testServer.server).post(`/api/layout-plans/${SOME_UUID}/visual-generation`)).status).toBe(401);
+    expect((await request(testServer.server).get(`/api/layout-plans/${SOME_UUID}/visual-generation`)).status).toBe(401);
+    expect((await request(testServer.server).get(`/api/visual-outputs/${SOME_UUID}`)).status).toBe(401);
+    expect((await request(testServer.server).post(`/api/visual-outputs/${SOME_UUID}/approve`)).status).toBe(401);
+    expect((await request(testServer.server).post(`/api/visual-outputs/${SOME_UUID}/reject`)).status).toBe(401);
   });
 });
 
@@ -724,7 +728,7 @@ describe('9. Protected file download — GET /api/visual-outputs/:id/file', () =
       expect(Buffer.from(secondRes.body).toString()).toBe(FAKE_IMAGE_BYTES_2);
 
       // Same auth gates as every other visual_generation read.
-      expect((await request(app).get(first.fileUrl)).status).toBe(401);
+      expect((await request(testServer.server).get(first.fileUrl)).status).toBe(401);
 
       const contentManager = await loginAs(TEST_USERS.CONTENT_MANAGER);
       const forbiddenRes = await contentManager.get(first.fileUrl);

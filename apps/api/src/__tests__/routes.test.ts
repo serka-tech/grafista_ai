@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 const SEED_CLIENT_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 const APPROVED_IDEA_ID = 'e1a1a1a1-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -10,7 +14,7 @@ const DRAFT_IDEA_ID = 'e3c3c3c3-cccc-cccc-cccc-cccccccccccc';
 // Authenticated as OWNER (all permissions) — these tests exercise business
 // logic, not the auth layer itself. Auth-specific behavior is covered in
 // auth.test.ts.
-const owner = request.agent(app);
+const owner = request.agent(testServer.server);
 
 beforeAll(async () => {
   const res = await owner.post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: TEST_USER_PASSWORD });
@@ -19,7 +23,7 @@ beforeAll(async () => {
 
 describe('GET /api/health', () => {
   it('returns ok status (public, no auth required)', async () => {
-    const res = await request(app).get('/api/health');
+    const res = await request(testServer.server).get('/api/health');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
   });

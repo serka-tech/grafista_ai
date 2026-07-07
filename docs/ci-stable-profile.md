@@ -1,11 +1,17 @@
-# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4)
+# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4, 405-flake root-caused in Step 5, substantially reduced in Step 6)
 
-> **Status: scripts + docs, plus two real source fixes from Production Step
-> 4** (see "Production Step 4" section below for the full, honest account —
-> a genuine root cause was found and fixed, but it did NOT eliminate
-> `ci:stable`'s test-step flakiness; a second, distinct, unexplained failure
-> mode remains). No `.github/workflows/` file was added — see "Why no GitHub
-> Actions file yet" below. Continues [`docs/staging-compose.md`](./staging-compose.md)
+> **Status: scripts + docs, plus real source fixes from Production Steps 4
+> and 6** (see "Production Step 4"/"Production Step 5"/"Production Step 6"
+> sections below for the full, honest account — Step 4 fixed a confirmed DB
+> pool leak but did NOT eliminate flakiness; Step 5 root-caused the
+> remaining 405/403/404/"socket hang up" flake to an external ephemeral-port
+> collision with an unrelated process on the developer machine, without
+> fixing it; Step 6 applied the fix Step 5 identified and measured 6 clean
+> full-suite `test:ci` runs out of 7 attempts afterward — up from ~1-in-3-to-6
+> before, but the flake recurred once within Step 6's own validation, so it
+> is reduced, not eliminated — see Step 6 for the full run-by-run account).
+> No `.github/workflows/` file was added — see "Why no GitHub Actions file
+> yet" below. Continues [`docs/staging-compose.md`](./staging-compose.md)
 > (Production Step 2/2B/2C) and [`docs/deployment-runbook.md`](./deployment-runbook.md)
 > — neither is re-derived here.
 
@@ -227,6 +233,125 @@ meantime, `CI_DEBUG_ROUTES=1 CI_DEBUG_ROUTES_LOG_FILE=<path>` lets anyone
 who hits a spurious status on a merge run confirm in under a minute whether
 it is this same external-process collision (look for a missing `-->`/`<--`
 pair for the failing call in the log) rather than a real regression.
+
+## Production Step 6 — the 405 flake, actually fixed (shared listening server per test file)
+
+**What this step did:** implemented the exact follow-up Step 5 identified as
+the durable fix, and nothing more. Added
+`apps/api/src/test/http-test-server.ts`, a small helper (`startTestServer(app)`
+→ `{ server, close() }`) that calls `app.listen(0)` **once** and hands back
+the already-listening `http.Server`. Per `supertest`'s own source
+(`node_modules/.pnpm/supertest@7.2.2/node_modules/supertest/lib/test.js`),
+`Test.serverAddress()` only calls `.listen(0)` itself when the object passed
+in is a bare function whose `.address()` is still null — pass it an
+already-listening `http.Server` instead and it reuses that one address for
+every request, and also skips the auto-close-on-`end()` path entirely (that
+path only fires for a server `supertest` created internally), so the one
+real listener stays up for the whole file and is closed exactly once, in
+`afterAll`.
+
+**Files changed:** all 17 test files under `apps/api/src/__tests__/` that
+import `supertest` — `analytics-events.test.ts`, `auth.test.ts`,
+`client-isolation.test.ts`, `creative-qa.test.ts`, `demo-flow.test.ts`,
+`design-dna.test.ts`, `layout-plans.test.ts`, `production-jobs.test.ts`,
+`render-health-ready.test.ts`, `render-jobs.test.ts`,
+`render-queue-worker.test.ts`, `revision-entries.test.ts`, `routes.test.ts`,
+`stability.test.ts`, `storage.test.ts`, `visual-generation.test.ts`,
+`workflows.test.ts`. Each file now does `const testServer =
+startTestServer(app); afterAll(() => testServer.close());` right after
+obtaining `app`, and every `request(app)` / `request.agent(app)` call site
+became `request(testServer.server)` / `request.agent(testServer.server)`.
+`demo-flow.test.ts` (the one file that loads `app` via a top-level-await
+dynamic import, because it deliberately flips `AI_DEFAULT_PROVIDER` before
+loading the app graph) got a second, separate `afterAll` for the server,
+placed right after its existing env-restore `afterAll` — the env-flip logic
+itself was not touched. The other 9 files under `__tests__/` that don't
+import `supertest` (pure unit tests) were left untouched, as were
+`CI_DEBUG_ROUTES`/`debug-routes.ts`/`app.ts` from Step 5.
+
+**Effect on ephemeral bind/close volume:** this cuts the ~2000
+`http.Server.listen(0)`/close cycles per `test:ci` run (one per `supertest`
+call, per Step 5's finding) down to 17 — one `.listen(0)` per converted file,
+opened once in module scope and closed once in `afterAll` — plus whatever
+the other 9 non-`supertest` unit-test files still don't need. That is
+roughly two orders of magnitude fewer ephemeral binds contending for the
+same OS ephemeral port range that Step 5 found the Antigravity IDE's
+`language_server_macos_arm` process also using, which is exactly the lever
+Step 5 identified as the fix (shrinking the collision window, not
+eliminating the shared port range itself).
+
+**Verification performed, and the honest reliability picture:**
+- Each of the 17 converted files was run standalone
+  (`vitest run src/__tests__/<file>.test.ts --maxWorkers=1`) immediately
+  after conversion, before moving to the next file — all 17 passed with
+  their full expected test count on the first try, no fixes needed beyond
+  the mechanical substitution itself.
+- `pnpm typecheck`, `pnpm lint`, `pnpm build` all passed cleanly across every
+  workspace package after all 17 conversions.
+- `pnpm run test:ci` (the full 433-test, 26-file, `--maxWorkers=1` suite) was
+  run **seven times total across this step's validation** (four by the
+  implementing agent — three standalone plus one inside `pnpm run
+  ci:stable` — and three more independently by the orchestrating session
+  afterward, specifically because four clean runs alone felt like too small
+  a sample to call this fixed): **six of the seven were clean 433/433
+  passes; one failed.** The failure (independent run #5 overall) was a bare
+  `405` on the `POST /api/auth/login` call inside `production-jobs.test.ts`'s
+  `loginAs()` helper, which cascaded into 22 dependent test failures in that
+  one file (every other helper in that file calls `loginAs()` first) — the
+  same symptom class Step 5 root-caused, not a new one. Re-running
+  `production-jobs.test.ts` standalone immediately after came back clean
+  (23/23) — consistent with the exact "always fails only under full-suite
+  load, always clean standalone" pattern documented since Step 3. Two
+  further full-suite attempts with `CI_DEBUG_ROUTES=1` enabled, made
+  specifically to try to recapture the failure's log signature, both came
+  back clean — the debug run never caught the failure recurring, so this
+  specific instance's log signature could NOT be independently
+  reconfirmed against Step 5's "missing request/response log entry" proof;
+  it is presumed to be the same external-collision class based on the
+  identical symptom (bare 405 on a login POST, standalone-clean), not
+  re-verified with the same rigor as Step 5's original finding.
+- **Net result: 6/7 (~86%) clean full-suite runs observed in this step's own
+  validation**, versus the ~1-in-3-to-6 (~17–33%) rate documented in Steps
+  3–5 on this same machine. This is a real, measured improvement — consistent
+  with cutting ephemeral binds from ~2000/run to 17/run, which should shrink
+  (not eliminate) the collision window with whatever else is using the OS's
+  ephemeral port range — but it is **not zero flakiness**, and this doc will
+  not claim it is. The fix reduces exposure to the Step 5 mechanism; it does
+  not remove the mechanism itself (the OS ephemeral port range is still
+  shared with whatever else is running on this machine).
+- `pnpm run ci:stable` (`typecheck && lint && build && test:ci` chained) was
+  run once, end to end, and passed cleanly (one of the six clean runs
+  counted above).
+- **What this does NOT prove:** 6 clean runs out of 7 attempts on one
+  developer machine, in one session, is encouraging but still a small
+  sample — not a large-sample statistical guarantee, and not a run on a
+  dedicated, otherwise-idle CI runner. The specific mechanism Step 5
+  identified (an unrelated local IDE process sharing the OS ephemeral port
+  range) is inherently machine-specific — a CI runner without that process
+  running at all would have a smaller (though not necessarily zero, if
+  anything else shares that runner's ephemeral range) collision risk from
+  this cause, so this fix's benefit on an actual CI runner could plausibly
+  differ from what was measured here in either direction. Given 6/7 clean,
+  `ci:stable` can reasonably be treated as an **improved but still
+  non-deterministic** merge gate — calling it a "candidate merge gate"
+  outright would overstate what one session's 7 runs actually show; a
+  spurious failure recurred within this same step's own validation, so this
+  doc explicitly does NOT claim the flake is eliminated, only measurably
+  reduced. If a spurious failure is observed again, re-run the specific
+  failing file standalone first (it is expected to pass, per the pattern
+  above), and use `CI_DEBUG_ROUTES=1 CI_DEBUG_ROUTES_LOG_FILE=<path>` (left
+  in place, unchanged, from Step 5) on the next full-suite attempt to try to
+  catch and reconfirm the log signature.
+- Not run in this step: `pnpm run ci:staging` (explicitly lower priority per
+  this step's own task scope than repeating `test:ci`; it does not share the
+  embedded-Postgres-under-concurrent-supertest architecture this step
+  touches, so it was not expected to be affected either way).
+
+**Principles honored:** no test was deleted, no assertion was loosened, no
+real endpoint/route behavior changed, no retries were added to mask
+flakiness, and `CI_DEBUG_ROUTES`/`debug-routes.ts`/`app.ts` were left
+untouched — this step is scoped purely to the test HTTP client/server
+lifecycle described above.
 
 ## Why no GitHub Actions file yet
 
@@ -480,27 +605,36 @@ Docker-build minutes on a commit that already fails stable checks.
 
 ## Remaining risks
 
-- **The `ci:stable` test step's real-world green rate is still roughly
-  1-in-3-to-6 full-suite attempts, even after Production Steps 4 and 5.**
-  Step 4 found and fixed one confirmed, verified root cause (a never-closed
-  DB pool connection leak) but the overall failure rate did not measurably
-  improve. Step 5 then root-caused the second failure mode (the 405s, and by
-  extension the 403/404/"socket hang up" variants seen since) to an external
-  collision between `supertest`'s ~2000-per-run ephemeral `http.Server`
-  bind/close cycles and the Antigravity IDE's own background
-  `language_server_macos_arm` process, which independently binds ports
-  inside the same OS ephemeral range on this developer machine — see
-  "Production Step 5" above for the full evidence chain. **This is a real,
-  reproduced, understood root cause — not an application bug — but it is
-  NOT fixed**, because the durable fix (give each test file, or the whole
-  run, one already-listening server instead of one ephemeral server per
-  `supertest` call) touches request-construction call sites across
-  essentially all 26 test files, which this step's scope explicitly
-  excluded ("no large refactor of test isolation architecture"). Until that
-  follow-up lands, `ci:stable`'s test step should still not be treated as a
-  fully deterministic merge gate; `CI_DEBUG_ROUTES=1` (see Step 5) lets
-  anyone confirm in under a minute whether a given spurious failure is this
-  same known, external, non-app-code cause.
+- **The `ci:stable` test step's flakiness through Steps 3–5 was roughly
+  1-in-3-to-6 full-suite attempts; Production Step 6 applied the durable fix
+  Step 5 identified (share one already-listening `http.Server` per test file
+  instead of one ephemeral server per `supertest` call) and measured 6
+  clean 433/433 runs out of 7 full-suite `test:ci` attempts afterward — a
+  real, measured improvement, but the flake recurred once within Step 6's
+  own validation, so it is REDUCED, not eliminated.** See "Production Step 6"
+  above for the full run-by-run account, including the one recurrence (a
+  bare 405 on `production-jobs.test.ts`'s login helper, standalone-clean on
+  re-run — same symptom class as before). Step 4 found and fixed one
+  confirmed, verified root cause (a never-closed DB pool connection leak);
+  Step 5 root-caused the remaining failure mode (the 405s, and by extension
+  the 403/404/"socket hang up" variants seen since) to an external collision
+  between `supertest`'s ~2000-per-run ephemeral `http.Server` bind/close
+  cycles and the Antigravity IDE's own background `language_server_macos_arm`
+  process, which independently binds ports inside the same OS ephemeral
+  range on this developer machine, WITHOUT fixing it (out of scope for Step
+  5). Step 6 then implemented that fix across all 17 `supertest`-using test
+  files, cutting ephemeral binds from ~2000/run to 17/run. **6/7 clean runs
+  in one session is encouraging, not a large-sample statistical guarantee,
+  and the flake recurring even once within this same validation means
+  `ci:stable` should NOT yet be called a "candidate merge gate" outright** —
+  it is an improved but still non-deterministic gate; `CI_DEBUG_ROUTES=1`
+  (see Step 5, left unchanged) still exists for anyone who hits a spurious
+  failure to try to confirm whether it's a residual instance of this same
+  external-collision class (now less frequent, given the ~2000→17 reduction
+  in ephemeral binds) or something new — Step 6's own attempt to recapture
+  the recurrence's log signature with `CI_DEBUG_ROUTES` did not catch it
+  happening again, so that specific instance's signature was not
+  independently reconfirmed, only presumed by symptom match.
 - **`ci:staging` was reliable across every attempt today** (multiple full
   runs, plus two forced-failure injections to verify cleanup) — it does not
   share the embedded-Postgres-under-concurrent-vitest-workers architecture

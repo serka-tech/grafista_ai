@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { v4 as uuid } from 'uuid';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { store } from '../data/store.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Production Readiness Step — Healthcheck + Worker Heartbeat/Stale Lock
@@ -183,7 +187,7 @@ vi.mock('@grafista/model-router', async (importOriginal) => {
 });
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;
@@ -308,7 +312,7 @@ afterEach(async () => {
 
 describe('GET /api/health — unchanged regression guard', () => {
   it('returns the exact same static shape as before this step', async () => {
-    const res = await request(app).get('/api/health');
+    const res = await request(testServer.server).get('/api/health');
     expect(res.status).toBe(200);
     expect(Object.keys(res.body).sort()).toEqual(['service', 'status', 'timestamp', 'version'].sort());
     expect(res.body.status).toBe('ok');
@@ -320,7 +324,7 @@ describe('GET /api/health — unchanged regression guard', () => {
 
 describe('GET /api/health/ready — basic shape and no-auth access', () => {
   it('returns 200 with an overall ok/degraded status and all check keys present, no auth required', async () => {
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect([200, 503]).toContain(res.status);
     expect(['ok', 'degraded', 'error']).toContain(res.body.status);
     const checks = res.body.checks;
@@ -333,25 +337,25 @@ describe('GET /api/health/ready — basic shape and no-auth access', () => {
   });
 
   it('database check is ok (real embedded Postgres is up)', async () => {
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect(res.body.checks.database.status).toBe('ok');
   });
 
   it('renderQueue reports "queue disabled" when RENDER_QUEUE_ENABLED is unset', async () => {
     expect(process.env.RENDER_QUEUE_ENABLED).toBeUndefined();
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect(res.body.checks.renderQueue.status).toBe('ok');
     expect(res.body.checks.renderQueue.message.toLowerCase()).toContain('disabled');
   });
 
   it('workerHeartbeat reports "not applicable" when RENDER_QUEUE_ENABLED is unset', async () => {
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect(res.body.checks.workerHeartbeat.status).toBe('ok');
     expect(res.body.checks.workerHeartbeat.message.toLowerCase()).toContain('not applicable');
   });
 
   it('never leaks any real secret value present in the test process env', async () => {
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     const stringified = JSON.stringify(res.body);
     const secretValues = [
       process.env.AUTH_SECRET,
@@ -365,7 +369,7 @@ describe('GET /api/health/ready — basic shape and no-auth access', () => {
   });
 
   it('providers check reports presence/absence only, never leaking the key value', async () => {
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     const providers = res.body.checks.providers;
     expect(providers.details.openai).toBe('present');
     expect(providers.details.anthropic).toBe('present');
@@ -385,7 +389,7 @@ describe('Worker heartbeat — tick writes/updates a heartbeat row', () => {
     expect(heartbeat).toBeTruthy();
     expect(heartbeat!.status).toBe('ok');
 
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect(res.body.checks.workerHeartbeat.status).toBe('ok');
     expect(res.body.checks.workerHeartbeat.details.workerCount).toBeGreaterThan(0);
   }, 30_000);
@@ -396,7 +400,7 @@ describe('Worker heartbeat — tick writes/updates a heartbeat row', () => {
     await store.renderWorkerHeartbeats.upsertHeartbeat(workerId, { status: 'ok' });
     await pool.query("UPDATE render_worker_heartbeats SET last_heartbeat_at = NOW() - INTERVAL '1 hour'");
 
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect(res.body.checks.workerHeartbeat.status).toBe('degraded');
   });
 });
@@ -534,7 +538,7 @@ describe('Stale lock recovery — sweepStaleRenderLocks', () => {
     await store.renderJobs.claimNext('still-stale-worker');
     await pool.query("UPDATE render_jobs SET started_at = NOW() - INTERVAL '5 seconds' WHERE id = $1", [job.id]);
 
-    const res = await request(app).get('/api/health/ready');
+    const res = await request(testServer.server).get('/api/health/ready');
     expect(res.body.checks.renderQueue.status).toBe('degraded');
     expect(res.body.checks.renderQueue.details.staleLockedCount).toBeGreaterThanOrEqual(1);
   }, 30_000);

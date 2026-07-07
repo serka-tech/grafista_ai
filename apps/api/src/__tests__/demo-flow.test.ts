@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import request from 'supertest';
+import { startTestServer } from '../test/http-test-server.js';
 
 /**
  * Phase 2 Step 10 — MVP demo flow, end to end, on the KEYLESS configuration.
@@ -41,6 +42,9 @@ const { app } = await import('../app.js');
 const { pool } = await import('../db/pool.js');
 const { TEST_USERS, TEST_USER_PASSWORD } = await import('../test/global-setup.js');
 
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
+
 afterAll(() => {
   // Same hygiene as fake-provider.test.ts: never leak the demo switch into
   // other test files that may reuse this worker's process.env.
@@ -65,7 +69,7 @@ const DEMO_REFERENCE_PNG = Buffer.from(
 const FAKE_MODEL = 'fake-canned-v1';
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;

@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
 import { pool } from '../db/pool.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Regression tests for the Bug 1 (async route handler crash) and Bug 2
@@ -23,7 +27,7 @@ const SEED_CLIENT_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 // i.e. previously unapproved, not referenced by id in any other test file.
 const PENDING_IDEA_ID = 'e2b2b2b2-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
-const owner = request.agent(app);
+const owner = request.agent(testServer.server);
 
 beforeAll(async () => {
   const res = await owner.post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: TEST_USER_PASSWORD });
@@ -47,7 +51,7 @@ describe('Bug 1 — malformed input no longer crashes the process', () => {
   it('the API is still responsive immediately after the malformed request (server did not die)', async () => {
     await owner.get('/api/clients/not-a-real-uuid');
 
-    const health = await request(app).get('/api/health');
+    const health = await request(testServer.server).get('/api/health');
     expect(health.status).toBe(200);
     expect(health.body.status).toBe('ok');
 
@@ -72,7 +76,7 @@ describe('Bug 1 — malformed input no longer crashes the process', () => {
     });
 
     // And the server is still up afterwards.
-    const health = await request(app).get('/api/health');
+    const health = await request(testServer.server).get('/api/health');
     expect(health.status).toBe(200);
   });
 });

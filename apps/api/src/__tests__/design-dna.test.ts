@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * The test environment (global-setup.ts) sets a FAKE OPENAI_API_KEY, so any test that
@@ -94,7 +98,7 @@ vi.mock('@grafista/model-router', () => {
 });
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;
@@ -124,7 +128,7 @@ beforeEach(() => {
 
 describe('1. Unauthenticated access', () => {
   it('rejects POST analyze with 401', async () => {
-    const res = await request(app).post('/api/clients/a1b2c3d4-e5f6-7890-abcd-ef1234567890/design-dna/analyze');
+    const res = await request(testServer.server).post('/api/clients/a1b2c3d4-e5f6-7890-abcd-ef1234567890/design-dna/analyze');
     expect(res.status).toBe(401);
   });
 });

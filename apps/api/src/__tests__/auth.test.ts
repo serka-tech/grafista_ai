@@ -1,47 +1,51 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
 import { pool } from '../db/pool.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 const SEED_CLIENT_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
 describe('1. Unauthenticated access to protected routes', () => {
   it('rejects GET /api/clients with 401', async () => {
-    const res = await request(app).get('/api/clients');
+    const res = await request(testServer.server).get('/api/clients');
     expect(res.status).toBe(401);
   });
 
   it('rejects POST /api/clients with 401', async () => {
-    const res = await request(app).post('/api/clients').send({ name: 'Should Not Be Created' });
+    const res = await request(testServer.server).post('/api/clients').send({ name: 'Should Not Be Created' });
     expect(res.status).toBe(401);
   });
 
   it('rejects GET /api/settings/providers with 401', async () => {
-    const res = await request(app).get('/api/settings/providers');
+    const res = await request(testServer.server).get('/api/settings/providers');
     expect(res.status).toBe(401);
   });
 });
 
 describe('2. Invalid login', () => {
   it('rejects an unknown email with 401', async () => {
-    const res = await request(app).post('/api/auth/login').send({ email: 'nobody@test.local', password: 'whatever123' });
+    const res = await request(testServer.server).post('/api/auth/login').send({ email: 'nobody@test.local', password: 'whatever123' });
     expect(res.status).toBe(401);
   });
 
   it('rejects a known email with the wrong password with 401', async () => {
-    const res = await request(app).post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: 'totally-wrong-password' });
+    const res = await request(testServer.server).post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: 'totally-wrong-password' });
     expect(res.status).toBe(401);
   });
 
   it('does not set a session cookie on failed login', async () => {
-    const res = await request(app).post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: 'totally-wrong-password' });
+    const res = await request(testServer.server).post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: 'totally-wrong-password' });
     expect(res.headers['set-cookie']).toBeUndefined();
   });
 });
 
 describe('3. OWNER can access all protected routes', () => {
-  const owner = request.agent(app);
+  const owner = request.agent(testServer.server);
 
   it('logs in successfully and sets a cookie', async () => {
     const res = await owner.post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: TEST_USER_PASSWORD });
@@ -79,7 +83,7 @@ describe('3. OWNER can access all protected routes', () => {
 });
 
 describe('4. DESIGNER cannot final-approve outputs', () => {
-  const designer = request.agent(app);
+  const designer = request.agent(testServer.server);
 
   it('logs in as DESIGNER', async () => {
     const res = await designer.post('/api/auth/login').send({ email: TEST_USERS.DESIGNER, password: TEST_USER_PASSWORD });
@@ -101,7 +105,7 @@ describe('4. DESIGNER cannot final-approve outputs', () => {
 });
 
 describe('5. CONTENT_MANAGER cannot manage settings', () => {
-  const contentManager = request.agent(app);
+  const contentManager = request.agent(testServer.server);
 
   it('logs in as CONTENT_MANAGER', async () => {
     const res = await contentManager
@@ -119,7 +123,7 @@ describe('5. CONTENT_MANAGER cannot manage settings', () => {
 });
 
 describe('6. User without brand_assets:upload cannot upload brand assets', () => {
-  const contentManager = request.agent(app);
+  const contentManager = request.agent(testServer.server);
 
   it('logs in as CONTENT_MANAGER (no brand_assets:upload)', async () => {
     const res = await contentManager
@@ -138,7 +142,7 @@ describe('6. User without brand_assets:upload cannot upload brand assets', () =>
   });
 
   it('DESIGNER (has brand_assets:upload) is allowed through the permission gate', async () => {
-    const designer = request.agent(app);
+    const designer = request.agent(testServer.server);
     await designer.post('/api/auth/login').send({ email: TEST_USERS.DESIGNER, password: TEST_USER_PASSWORD });
     const res = await designer
       .post(`/api/clients/${SEED_CLIENT_ID}/brand-assets`)
@@ -149,7 +153,7 @@ describe('6. User without brand_assets:upload cannot upload brand assets', () =>
 });
 
 describe('7. Logout invalidates the session', () => {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
 
   it('logs in, confirms access, logs out, then confirms access is revoked', async () => {
     const loginRes = await agent.post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: TEST_USER_PASSWORD });
@@ -169,7 +173,7 @@ describe('7. Logout invalidates the session', () => {
 
 describe('8. Sessions are persisted in PostgreSQL, not in-memory', () => {
   it('a valid session has a real row in the sessions table, queryable outside the app', async () => {
-    const agent = request.agent(app);
+    const agent = request.agent(testServer.server);
     await agent.post('/api/auth/login').send({ email: TEST_USERS.OWNER, password: TEST_USER_PASSWORD });
 
     const { rows } = await pool.query(

@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
 import { PIPELINE_ORDER } from '../workflows/definition-loader.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Workflow engine + routes tests (Phase 2 Step 6). Structurally mirrors
@@ -202,7 +206,7 @@ type Agent = ReturnType<typeof request.agent>;
 const SEED_CLIENT_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
 async function loginAs(email: string): Promise<Agent> {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status, `login as ${email} failed: ${JSON.stringify(res.body)}`).toBe(200);
   return agent;
@@ -375,12 +379,12 @@ describe('1. Workflow catalog API serves the validated definitions', () => {
 
 describe('2. Unauthenticated access', () => {
   it('rejects start and run listing with 401', async () => {
-    const startRes = await request(app)
+    const startRes = await request(testServer.server)
       .post('/api/workflows/style-library-ingestion/start')
       .send({ clientId: SEED_CLIENT_ID });
     expect(startRes.status).toBe(401);
 
-    const listRes = await request(app).get('/api/workflow-runs');
+    const listRes = await request(testServer.server).get('/api/workflow-runs');
     expect(listRes.status).toBe(401);
   });
 });

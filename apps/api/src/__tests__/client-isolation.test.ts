@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { v4 as uuid } from 'uuid';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
 import { usersRepo } from '../db/repositories/users.js';
 import { clientMembersRepo } from '../db/repositories/client-members.js';
 import { hashPassword } from '../auth/password.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Phase 3 Step 4 — Client Isolation Hardening.
@@ -187,7 +191,7 @@ vi.mock('@grafista/model-router', () => {
 });
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;

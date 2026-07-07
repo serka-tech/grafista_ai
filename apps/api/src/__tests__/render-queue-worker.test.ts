@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { v4 as uuid } from 'uuid';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { store } from '../data/store.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
@@ -9,6 +10,9 @@ import { usersRepo } from '../db/repositories/users.js';
 import { clientMembersRepo } from '../db/repositories/client-members.js';
 import { hashPassword } from '../auth/password.js';
 import type { RenderInput, RenderOutput } from '../render/adapters/types.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Phase 3 Step 5A — Render Queue / Polling Worker.
@@ -210,7 +214,7 @@ vi.mock('@grafista/model-router', async (importOriginal) => {
 });
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;

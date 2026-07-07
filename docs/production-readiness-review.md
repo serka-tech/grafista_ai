@@ -577,6 +577,48 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   değil** — ama artık NEDEN olmadığı kanıtlı ve belgeli. Tam dürüst detay:
   [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production Step
   5" bölümü — burada TEKRARLANMIYOR.
+- **GÜNCELLEME (Production Step 6 — 405 flake'i azaltıldı, TAMAMEN
+  giderilmedi):** Step 5'in tespit ettiği ama kapsam dışı bıraktığı kalıcı
+  çözüm bu adımda uygulandı: `apps/api/src/test/http-test-server.ts` adında
+  küçük bir yardımcı eklendi (`startTestServer(app)` → `app.listen(0)`'ı
+  SADECE BİR KEZ çağırıp zaten-dinleyen bir `http.Server` döndürür).
+  `supertest`'in kendi kaynak kodu doğrulandı: `Test.serverAddress()` sadece
+  bare bir fonksiyona (`app.address()` hâlâ null olduğunda) kendi
+  `.listen(0)`'ını çağırıyor — zaten dinleyen bir server verilirse onu tekrar
+  kullanıyor ve `end()`'in otomatik kapama mantığını da atlıyor. `supertest`
+  import eden 17 test dosyasının HEPSİNDE (`analytics-events`, `auth`,
+  `client-isolation`, `creative-qa`, `demo-flow`, `design-dna`,
+  `layout-plans`, `production-jobs`, `render-health-ready`, `render-jobs`,
+  `render-queue-worker`, `revision-entries`, `routes`, `stability`,
+  `storage`, `visual-generation`, `workflows`) `request(app)`/
+  `request.agent(app)` çağrıları `request(testServer.server)`/
+  `request.agent(testServer.server)` olarak mekanik biçimde değiştirildi; her
+  dosya `app`'i aldıktan hemen sonra TEK bir server açıp `afterAll`'da
+  kapatıyor. Bu, Step 5'in bulduğu ~2000 efemer bind/kapatma döngüsünü
+  ~17'ye indiriyor. **Doğrulama:** 17 dosyanın her biri dönüştürüldükten
+  hemen sonra tek başına çalıştırıldı (hepsi ilk denemede geçti);
+  `pnpm typecheck`/`pnpm lint`/`pnpm build` temiz; `pnpm run test:ci` (433
+  test, 26 dosya) toplam **7 kez** çalıştırıldı (agent tarafından 4 kez —
+  3 bağımsız + `ci:stable` zinciri içinde 1 kez — ve orkestratör oturum
+  tarafından bağımsız olarak 3 kez daha, çünkü 4 temiz koşu tek başına
+  yetersiz bir örneklem gibi geldi). **Sonuç: 7 denemeden 6'sı temiz
+  433/433, 1'i başarısız** — orkestratörün 5. bağımsız koşusunda
+  `production-jobs.test.ts`'in login helper'ında yine bir 405 görüldü (aynı
+  dosyada 22 teste yayıldı, hepsi login'e bağımlı); dosya hemen ardından
+  tek başına 23/23 temiz geçti — Step 3'ten beri belgelenen "sadece tam
+  suite yükü altında nadiren, izole hep temiz" deseniyle birebir tutarlı.
+  `CI_DEBUG_ROUTES` ile bu belirtiyi yeniden yakalamaya çalışan 2 ek koşu
+  ikisi de temiz geldi — yani bu spesifik tekrarın log imzası bağımsız
+  olarak yeniden doğrulanamadı, sadece belirti eşleşmesiyle Step 5'in aynı
+  dış-çakışma sınıfına ait olduğu varsayıldı. **Dürüst sonuç: bu, tek bir
+  geliştirici makinesinde bir oturumda ~%86 (6/7) temiz oran — Step 3-5'in
+  ~1'de-3-ila-6 (~%17-33) oranına göre gerçek ve ölçülebilir bir iyileşme,
+  ama SIFIR flakiness DEĞİL.** Flake bu adımın kendi doğrulaması sırasında
+  bir kez daha tekrarlandığından, `ci:stable` "aday bir merge gate" olarak
+  bile abartılı olur — daha doğru tanım: **iyileştirilmiş ama hâlâ
+  deterministik olmayan bir gate**. `CI_DEBUG_ROUTES` teşhis aracı hiç
+  değiştirilmedi. Tam dürüst detay: [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin
+  "Production Step 6" bölümü — burada TEKRARLANMIYOR.
 - **GÜNCELLEME (Production Step 2C — reprodüksiyon doğrulaması):** Step
   2B'nin workaround'ı gerçek Docker'a karşı iki senaryoda test edildi: (A)
   mevcut repo'da `staging:down` → `staging:up`, hiç `--no-cache`/restart

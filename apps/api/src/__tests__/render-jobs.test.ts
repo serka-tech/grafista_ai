@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../app.js';
+import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
 import type { RenderInput, RenderOutput } from '../render/adapters/types.js';
+
+const testServer = startTestServer(app);
+afterAll(() => testServer.close());
 
 /**
  * Phase 2 Step 9A — Render Jobs / Export Artifacts (Template Render Engine
@@ -221,7 +225,7 @@ vi.mock('@grafista/model-router', () => {
 });
 
 async function loginAs(email: string) {
-  const agent = request.agent(app);
+  const agent = request.agent(testServer.server);
   const res = await agent.post('/api/auth/login').send({ email, password: TEST_USER_PASSWORD });
   expect(res.status).toBe(200);
   return agent;
@@ -388,10 +392,10 @@ const SOME_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
 describe('1. Unauthenticated access', () => {
   it('rejects render, get, artifacts and file with 401', async () => {
-    expect((await request(app).post(`/api/production-jobs/${SOME_UUID}/render`)).status).toBe(401);
-    expect((await request(app).get(`/api/render-jobs/${SOME_UUID}`)).status).toBe(401);
-    expect((await request(app).get(`/api/render-jobs/${SOME_UUID}/artifacts`)).status).toBe(401);
-    expect((await request(app).get(`/api/export-artifacts/${SOME_UUID}/file`)).status).toBe(401);
+    expect((await request(testServer.server).post(`/api/production-jobs/${SOME_UUID}/render`)).status).toBe(401);
+    expect((await request(testServer.server).get(`/api/render-jobs/${SOME_UUID}`)).status).toBe(401);
+    expect((await request(testServer.server).get(`/api/render-jobs/${SOME_UUID}/artifacts`)).status).toBe(401);
+    expect((await request(testServer.server).get(`/api/export-artifacts/${SOME_UUID}/file`)).status).toBe(401);
   });
 });
 
@@ -772,7 +776,7 @@ describe('7. Invalid request body — preset/exportFormat validation', () => {
 
 describe('8. Render history — GET /production-jobs/:id/render-jobs', () => {
   it('rejects unauthenticated access with 401', async () => {
-    const res = await request(app).get(`/api/production-jobs/${SOME_UUID}/render-jobs`);
+    const res = await request(testServer.server).get(`/api/production-jobs/${SOME_UUID}/render-jobs`);
     expect(res.status).toBe(401);
   });
 
