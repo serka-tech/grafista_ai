@@ -952,6 +952,19 @@ Docker-build minutes on a commit that already fails stable checks.
   (`RENDERER_PROVIDER=fake`, `AI_DEFAULT_PROVIDER=fake`,
   `STORAGE_PROVIDER=local`) — see `docs/staging-compose.md`'s "Known gaps",
   unchanged.
+- **UPDATE (Production Step 9): the "candidate merge gate" status above is
+  a CODE-CORRECTNESS gate — it is NOT a data-safety gate, and the two must
+  not be conflated.** `stable`/`staging-smoke` passing tells you the code
+  compiles, lints, and behaves correctly against a disposable fake-provider
+  stack; it says nothing about whether production data can be backed up or
+  recovered. That is a separate, previously-undocumented gap — closed as
+  of Production Step 9 by [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md)
+  (persistence inventory, managed Postgres/S3 decision criteria, backup
+  policy, restore procedure, staging restore drill). Written, not yet
+  exercised against real data — see that document's own header warning.
+  Both gates must independently pass before a real production deploy: this
+  CI gate for code correctness, and a completed staging restore drill
+  (`docs/backup-restore-runbook.md` §7) for data safety.
 - **Multi-worker/horizontal-scale render-queue coordination is still
   completely untested** in any profile — `docs/render-queue-worker-plan.md`
   §7's finding is unchanged.
@@ -961,6 +974,10 @@ Docker-build minutes on a commit that already fails stable checks.
 
 ## Related documents
 
+- [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
+  Production Step 9: the separate data-safety gate (persistence
+  inventory, managed Postgres/S3 decision, backup policy, restore
+  procedure), distinct from this document's code-correctness CI gate.
 - [`docs/staging-compose.md`](./staging-compose.md) — full Docker/staging
   design decisions, the Step 2B bugs found+fixed, and the Step 2C
   reproducibility findings this profile builds on. Not repeated here.

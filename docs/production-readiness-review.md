@@ -763,8 +763,73 @@ backup/restore prosedürü (bugün hâlâ hiçbir yerde yazılı değil) ve mana
 Postgres/S3 seçimi gibi gerçek altyapı kararları. Bu belge bunları YENİDEN
 ÖNCELİKLENDİRMİYOR, yalnız hangisinin hâlâ açık olduğunu netleştiriyor.
 
+## 17. Implementation status update (Backup/Restore Prosedürü & Managed Storage Kararı — Production Step 9)
+
+**§16'nın bıraktığı iki açık kalemden biri (backup/restore) artık
+DOKÜMANTE — otomatize/uygulanmış değil.** Tam gerekçe/prosedür
+[`docs/backup-restore-runbook.md`](./backup-restore-runbook.md)'de — burada
+yalnızca bu belgenin production-gate sınıflandırmasına düşen özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **Persistence envanteri çıkarıldı:** hangi Postgres tablosu/object
+  storage prefix'i kalıcı (yedeklenmesi ZORUNLU) — kullanıcı-kaynaklı
+  yüklemeler (`brand-assets/`, `design-references/`) ve AI-üretilmiş
+  görseller (`generated-outputs/`) — hangisi güvenle regenerable/cache
+  (render export'ları, `render-jobs/*/exports/*`, render pipeline'ı
+  yeniden çalıştırarak reprodüklenebilir). Kod incelemesiyle doğrulandı:
+  hiçbir tabloda `BYTEA`/binary kolon yok, tüm dosya baytları
+  Postgres dışında object storage'da.
+- **Managed Postgres/S3 için karar KRİTERLERİ hazırlandı** (sağlayıcı
+  SEÇİLMEDİ — bu, gerçek bir hesap/altyapı provizyonu, bu adımın kapsamı
+  dışı): `STORAGE_PROVIDER=s3` soyutlamasının zaten sıfır kod
+  değişikliğiyle her S3-uyumlu sağlayıcıyla çalıştığı (bu belgenin §4'ünün
+  iddiası) kod okumasıyla YENİDEN doğrulandı; `local` modun production'da
+  hiç kullanılmaması gerektiği netleştirildi.
+- **Backup policy + RPO/RTO hedefleri yazıldı** — günlük otomatik
+  snapshot + haftalık bağımsız logical dump, versioning + lifecycle
+  policy (yalnız cache tier'da), somut RPO/RTO tablosu.
+- **Restore prosedürü + staging restore drill adım adım yazıldı** —
+  Postgres (`pg_restore`) ve object storage (versiyon geri getirme / bucket
+  senkronizasyonu) için placeholder komutlar, verification/rollback
+  checklist'leri.
+- **`docs/deployment-runbook.md` güncellendi:** §5'e "4b" backup+restore-drill
+  doğrulama adımı (production öncesi zorunlu gate), §6/§11'e bu yeni
+  runbook'a referanslar eklendi.
+- **`docs/ci-stable-profile.md` güncellendi:** CI candidate-merge-gate
+  durumunun bu backup/restore gate'inden AYRI bir şey olduğu netleştirildi
+  — biri karışmasın diye.
+
+**Kapatılmadı (bilinçli, dürüstçe restate):**
+
+- Hiçbir otomasyon eklenmedi — backup/restore hâlâ tamamen manuel bir
+  prosedür, bir script/cron değil.
+- Staging restore drill **gerçekten çalıştırılmadı** — yalnızca nasıl
+  çalıştırılacağı yazıldı (`docs/backup-restore-runbook.md` §7). İlk
+  gerçek koşum aynı zamanda bu prosedürün ilk doğrulaması olacak.
+- Managed Postgres/S3 sağlayıcısı seçilip provizyonlanmadı — yalnızca
+  seçim kriterleri hazır.
+- §16'nın listelediği diğer açık kalem (çoklu-worker yatay ölçek
+  koordinasyonu) bu adımın kapsamı DIŞI, değişmedi.
+- Hiçbir production deploy yapılmadı — bu adım yalnız veri-güvenliği
+  prosedürünü hazırladı, bir production ortamını değil.
+
+**Bu adımın kendi doğrulaması:** `pnpm run typecheck`/`lint`/`build`/
+`ci:stable`/`ci:staging` bu adımda (dokümantasyon + `.env.example` yorum
+değişikliği sonrası) tekrar çalıştırıldı, hepsi PASS — kod değişikliği
+olmadığı için beklenen sonuç, ama gerçekten koşuldu, varsayılmadı.
+
+**Sonraki mantıklı adım:** backup/restore prosedürü artık yazılı olduğu
+için, gerçek production deploy'a geçmeden önceki en somut kalan iş bu
+prosedürün staging'de en az bir kez GERÇEKTEN çalıştırılıp doğrulanması
+(`docs/backup-restore-runbook.md` §7) — bu, bir sonraki implementation
+adayı için doğal bir aday, ama bu belge bunu yeniden önceliklendirmiyor.
+
 ## İlgili dokümanlar
 
+- [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) — §17'nin
+  tam teslimatı: persistence envanteri, managed Postgres/S3 karar
+  kriterleri, backup policy, restore/restore-drill prosedürü.
 - [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — §16'nın doğrudan
   kaynağı: Production Step 8'in tam çalıştırma tablosu, 3 bulunan bug'ın
   kanıtlı kök-neden yazımı, ve Remote Runner Validation Protocol'ün gerçek

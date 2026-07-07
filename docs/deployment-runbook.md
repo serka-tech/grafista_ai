@@ -320,6 +320,15 @@ cp .env.example apps/api/.env
 # 4. Postgres connectivity check (dedike bir script yok — doğrudan doğrula)
 psql "$DATABASE_URL" -c "SELECT 1;"
 
+# 4b. Backup + restore drill doğrulaması (YALNIZ production, staging/local'de
+# opsiyonel — bkz. docs/backup-restore-runbook.md, Production Step 9)
+# Migration'ı çalıştırmadan ÖNCE: (a) mevcut instance'ın güncel bir backup'ı
+# alınmış olmalı (docs/backup-restore-runbook.md §3a), (b) en az bir kez
+# staging'de bu backup'tan restore drill'i (§7) başarıyla tamamlanmış
+# olmalı. Bu adım bugün OTOMATİZE DEĞİL — §6'nın "backup ZORUNLU ama
+# otomatize eden bir tool yok" notuyla aynı, insan disiplinine bağlı bir
+# gate.
+
 # 5. Migration run
 pnpm --filter @grafista/api run db:migrate
 # (001'den bugünkü en yüksek numaralı migration'a kadar sırayla uygulanır;
@@ -391,6 +400,12 @@ Not: adım 12 (`db:seed`) adım 13'ten (`db:seed-admin`) ÖNCE çalışmalı —
   bugün bunu otomatikleştiren bir araç/script YOK (`pg_dump`/managed
   Postgres'in kendi snapshot mekanizması kullanılmalı, elle). Bu bir
   prosedür notudur, var olan bir tool'un referansı değildir.
+  **GÜNCELLEME (Production Step 9):** bu "backup ZORUNLU" notu artık bir
+  prosedüre bağlandı — [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md)
+  §3a (backup policy) ve §7 (staging restore drill). Prosedür YAZILDI,
+  ama henüz gerçek production verisiyle egzersiz edilmedi (bkz. o
+  dokümanın dosya başı uyarısı) — otomatikleştirme hâlâ yok, yalnızca
+  artık ne yapılacağı dokümante.
 - **Rollback stratejisi:** `docs/production-readiness-review.md`'nin
   bulgusu aynen geçerli — **bugün gerçek bir "migration down" komutu/
   mekanizması YOK; additive-only disiplin FİİLEN rollback stratejisinin
@@ -571,21 +586,42 @@ gerektiğini belirler (§13).
 
 ## 11. Backup/restore
 
+> **GÜNCELLEME (Production Step 9):** bu bölümün altındaki maddeler
+> ("otomatik backup yok", "restore smoke yok") Step 9 öncesi durumu
+> yansıtıyordu ve **hâlâ teknik olarak doğru** — Step 9 hiçbir otomasyon
+> EKLEMEDİ (bilinçli kapsam sınırı, bkz. aşağıdaki not). Değişen şey: artık
+> tam bir prosedür/karar dokümanı var —
+> [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) — persistence
+> envanteri (hangi veri kalıcı/hangisi cache), managed Postgres/S3 yön
+> önerisi, backup policy (RPO/RTO hedefleri dahil), ve adım adım
+> restore/restore-drill prosedürü. **Bu doküman henüz gerçek bir restore
+> ile egzersiz edilmedi** (bugüne kadar gerçek production verisi/yedeği
+> hiç olmadı) — prosedür yazılı, doğrulanmış değil. §7'deki staging
+> restore drill, production'a geçmeden önce en az bir kez ÇALIŞTIRILMALI
+> (bkz. §5'in yeni "4b" adımı, bu runbook'a bu Step 9'da eklendi).
+
 - **PostgreSQL backup:** bugün **otomatik bir backup mekanizması yok** —
   ne bir cron, ne bir script, ne bir dokümante prosedür
   (`docs/production-readiness-review.md`'nin doğruladığı boşluk, burada
   aynen restate ediliyor). Production'a çıkmadan önce en az managed
   Postgres sağlayıcısının kendi otomatik snapshot/PITR özelliği
-  etkinleştirilmeli — repo bunu kendi başına sağlamıyor.
+  etkinleştirilmeli — repo bunu kendi başına sağlamıyor. Somut policy
+  (retention, RPO/RTO hedefleri) artık `docs/backup-restore-runbook.md`
+  §3a/§3c'de.
 - **S3/artifact backup:** `STORAGE_PROVIDER=local` modunda **sıfır backup
   hikayesi** — tek instance'ın diski kaybolursa tüm görsel/render/artifact
   geçmişi kalıcı olarak kaybolur (`docs/production-readiness-review.md`,
   confirmed). `s3` modunda bir backup hikayesi olabilir ama bu tamamen S3
   sağlayıcısının kendi versioning/replication ayarına bağlı — repo bunu
-  ne yapılandırıyor ne dokümante ediyor.
-- **Restore smoke:** **yok** — ne bir "backup'tan geri yükle ve doğrula"
-  script'i, ne bir dokümante prosedür bugün mevcut. Bir restore denemesi
-  gerekirse, bugün sıfırdan icat edilmesi gerekir.
+  ne yapılandırıyor ne dokümante ediyor. `docs/backup-restore-runbook.md`
+  §2, production'da `local` modun hiç kullanılmaması gerektiğini net
+  şekilde önerir.
+- **Restore smoke:** script hâlâ **yok**, ama artık bir dokümante
+  prosedür var — `docs/backup-restore-runbook.md` §5/§6 (restore
+  komutları) ve §7 (staging restore drill, adım adım). Bir restore
+  denemesi gerekirse artık sıfırdan icat edilmesi GEREKMEZ, ama bu
+  prosedürün kendisi de henüz gerçek veriyle koşulmadı — ilk gerçek
+  koşum aynı zamanda prosedürün ilk doğrulaması olacak.
 - **Migration rollback:** §6'ya bkz. — additive-only disiplin fiilen
   rollback stratejisidir, ayrı bir "down migration" tool'u yok.
 - **Analytics/revision veri saklama (retention):** bugün **hiçbir
@@ -781,8 +817,42 @@ kabul etmeyin; 4/5 veya altıysa gerçek oranı dürüstçe raporlayın.
 
 ---
 
+## 15. Implementation status update (Backup/Restore Runbook & Managed Storage Decision — Production Step 9)
+
+**YAZILDI — prosedür + karar dokümanı, egzersiz edilmedi.** Bu adımın
+hedefi §11'in ve `docs/production-readiness-review.md` §10/§16'nın ortak
+tespit ettiği "backup/restore prosedürü hiçbir yerde yazılı değil"
+boşluğunu kapatmaktı. Gerçekten kapatılan/kapatılmayan:
+
+- **Kapatıldı:** persistence envanteri (hangi Postgres tablosu/storage
+  prefix'i kalıcı, hangisi cache), managed Postgres/S3 için ölçüt ve yön
+  önerisi (sağlayıcı SEÇİLMEDİ, yalnızca kriterler), backup policy
+  (RPO/RTO hedefleri dahil), adım adım Postgres + object storage restore
+  komutları, staging restore drill prosedürü, verification/rollback
+  checklist'leri — hepsi [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md)'de.
+- **Kapatılmadı (bilinçli, bu adımın kapsamı dışı):** hiçbir otomasyon
+  eklenmedi (backup script/cron YOK, hâlâ manuel); hiçbir managed
+  Postgres/S3 sağlayıcısı seçilip provizyonlanmadı; staging restore
+  drill **gerçekten çalıştırılmadı** — yalnızca nasıl çalıştırılacağı
+  yazıldı; hiçbir production deploy yapılmadı, hiçbir migration
+  eklenmedi.
+- **Bu adımın kendi doğrulaması:** typecheck/lint/build/`ci:stable`/
+  `ci:staging` hepsi bu adımda (yalnızca dokümantasyon + `.env.example`
+  yorum değişikliği sonrası) tekrar çalıştırıldı — hepsi PASS (kod
+  değişikliği yok, beklenen sonuç).
+- **Dürüst sonuç:** production deploy'a giden yoldaki "veri güvenliği"
+  gate'i artık bir PROSEDÜRE sahip, ama bu prosedür kendisi HENÜZ
+  doğrulanmadı. `docs/production-readiness-review.md`'nin bu adımı
+  nasıl sınıflandırdığı için bkz. o dosyanın kendi Step 9 güncellemesi.
+
+---
+
 ## İlgili dokümanlar
 
+- [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
+  Production Step 9'un tam teslimatı: persistence envanteri, managed
+  Postgres/S3 karar kriterleri, backup policy, restore/restore-drill
+  prosedürü. §11/§6'nın artık işaret ettiği doküman.
 - [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — §14'ün doğrudan
   kaynağı: Remote Runner Validation Protocol'ün tam gerekçesi, dormant
   `.github/workflows/stable-ci.yml` kararı, ve `CI_DEBUG_ROUTES` teşhis
