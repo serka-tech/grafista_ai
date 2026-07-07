@@ -1530,6 +1530,134 @@ VERMİYOR, yalnızca ne zaman gerekeceğini netleştiriyor.
 
 ---
 
+## 24. Render API Docker Build Fix — Production Step 15
+
+> **§21'in "Render Docker build riski GERÇEKTEN test edilmedi" notu ve
+> §13/§21'in HIGH-RISK bulgusu bu adımda KAPANDI — risk gerçek bir
+> deploy hatası olarak DOĞRULANDI, kök nedeni bulundu, ve düzeltildi.**
+> Gerçek Render staging altyapısı bu adımdan önce kullanıcı tarafından
+> provizyonlandı (`grafista-api-staging`, Docker runtime, Frankfurt,
+> Starter plan; `grafista-postgres-staging`, Basic-256mb, PostgreSQL 18)
+> ve ilk deploy denemesi tam olarak `docs/render-staging-blueprint.template.yaml`'ın
+> HIGH-RISK notunun öngördüğü hatayla başarısız oldu: `Error: Cannot
+> find module '/repo/apps/api/dist/index.js'`.
+
+**Kök neden — iki katmanlı:**
+
+1. **Yüzey neden:** `apps/api/Dockerfile`'ın build stage'i (Production
+   Step 8'den beri) hiçbir workspace paketini container İÇİNDE
+   derlemiyordu — her paketin `dist/`'inin HOST'ta önceden build
+   edilmiş olmasını ve `COPY . .` ile image'a taşınmasını bekliyordu.
+   Bu, `scripts/ci-staging.sh`'in kendi host-build adımıyla (ve her
+   geliştiricinin kendi çalışma dizininde biriken, gitignore'lu ama
+   diskte duran `dist/` klasörleriyle) hep gizlenmiş bir varsayımdı.
+   Render'ın `runtime: docker` servisi ise `docker build`'i doğrudan,
+   host-build adımı OLMADAN, taze bir `git clone`'a karşı çalıştırıyor
+   — bu yüzden `dist/` hiç var olmadı.
+2. **Asıl kök neden — bu adımda YENİ bulundu:** Build stage'e
+   `RUN pnpm --filter @grafista/api... run build`'i geri eklemek
+   (in-container derleme) tek başına YETMEDİ — gerçek çalışma
+   dizinine (temiz bir `git clone`'a değil) karşı test edildiğinde AYNI
+   "modül bulunamadı" hatası (bu kez TypeScript derleme hatası olarak,
+   `Cannot find module '@grafista/schemas'`) tekrar üretildi. Kaynağı:
+   `.dockerignore`'daki bare `*.tsbuildinfo` deseni yalnızca context
+   KÖKÜNDEKİ dosyaları hariç tutuyor — `.gitignore`'un aksine, `/`
+   içermeyen bir desen bu Docker/BuildKit sürümünde (29.5.2 /
+   buildx 0.34.0-desktop.1) İÇ İÇE (nested) dosyaları hariç TUTMUYOR
+   (minik bir izole repro ile doğrulandı — aşağıya bkz.). Sonuç: her
+   paketin host'ta üretilmiş `tsconfig.tsbuildinfo`'su (TypeScript'in
+   `"incremental": true` — `tsconfig.base.json` — çıktısı) sessizce
+   image'a kopyalanıyordu; tsc kendi eski build-info'sunu bulunca
+   paketi "zaten güncel" sayıp SIFIR dosya emit ediyordu — HER SEFERİNDE,
+   %100 deterministik. **Production Step 2B ve Step 8'in "tsc COPY'lenen
+   kaynağa karşı güvenilmez" diye kaydettiği bulgu, gerçekte BU tek
+   satırlık `.dockerignore` glob bug'ıydı** — bir yıllık host-build-önce
+   workaround'ı, aslında root-cause edilebilir, tek satırlık bir düzeltmesi
+   olan bir sorun içindi.
+
+**Yapılan düzeltme (yalnızca 2 dosya, hiçbir Render panel ayarı
+gerektirmiyor):**
+
+- `apps/api/Dockerfile` — build stage artık `RUN pnpm --filter
+  @grafista/api... run build` ile @grafista/api VE workspace
+  bağımlılıklarının (schemas, model-router, prompt-engine) hepsini
+  in-container, doğru topolojik sırada derliyor (pnpm'in `...` filtre
+  sözdizimi). Host-build-ve-kopyala workaround'ı tamamen kaldırıldı.
+- `.dockerignore` — `apps/*/dist/` ve `packages/*/dist/` yeniden
+  eklendi (artık hiçbir paket host-built dist'e güvenmiyor, hepsi
+  in-container build ediliyor) VE `*.tsbuildinfo` → `**/*.tsbuildinfo`
+  (asıl kök-neden düzeltmesi — nested tsbuildinfo dosyalarını da
+  gerçekten hariç tutuyor).
+
+**Doğrulama (hepsi bu adımda gerçekten çalıştırıldı):**
+
+- Minik izole repro: `*.tsbuildinfo` deseni context kökündeki dosyayı
+  hariç tuttu ama `sub/nested.tsbuildinfo`'yu TUTMADI (kopyalandı);
+  `**/*.tsbuildinfo` her iki durumu da doğru hariç tuttu.
+- Temiz `git clone` (host build hiç çalışmamış, sıfır `dist/`/tsbuildinfo)
+  üzerinden `docker build --no-cache --target build`: **4/4 PASS** —
+  2× bu makinenin native mimarisinde (arm64), 2× `--platform linux/amd64`
+  (Render'ın gerçek mimarisi, QEMU emülasyonuyla) — hepsi
+  `apps/api/dist/index.js`'i doğru üretti.
+  **Düzeltme ÖNCESİ** aynı temiz clone'a karşı: dist/index.js YOK
+  (repro edildi, beklenen).
+  **Düzeltme ÖNCESİ, .dockerignore düzeltmesi olmadan, host-build
+  artıklarıyla dolu gerçek çalışma dizinine karşı** (`docker build` VE
+  `docker compose build`, ikisi de, isole/eşzamanlı başka build
+  olmadan): **3/3 FAIL** — `Cannot find module '@grafista/schemas'`,
+  yukarıdaki kök-neden analiziyle birebir eşleşen.
+  **Düzeltme SONRASI, aynı host-build-artıklı gerçek çalışma dizinine
+  karşı**: **2/2 PASS** (determinism doğrulaması) + ayrı bir
+  post-COPY inceleme, `.dockerignore`'un artık hiçbir tsbuildinfo'yu
+  context'e sızdırmadığını doğrudan gösterdi (COPY'den hemen sonra,
+  hiçbir RUN build adımı çalışmadan, container içinde SIFIR
+  `*.tsbuildinfo` bulundu).
+- `pnpm run typecheck` / `pnpm run lint` / `pnpm run build`: PASS.
+- `pnpm run ci:stable`: PASS.
+- `pnpm run ci:staging` (gerçek Docker Desktop'a karşı — host build →
+  `staging:up` → health poll → migrate → `smoke:staging` →
+  `staging:down`, hepsi `docker-compose.staging.yml` üzerinden, düzeltme
+  SONRASI): PASS — tam sonuç ve komut tablosu bu adımın kendi final
+  raporunda.
+
+**Bu adımda AYRICA olan, plansız ama şeffafça kaydedilen bir olay:**
+Doğrulama sürecinde (izole bir `.dockerignore` deseni testi için
+kullanılan geçici bir scratch dizinini temizlerken) yanlışlıkla TEK bir
+`rm -rf` komutuna gerçek proje dizininin yolu da eklendi ve proje
+dizini silindi. Working tree bu adımın başında ZATEN temizdi (`git
+status` — commit edilmemiş hiçbir değişiklik yoktu, tek uncommitted
+değişiklik bu adımın kendi Dockerfile/.dockerignore fix'iydi ve ayrı bir
+scratch kopyası vardı) — bu yüzden `git clone` ile origin'den (GitHub)
+sıfır veri kaybıyla tam kurtarıldı, fix dosyaları scratch kopyasından
+geri uygulandı. Kaybolan tek şey `.env.staging` (gitignore'lu, secret
+İÇERMİYOR, `.env.staging.example`'dan CI'ın kendi yaptığı gibi yeniden
+üretildi) idi. Bu olay burada gelecekte benzer bir hatadan kaçınmak için
+kaydediliyor, gizlenmiyor.
+
+**Kapatılmadı (bilinçli, dürüstçe restate):**
+
+- Gerçek Render deploy'unun bu fix'le başarılı olacağı %100
+  GARANTİ değil — yerel doğrulama (native + amd64 emülasyon, temiz
+  clone + gerçek host-build-artıklı senaryo) mümkün olan en yakın
+  proxy, ama Render'ın kendi build altyapısına karşı gerçek bir deploy
+  hâlâ YAPILMADI (bu adımın kapsamı dışı — "production deploy yapma"
+  görev kısıtı).
+  Render panelinden yeniden deploy tetiklenmeli ve gerçek log
+  doğrulanmalı.
+- `.dockerignore`'daki bu bare-pattern-recursion bug'ı sınıfının
+  BAŞKA satırlarda da (bu adımda kontrol edilmedi — yalnız
+  `*.tsbuildinfo` düzeltildi) gizli olup olmadığı ayrıca denetlenmedi;
+  mevcut diğer satırların hepsi ya `/` içeriyor (`node_modules/`,
+  `.pnpm-store/`) ya da zaten `**/` prefix'i var (`**/node_modules/`) —
+  yalnızca `*.tsbuildinfo` ve `*.psd`/`*.log` gibi bare-glob'lar
+  aynı riski taşıyabilir; `*.psd`/`*.log`/`logs/` bu repo için
+  build-doğruluğunu etkilemiyor (yalnızca disk/imaj boyutu), bu yüzden
+  bilinçli olarak bu adımın kapsamı dışında bırakıldı.
+- Env/secret/R2/production deploy/runtime storage refactor'a
+  dokunulmadı — görev kısıtına uygun.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

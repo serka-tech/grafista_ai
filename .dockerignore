@@ -9,25 +9,51 @@ node_modules/
 **/node_modules/
 .pnpm-store/
 
-# Root `dist/` is excluded. packages/*/dist AND apps/*/dist are
-# intentionally NOT excluded (see apps/api/Dockerfile's comment on the build
-# stage): tsc running against COPY'd (not host-native) source inside a Docker
-# build was found unreliable — first for packages/schemas, packages/model-router
-# and packages/prompt-engine on this developer's Docker Desktop (Production
-# Step 2B), then confirmed to hit apps/api's own in-container build too, on a
-# genuinely different environment (a GitHub Actions amd64 Linux runner,
-# Production Step 8) — Step 2B's original theory that this was specific to
-# "this Docker Desktop installation" was too narrow; the same class of bug
-# can hit either platform. The pragmatic workaround, applied uniformly to
-# all four buildable workspace packages now: ship each one's already-host-built
-# dist/ in the image, build NOTHING with tsc inside the container. This means
-# `pnpm run build` must have been run on the HOST for every workspace package
-# before `docker compose -f docker-compose.staging.yml build` — see
-# docs/staging-compose.md, docs/ci-stable-profile.md ("Production Step 8"),
-# and docs/deployment-runbook.md.
+# Every workspace package's dist/ is excluded — apps/api/Dockerfile's build
+# stage now builds all of them fresh in-container (Production Step 15; see
+# docs/deployment-runbook.md's Production Step 15 entry). Earlier steps
+# (2B, 8) deliberately did NOT exclude packages/*/dist and apps/*/dist here,
+# shipping host-built dist/ via `COPY . .` instead, because in-container tsc
+# was believed to unreliably emit zero files. That workaround only ever
+# worked because a host-build step (scripts/ci-staging.sh, or just a
+# developer's own working tree) always left dist/ on disk before `docker
+# build` ran — it broke on Render, whose `runtime: docker` service builds a
+# genuinely fresh checkout with no host-build step, so dist/ never existed
+# there. Excluding dist/ here again (for every package, not just apps/*)
+# means a stale host-built dist/ can never again mask a broken in-container
+# build the way it masked this one on every local Docker build before
+# Production Step 15.
 /dist/
+apps/*/dist/
+packages/*/dist/
 .next/
 out/
+
+# `**/*.tsbuildinfo`, NOT the bare `*.tsbuildinfo` this line used to be —
+# ROOT CAUSE FOUND in Production Step 15 (see docs/deployment-runbook.md's
+# Production Step 15 entry for the full writeup): a bare pattern with no `/`
+# in a .dockerignore only excludes matches at the CONTEXT ROOT under this
+# Docker/BuildKit version (empirically verified with a minimal repro — see
+# the runbook entry) — unlike a .gitignore, where a bare `*.ext` pattern
+# matches at any depth. `*.tsbuildinfo` therefore NEVER excluded any nested
+# tsbuildinfo file (packages/*/tsconfig.tsbuildinfo, apps/api/tsconfig.tsbuildinfo,
+# etc.) — every one of those was silently copied into every Docker build
+# this repo ever ran, on every machine. Each package's tsc runs with
+# `"incremental": true` (tsconfig.base.json); finding its own stale
+# tsbuildinfo already in place, it correctly (by tsc's own incremental-build
+# design) treated the package as already-up-to-date and emitted NOTHING —
+# every single time, 100% deterministically. THIS is what Production Steps
+# 2B and 8 actually observed and (reasonably, given the evidence available
+# then) misdiagnosed as "tsc unreliably emits zero output when run against
+# COPY'd source" — a full year of workarounds (host-build-and-ship,
+# discarded in this step) for a one-line .dockerignore glob bug. A genuinely
+# fresh `git clone` never had this problem (gitignored tsbuildinfo files
+# don't exist in a clone at all) — which is exactly why this step's own
+# clean-clone verification runs never reproduced the failure, and why the
+# bug only surfaced against a real, previously-built working tree (and, by
+# the same mechanism, would have hit any Docker build platform working from
+# a checkout with leftover local build state — not just Render).
+**/*.tsbuildinfo
 *.tsbuildinfo
 
 .git/

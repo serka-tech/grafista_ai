@@ -1293,6 +1293,74 @@ Provizyonlama tamamlandıktan SONRA sıradaki adım
 tamamlayıp §15b'nin managed restore drill'ini gerçekten çalıştırmak
 olacak — bu da HENÜZ bu adımın kapsamında DEĞİL.
 
+## 23. Implementation status update (Render API Docker Build Fix — Production Step 15)
+
+**§21'in "Render Docker build riski GERÇEKTEN test edilmedi" notu bu
+adımda KAPANDI — kullanıcı gerçek Render staging altyapısını
+provizyonladı, ilk deploy §13/§21'in HIGH-RISK notunun öngördüğü
+hatayla (`Cannot find module '/repo/apps/api/dist/index.js'`) GERÇEKTEN
+başarısız oldu, kök nedeni bulunup düzeltildi.** Tam root-cause yazımı
+ve komut-seviyeli doğrulama `docs/deployment-runbook.md` §24'te — burada
+yalnızca bu belgenin production-gate sınıflandırmasına düşen özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **Yüzey neden doğrulandı:** `apps/api/Dockerfile`'ın host-build-önce
+  varsayımı Render'ın `runtime: docker` build modeliyle (host-build
+  adımı yok, yalnızca taze bir git checkout'a karşı `docker build`)
+  uyumsuzdu — §13'ün riski, artık gerçek bir deploy hatası olarak
+  DOĞRULANDI.
+- **Gerçek kök neden BULUNDU (yeni, önceki adımların hiçbirinde
+  görülmemiş):** `.dockerignore`'daki bare `*.tsbuildinfo` deseni bu
+  Docker/BuildKit sürümünde yalnızca context KÖKÜNÜ hariç tutuyor,
+  nested dosyaları DEĞİL (minik izole repro ile ampirik doğrulandı) —
+  Production Step 2B ve Step 8'in "tsc COPY'lenen kaynağa karşı
+  güvenilmez" diye kaydettiği, aylarca "kök nedeni bulunamadı" olarak
+  restate edilen bulgu, gerçekte bu tek satırlık glob bug'ıydı.
+- **Düzeltme uygulandı, yalnızca 2 dosya:** `apps/api/Dockerfile`
+  (in-container build workspace paketlerinin hepsi için geri getirildi,
+  host-build-ve-kopyala workaround'ı kaldırıldı) ve `.dockerignore`
+  (`**/*.tsbuildinfo` + `apps/*/dist/`/`packages/*/dist/` yeniden
+  eklendi). Render panel ayarına dokunulmadı.
+- **Doğrulama kapsamlı:** temiz `git clone` üzerinden 4/4 `--no-cache`
+  build PASS (native + linux/amd64 emülasyon, Render'ın gerçek
+  mimarisi); düzeltme ÖNCESİ gerçek (host-build artıklı) çalışma
+  dizinine karşı 3/3 FAIL (kök-neden teorisiyle birebir eşleşen hata);
+  düzeltme SONRASI aynı senaryoya karşı 2/2 PASS + COPY-sonrası doğrudan
+  inceleme (sıfır tsbuildinfo sızıntısı). `pnpm run
+  typecheck`/`lint`/`build`/`ci:stable`/`ci:staging` hepsi PASS —
+  detaylı komut tablosu `docs/deployment-runbook.md` §24'te.
+
+**Kapatılmadı (bilinçli, dürüstçe restate):**
+
+- Gerçek Render altyapısına karşı yeniden deploy bu Antigravity
+  oturumunda TETİKLENMEDİ — bu fix'in Render'ın kendi build
+  altyapısında da başarılı olacağı yerel doğrulamayla mümkün olan en
+  yakın proxy ile desteklendi (native + amd64 emülasyon), ama %100
+  garanti değil. Kullanıcının Render panelinden "Manual Deploy" tetikleyip
+  logu doğrulaması gerekiyor.
+- `.dockerignore`'un diğer bare-glob satırlarının (`*.psd`, `*.log`)
+  aynı sınıf bug'ı taşıyıp taşımadığı bu adımda AYRICA denetlenmedi —
+  bilinçli, çünkü bunlar yalnızca imaj boyutunu etkiliyor, build
+  doğruluğunu değil.
+- Bu adım sırasında proje dizininin yanlışlıkla silinip GitHub'dan sıfır
+  veri kaybıyla geri yüklendiği bir olay oldu — detay ve neden
+  `docs/deployment-runbook.md` §24'te şeffafça kaydedildi.
+- Env/secret/R2/production deploy/runtime storage refactor'a
+  dokunulmadı.
+
+**Bu adımın kendi doğrulaması:** bkz. `docs/deployment-runbook.md`
+§24'ün doğrulama bölümü — PASS/FAIL tablosu orada tekrarlanmıyor,
+burada yalnız cross-reference var.
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** Render Docker build
+riski artık gerçek bir deploy hatası olarak doğrulandı VE düzeltildi,
+yerel olarak kapsamlı doğrulandı. **Ama bu, staging'in canlıda çalıştığı
+anlamına GELMEZ** — gerçek Render deploy'u bu düzeltmeyle henüz yeniden
+denenmedi. **Bir sonraki somut adım:** kullanıcının Render panelinden
+`grafista-api-staging` için manuel bir yeniden deploy tetikleyip build
+logunun `apps/api/dist/index.js`'i artık bulduğunu doğrulaması.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

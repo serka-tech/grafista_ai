@@ -30,66 +30,46 @@
 # imply any real Render/Cloudflare account or credential.
 #
 # ═══════════════════════════════════════════════════════════════════════
-# HIGH-RISK, UNVERIFIED: apps/api/Dockerfile's "host-build-first"
-# requirement vs. Render's own build pipeline
+# RESOLVED (Production Step 15) — was: HIGH-RISK, UNVERIFIED "host-build-
+# first" requirement vs. Render's own build pipeline
 # ═══════════════════════════════════════════════════════════════════════
 #
-# apps/api/Dockerfile's build stage does NOT run `tsc` inside the
-# container for ANY of the four workspace packages (packages/schemas,
-# packages/model-router, packages/prompt-engine, apps/api itself) — it
-# ships each package's ALREADY-HOST-BUILT `dist/` via `COPY . .`
-# (.dockerignore intentionally does NOT exclude `packages/*/dist` or
-# `apps/*/dist`). This exists because Production Step 2B/Step 8 found,
-# on TWO independent environments (this developer's local Docker
-# Desktop, and a GitHub Actions amd64 Linux runner), that running `tsc`
-# against COPY'd source inside a Docker build silently produces ZERO
-# output — a confirmed, reproduced, but still not-root-caused bug (see
-# docs/ci-stable-profile.md "Production Step 8" and
-# docs/staging-compose.md "Production Step 2B"/"2C"). The workaround:
-# `pnpm run build` MUST run on the HOST (or the CI runner, as
-# scripts/ci-staging.sh does) BEFORE `docker build`/`docker compose
-# build` — the Dockerfile has no host-build step of its own.
+# This section originally warned that apps/api/Dockerfile's build stage
+# shipped every package's ALREADY-HOST-BUILT `dist/` via `COPY . .`
+# instead of building in-container — a workaround for a "tsc silently
+# emits zero output" bug Production Step 2B/Step 8 found but never
+# root-caused — and that this was very plausibly incompatible with
+# Render's `runtime: docker` service, which only ever runs `docker
+# build` against a fresh checkout with no host-build step of its own.
 #
-# Render's own hosted build infrastructure for a `runtime: docker`
-# service runs `docker build` directly against your repo — there is no
-# documented Render mechanism (per the Blueprint spec fetched this step)
-# for running an arbitrary host command BEFORE a Docker build starts
-# (`buildCommand`/`startCommand` are documented as fields for NON-Docker
-# runtimes only). This means: AS WRITTEN TODAY, deploying
-# apps/api/Dockerfile via Render's Docker runtime would very plausibly
-# hit the *exact same* "Cannot find module dist/index.js" failure
-# Production Step 8 found and fixed for GitHub Actions — because
-# Render's build has no host-build-first step, and the dist/ directories
-# are (correctly) gitignored, so a fresh Render checkout would not have
-# them. **This has NOT been tested against real Render infrastructure —
-# it is a documented, evidence-based RISK, not a confirmed failure, and
-# not something this step attempts to fix (that would mean redesigning
-# the Dockerfile's build stage or finding a genuine Render pre-build
-# hook — out of this step's "no big refactor" scope).** See
-# docs/production-readiness-review.md's Step 13 update for the same risk
-# recorded as a production-readiness item.
+# Production Step 15 confirmed that risk as a REAL deploy failure — the
+# user's actual `grafista-api-staging` Render service hit exactly
+# `Error: Cannot find module '/repo/apps/api/dist/index.js'` on its
+# first deploy — then found the real root cause and fixed it: a bare
+# `*.tsbuildinfo` line in `.dockerignore` only excluded that pattern at
+# the build-context ROOT, not in nested package directories (confirmed
+# with a minimal isolated repro), so every Docker build ever run against
+# this repo silently copied in each package's stale, host-built
+# `tsconfig.tsbuildinfo` — which is exactly what made `tsc`'s own
+# `"incremental": true` logic treat the package as already up to date
+# and emit nothing. THAT was Step 2B/Step 8's real bug, not general
+# in-container-tsc unreliability. Fix (2 files, no Render panel change):
+# apps/api/Dockerfile now builds every workspace package in-container
+# (`pnpm --filter @grafista/api... run build`), and .dockerignore
+# excludes `**/*.tsbuildinfo` (recursive) plus every package's `dist/`.
+# Verified with repeated `--no-cache` builds against both a genuinely
+# clean checkout and a real working tree carrying the exact stale
+# artifacts that broke this before — both scenarios deterministic across
+# multiple runs, on this machine's native arch AND a `linux/amd64`
+# emulated build matching Render's actual platform. Full write-up:
+# docs/deployment-runbook.md §24, docs/production-readiness-review.md §23.
 #
-# TWO documented paths forward — pick one at actual provisioning time,
-# neither is activated here:
-#
-#   (A) Docker runtime (modeled below as the primary `grafista-api-staging`
-#       service) — closer to the full architecture (real Playwright
-#       rendering possible later), but carries the unverified build risk
-#       above. Before relying on this path, either confirm Render's build
-#       environment does NOT hit the tsc-in-container bug (test it), or
-#       find/use a genuine Render pre-build hook if one exists in current
-#       Render docs (unconfirmed here).
-#   (B) Native Node runtime (see the commented-out alternative block
-#       below `grafista-api-staging`) — sidesteps the Docker build risk
-#       entirely by using Render's own `buildCommand`/`startCommand`
-#       (which DOES support running `pnpm run build` before start, since
-#       it's Render's own build step, not a Dockerfile COPY). Only viable
-#       for INITIAL staging bring-up with `RENDERER_PROVIDER=fake` (no
-#       Chromium dependency) — matches the same "fake renderer for first
-#       bring-up" convention docs/deployment-runbook.md §18c already
-#       recommends. Real Playwright rendering would need Chromium system
-#       dependencies a bare Node buildpack does not provide
-#       (docs/production-readiness-review.md §4's own reasoning).
+# Still NOT done by this step: an actual re-deploy against real Render
+# infrastructure with this fix — that requires the user to trigger it
+# from the Render dashboard. Path (A) below (Docker runtime) is now the
+# evidence-backed default; Path (B) (native Node, commented out) remains
+# available as a fallback that sidesteps Docker entirely if a real Render
+# deploy still fails for an unrelated reason.
 #
 # ═══════════════════════════════════════════════════════════════════════
 

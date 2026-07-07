@@ -44,32 +44,39 @@ RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
 # copies into an earlier layer for better Docker layer-cache reuse.
 COPY . .
 RUN pnpm install --frozen-lockfile
-# No tsc build runs in this stage — every workspace package's dist/,
-# including @grafista/api's own, is HOST-BUILT and shipped in via the
-# `COPY . .` above (see .dockerignore's comment). This Docker Desktop
-# environment was found (Production Step 2B) to unreliably emit .js/.d.ts
-# for packages/schemas, packages/model-router, packages/prompt-engine when
-# their tsc build ran against COPY'd (not bind-mounted or host-native)
-# source — reproduced consistently across both the BuildKit and legacy
-# builders on that machine, deterministic 0-file emission every time, yet
-# the identical tsc invocation never once failed when run directly on the
-# host. This stage originally still built @grafista/api's own dist/ fresh
-# in-container on the theory that only the other 3 packages were affected —
-# Production Step 8's first real GitHub Actions run (a genuinely different
-# environment: amd64 Linux, not this Mac) hit the identical failure mode for
-# @grafista/api itself (`Error: Cannot find module '/repo/apps/api/dist/index.js'`
-# at container boot — the in-container tsc silently produced no output there
-# too). Root cause still not fully pinned down (ruled out: this repo's own
-# tsconfig composite/extends setup — fixed separately in tsconfig.base.json;
-# ruled out: BuildKit-specific COPY mtime handling — reproduces on the legacy
-# builder too), but the pattern now clearly generalizes across platforms
-# rather than being specific to one machine — so @grafista/api gets the same
-# host-build-and-ship treatment as the other 3 packages. `pnpm run build`
-# must have been run on the HOST for every workspace package before
-# `docker compose build`. See docs/staging-compose.md,
-# docs/ci-stable-profile.md ("Production Step 8"), and
-# docs/deployment-runbook.md for the full tradeoff writeup and the follow-up
-# still needed to root-cause and remove this workaround entirely.
+# Builds @grafista/api AND its workspace dependencies in one command —
+# `@grafista/api...` is pnpm's "this package plus everything it depends on"
+# filter, so packages/schemas, packages/model-router and packages/prompt-engine
+# (each has `main`/`types` pointing at its own dist/, so apps/api cannot even
+# typecheck without them built first) all build in the correct topological
+# order before apps/api's own `tsc -p tsconfig.build.json` runs.
+#
+# PRODUCTION STEP 15 (fixed a real Render deploy failure — see
+# docs/deployment-runbook.md's Production Step 15 entry for the full
+# root-cause + verification writeup): earlier steps (2B, 8) removed this
+# in-container build entirely and shipped every package's dist/ HOST-built
+# via the `COPY . .` above instead, on a theory that in-container tsc
+# unreliably emits zero files. That workaround assumed a host-build step
+# always runs before `docker build` (true for scripts/ci-staging.sh and any
+# local dev machine, where dist/ — though gitignored — is left on disk from
+# earlier builds) but Render's `runtime: docker` service only ever runs
+# `docker build` against a genuinely fresh git checkout, with no host-build
+# step of its own — so dist/ never existed there, and the container crashed
+# at boot with `Cannot find module '/repo/apps/api/dist/index.js'`.
+#
+# The "unreliable tsc" theory itself turned out to be a misdiagnosis of a
+# ONE-LINE .dockerignore bug — see .dockerignore's own comment on
+# `**/*.tsbuildinfo` for the actual root cause (a stale, host-built
+# tsbuildinfo file was being copied into every Docker build this repo ever
+# ran, making tsc's own incremental-build logic correctly, deterministically
+# skip re-emitting already-"up to date" output). With that fixed, this
+# in-container build was re-verified as fully reliable: repeated `--no-cache`
+# builds (both this machine's native arch and a linux/amd64 emulated build
+# matching Render's actual platform), and separately reproduced end-to-end
+# against a real developer working tree carrying exactly the stale
+# artifacts that broke this before — see the runbook entry for the exact
+# commands and results.
+RUN pnpm --filter @grafista/api... run build
 
 # ─── Runtime stage ───────────────────────────────────────────────────────
 FROM node:20-bookworm-slim AS runtime
