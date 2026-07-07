@@ -52,6 +52,12 @@ on:
   push:
     branches: [main, phase-2-checkpoint]
   pull_request:
+  # Manual trigger — added in Production Step 8 specifically to sample
+  # additional independent runner instances for the Remote Runner Validation
+  # Protocol (docs/ci-stable-profile.md) without needing a new commit for
+  # every attempt. Also generally useful afterward for anyone who wants to
+  # re-run the stable checks without pushing.
+  workflow_dispatch:
 
 jobs:
   stable:
