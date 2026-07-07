@@ -2110,11 +2110,21 @@ doğrulandı. typecheck/lint/build + ci:stable 444/444 + ci:staging 0 fail
 2. Name: `grafista-dashboard-staging`; **Runtime: Node** (Docker DEĞİL);
    Region: API ile aynı (Frankfurt).
 3. **Build Command:** `pnpm install --frozen-lockfile && pnpm run build`
+   - Not: Bu komut **olduğu gibi** çalışır — `apps/dashboard/package.json`'da
+     `typescript` + `@types/*` bilinçli olarak `dependencies` altında (§28f), bu
+     yüzden `NODE_ENV=production` install devDependencies'i atlasa bile TS
+     toolchain'i kurulur ve `next build` (hem `@/` alias hem type-check) yeşil olur.
+   - Alternatif (istenirse): TS'i devDependencies'te tutup Build Command'i
+     `pnpm install --frozen-lockfile --prod=false && pnpm run build` yapmak da
+     aynı sonucu verir. Commit'li çözüm `dependencies` yolunu seçti (panelde
+     değişiklik gerektirmez).
 4. **Start Command:** `pnpm --filter @grafista/dashboard exec next start -p $PORT`
 5. **Environment** (present/missing — değer secret değil):
    - `API_PROXY_TARGET = https://grafista-api-staging.onrender.com`
      (build-time'da gerekli; Render build sırasında env enjekte eder).
    - `NEXT_PUBLIC_API_URL`'i **GİRME** (boş kalsın — same-origin proxy için).
+   - `NODE_ENV = production` kalabilir (runtime için doğru); build-time TS
+     bağımlılıkları `dependencies`'te olduğu için install sorun çıkarmaz (§28f).
 6. **Health Check Path:** `/login` (§27a/§28d).
 7. Deploy et; **Live** olmasını bekle; servis URL'sini not al.
 
@@ -2141,6 +2151,74 @@ Dashboard URL geldiğinde bağımsız `curl`/kontrol:
   =false` kaldı (bilinçli).
 - Managed restore drill ÇALIŞTIRILMADI (preflight hazır, §15c boş).
 - **Production deploy AÇILMADI.**
+
+### 28f. Dashboard build FAIL kök nedeni + fix (Production Step 19 — `@/` alias)
+
+> İlk dashboard deploy denemesi Render'da FAIL oldu. Bu bölüm kök nedeni ve
+> uygulanan fix'i belgeler. Kök neden **iki bağımsız izole worktree'de birebir
+> reprodüksiyonla** doğrulandı (sadece teori değil).
+
+**Semptom (Render build log):**
+
+```
+Failed to compile.
+./src/app/approvals/page.tsx                 Module not found: Can't resolve '@/lib/api'
+./src/app/briefs/[id]/layout-plans/page.tsx  Module not found: Can't resolve '@/lib/api'
+./src/app/briefs/[id]/layout-plans/page.tsx  Module not found: Can't resolve '@/components/creative-qa-report'
+./src/app/briefs/[id]/layout-plans/page.tsx  Module not found: Can't resolve '@/components/visual-outputs-panel'
+./src/app/briefs/[id]/page.tsx               Module not found: Can't resolve '@/lib/api'
+> Build failed because of webpack errors
+```
+
+**Kök neden (doğrulandı):** Render servisinde `NODE_ENV=production` env var'ı var.
+pnpm bunu **install** anında da uygular ve devDependencies'i atlar — pnpm bunu
+açıkça yazdı: `devDependencies: skipped because NODE_ENV is set to production`.
+Sonuç: `typescript`, `@types/*`, `eslint-config-next` HİÇ kurulmadı. Next.js
+14.2.35 `@/` path alias'ını yalnızca tsconfig'i yükleyebildiğinde bağlar
+(`JsConfigPathsPlugin`), bu da `typescript` paketinin kurulu olmasını gerektirir.
+typescript yoksa `useTypeScript=false` → tsconfig hiç okunmaz → `@/` alias'ı
+sessizce devre dışı kalır → TÜM `@/…` import'ları çözülemez. Next "please install
+typescript" bile demez; sessizce webpack'e geçip module-not-found ile patlar.
+
+typescript eksikliği **İKİ ayrı fazı** kırar (doğrulamada keşfedildi): (1) webpack
+compile fazı — `@/` çözümü (Render log'undaki hata; ilk patlayan bu). (2) `next
+build`'in "Linting and checking validity of types" fazı — tsconfig.json varken
+`typescript` + `@types/react` + `@types/node` zorunlu; yoksa "Please install
+typescript..." ile exit 1. Yani sadece `@/` çözümünü düzeltmek YETMEZ (webpack
+alias denendi, faz-2'de takıldı); typescript mutlaka kurulu olmalı.
+
+Dosya/casing/versiyon/lockfile TAMAMEN masum: kod aynı, `visual-outputs-panel.tsx`
++ `api.ts` doğru lowercase casing ile git-tracked, HEAD=origin (42aab25), Linux
+case-sensitivity sorunu YOK. `NODE_ENV=production` OLMADAN yapılan fresh
+`pnpm install --frozen-lockfile && pnpm run build` (izole worktree) PASS —
+çünkü o zaman typescript kurulur.
+
+**Fix (commit'lendi — tek kök neden, tek çözüm):**
+
+`apps/dashboard/package.json`'da build-time TypeScript araçları
+`devDependencies`'ten `dependencies`'e taşındı: `typescript`, `@types/node`,
+`@types/react`, `@types/react-dom`. Böylece `NODE_ENV=production` altında pnpm
+devDependencies'i atlasa bile bunlar kurulur → hem `@/` alias çözümü (native
+tsconfig `paths`) hem type-check fazı geçer. `eslint` + `eslint-config-next`
+devDependencies'te kaldı (prod install'da yokturlar; `next build` eslint kurulu
+değilse lint'i sessizce atlar, patlamaz). `pnpm-lock.yaml` bu sınıflandırmayı
+yansıtacak şekilde güncellendi (`--frozen-lockfile` uyumlu). `next.config.js` +
+`tsconfig.json`'a DOKUNULMADI (same-origin proxy §28b korundu).
+
+Neden webpack alias / `--prod=false` değil: webpack alias yalnızca faz (1)'i
+düzeltir, faz (2) type-check yine typescript ister — eksik kalırdı (doğrulamada
+bizzat görüldü). `--prod=false` çalışır ama Render panel ayarı gerektirir;
+`dependencies` çözümü commit'li ve panelde hiçbir değişiklik istemez (servis
+yeniden kurulsa bile dayanıklı). İkisi eşdeğer; §28c'de `--prod=false` alternatif
+olarak notlandı.
+
+**Doğrulama:** fix sonrası `NODE_ENV=production` fresh install + `next build`
+(izole worktree, typescript prod-dep olarak kurulu) → **PASS** (uçtan uca, exit 0,
+sıfır `@/` hatası, type-check geçti). Normal build + typecheck + lint +
+`ci:stable` (444/444 api testi) + `ci:staging` (docker smoke) → PASS.
+
+**Kalan durum:** Production deploy hâlâ AÇILMADI (bilinçli). Bu fix yalnızca
+staging dashboard build'ini yeşile çevirir.
 
 ---
 

@@ -13,14 +13,15 @@
   "dependencies": {
     "next": "^14.2.0",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0"
-  },
-  "devDependencies": {
+    "react-dom": "^18.3.0",
     "@types/node": "^20.12.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "eslint": "8",
-    "eslint-config-next": "14.2.35",
     "typescript": "^5.4.0"
+  },
+  "comment:dependencies": "typescript + @types/* live in dependencies (not devDependencies) on purpose: Render deploys with NODE_ENV=production, under which pnpm skips devDependencies at install time. next build hard-requires the TypeScript toolchain (both to load tsconfig `paths` for the `@/` alias AND for its type-check phase) whenever tsconfig.json exists, so these must be installed even in a production install. See docs/deployment-runbook.md §28f.",
+  "devDependencies": {
+    "eslint": "8",
+    "eslint-config-next": "14.2.35"
   }
 }
