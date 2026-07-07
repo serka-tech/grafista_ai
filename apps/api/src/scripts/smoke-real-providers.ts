@@ -23,6 +23,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { OpenAIAdapter, KieAIAdapter, classifyProviderError, type AIResponse } from '@grafista/model-router';
 import { LocalStorageProvider, LOCAL_UPLOAD_DIR } from '../storage/local-provider.js';
+import { getStorageProvider } from '../storage/factory.js';
+import type { StorageProvider } from '../storage/types.js';
 import { getRendererAdapter, resolveActiveRendererProviderName } from '../render/adapters/factory.js';
 
 type Outcome = 'PASS' | 'SKIP' | 'FAIL';
@@ -45,23 +47,39 @@ function describeProviderFailure(response: AIResponse): string {
   return `provider error [kind=${classification.kind} retryable=${classification.retryable}${statusNote}]: ${response.error ?? 'unknown'}`;
 }
 
-const SMOKE_KEY = 'smoke/step12-storage-roundtrip.txt';
-
 async function smokeStorage(): Promise<void> {
+  // Tests the ACTUALLY-configured provider (STORAGE_PROVIDER via the app's own
+  // factory), not a hardcoded local one — so on staging/production where
+  // STORAGE_PROVIDER=s3, this is a REAL S3/R2 put+get+delete roundtrip that
+  // exercises live credentials/bucket connectivity (Production Step 17: the
+  // previous version hardcoded LocalStorageProvider and never touched S3/R2,
+  // which meant the "storage" gate was never actually verified against a
+  // managed bucket). Uses a unique, throwaway key under a `_smoke/` prefix and
+  // always deletes it; never logs secrets or env values.
+  const key = `_smoke/storage-roundtrip-${Date.now()}.txt`;
+  const body = Buffer.from('grafista storage smoke roundtrip');
+  let provider: StorageProvider | undefined;
+  let putOk = false;
   try {
-    const provider = new LocalStorageProvider();
-    const body = Buffer.from('grafista step12 storage smoke');
-    const ref = await provider.putObject({ key: SMOKE_KEY, body, contentType: 'text/plain' });
-    const readBack = await provider.getObjectBuffer({ key: SMOKE_KEY });
-    const ok = readBack.equals(body);
-    await fs.promises.unlink(path.join(LOCAL_UPLOAD_DIR, SMOKE_KEY)).catch(() => undefined);
-    if (!ok) {
-      record('storage', 'FAIL', 'local roundtrip read bytes did not match written bytes');
+    // Inside the try so a config failure (e.g. STORAGE_PROVIDER=s3 with a
+    // missing S3_* env var) surfaces as a clear FAIL, not an uncaught throw.
+    provider = getStorageProvider();
+    const ref = await provider.putObject({ key, body, contentType: 'text/plain' });
+    putOk = true;
+    const readBack = await provider.getObjectBuffer({ key });
+    if (!readBack.equals(body)) {
+      record('storage', 'FAIL', `${provider.name} roundtrip read bytes did not match written bytes (bucket=${ref.bucket})`);
       return;
     }
-    record('storage', 'PASS', `local put/get/delete roundtrip ok (bucket=${ref.bucket})`);
+    await provider.deleteObject({ key });
+    record('storage', 'PASS', `${provider.name} put/get/delete roundtrip ok (bucket=${ref.bucket})`);
   } catch (err) {
-    record('storage', 'FAIL', `local storage roundtrip threw: ${(err as Error).message}`);
+    // Best-effort cleanup if we wrote but failed afterward — never mask the
+    // original error, and never leave the probe object behind.
+    if (putOk && provider) {
+      await provider.deleteObject({ key }).catch(() => undefined);
+    }
+    record('storage', 'FAIL', `${provider?.name ?? 'storage'} roundtrip threw: ${(err as Error).message}`);
   }
 }
 

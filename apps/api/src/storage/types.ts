@@ -42,6 +42,15 @@ export interface StorageProvider {
    * failure (not found, I/O error, etc).
    */
   getObjectBuffer(input: { key: string }): Promise<Buffer>;
+
+  /**
+   * Removes an object. Idempotent by design — deleting a key that does not exist
+   * is a no-op, NOT an error (matches S3 DeleteObject semantics, so both providers
+   * behave the same). Must throw StorageError only on a real I/O/permission failure.
+   * Currently used by the storage roundtrip smoke (scripts/smoke-real-providers.ts)
+   * to clean up its temporary probe object; safe for any future cleanup path.
+   */
+  deleteObject(input: { key: string }): Promise<void>;
 }
 
 /**

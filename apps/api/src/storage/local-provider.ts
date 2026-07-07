@@ -54,4 +54,18 @@ export class LocalStorageProvider implements StorageProvider {
       throw new StorageError(`Local storage read failed: ${(err as Error).message}`, 404);
     }
   }
+
+  async deleteObject({ key }: { key: string }): Promise<void> {
+    const filePath = resolveSafePath(key);
+    try {
+      await fs.promises.unlink(filePath);
+    } catch (err) {
+      // Missing file is a no-op (idempotent, matches S3 DeleteObject) — only a
+      // real I/O/permission failure is an error.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+      throw new StorageError(`Local storage delete failed: ${(err as Error).message}`, 500);
+    }
+  }
 }

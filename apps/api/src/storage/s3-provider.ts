@@ -7,7 +7,7 @@
  * any failure here is surfaced as a StorageError with a clear message.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageError, type ObjectAccess, type StorageProvider, type StoredObjectRef } from './types.js';
 
@@ -78,6 +78,16 @@ export class S3StorageProvider implements StorageProvider {
       return await streamToBuffer(body as NodeJS.ReadableStream);
     } catch (err) {
       throw new StorageError(`S3 object read failed: ${(err as Error).message}`, 502);
+    }
+  }
+
+  async deleteObject({ key }: { key: string }): Promise<void> {
+    // S3/R2 DeleteObject succeeds (204) even if the key does not exist, so this
+    // is naturally idempotent — no pre-check needed.
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    } catch (err) {
+      throw new StorageError(`S3 delete failed: ${(err as Error).message}`, 502);
     }
   }
 }
