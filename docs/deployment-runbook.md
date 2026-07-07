@@ -1349,6 +1349,187 @@ doğrulama — 001'den bugünkü en yüksek numaralı migration'a (bugün
 
 ---
 
+## 21. Render Staging Provisioning — Live Setup Checklist (Production Step 14)
+
+> **Status: LIVE SETUP REHBERİ — bu adımda hiçbir gerçek Render hesabı
+> açılmadı, hiçbir servis oluşturulmadı, hiçbir secret girildi.** §18b'nin
+> provider-agnostik checklist'i ile §20'nin Postgres-özel adımlarının
+> YERİNE geçmiyor — ikisini de Render'a özgü, kullanıcının panelde
+> takip edebileceği TEK bir sıralı listeye topluyor. Aşağıdaki her madde
+> kullanıcı tarafından Render dashboard'unda (veya Render CLI'ında) ELLE
+> yürütülecek — bu Antigravity oturumu hiçbir gerçek hesap/kredi kartı/API
+> çağrısı YAPAMAZ.
+>
+> **Bu adımda kullanıcıdan alınan non-secret kararlar** (ileride bu
+> listeyi doldururken kullanılacak):
+> - Hesap durumu: Render VE Cloudflare hesaplarının **ikisi de henüz yok**
+>   — sıfırdan başlanıyor.
+> - Branch: **`phase-2-checkpoint`** (mevcut çalışma branch'i, §18a'nın
+>   "decision required" notu bu kullanıcı kararıyla KAPANDI).
+> - Bölge tercihi: **Frankfurt/Avrupa** (Türkiye'ye en yakın seçenek) —
+>   Render'ın bugünkü bölge listesinde Frankfurt'un gerçekten mevcut
+>   olduğu ve tam bölge kodunun ne olduğu **provizyonlama sırasında
+>   Render dashboard'undan teyit edilmeli**, bu belge bir varsayım
+>   YAPMIYOR.
+> - `render.yaml` aktivasyonu: kullanıcı **pasif taslağın kalmasını,
+>   servisleri kendisinin Render panelinden manuel kurmasını** seçti —
+>   bkz. aşağıdaki "render.yaml kararı" notu.
+
+**Sıra önemli** — her madde bir öncekine bağımlı:
+
+- [ ] **Render hesabı/workspace oluşturuldu.** (render.com üzerinden
+      signup — Antigravity bu adımı YAPAMAZ.)
+- [ ] **GitHub repo Render'a bağlandı.** Render dashboard → New →
+      Web Service (veya Blueprint) → "Connect GitHub" → `serka-tech/grafista_ai`
+      repo'sunu seç → Render'ın GitHub App'ine yetki ver.
+- [ ] **Branch seçildi: `phase-2-checkpoint`.** (Kullanıcı kararı, yukarı
+      bkz. — §18a'nın decision required'ı kapandı.)
+- [ ] **Render Postgres (`grafista-postgres-staging`) oluşturuldu** — §20a'nın
+      adımları, bölge: Frankfurt/Avrupa (yukarıdaki doğrulama notuyla).
+- [ ] **API Web Service (`grafista-api-staging`) oluşturuldu** —
+      `docs/render-staging-blueprint.template.yaml`'ın modellediği gibi
+      Docker runtime, `dockerfilePath: apps/api/Dockerfile`,
+      `dockerContext` repo kökü. **Provizyonlamadan ÖNCE o dosyanın
+      HIGH-RISK notunu oku** — bugünkü Dockerfile host-build-first bir
+      workaround'a dayanıyor, Render'ın Docker build'inin bunu nasıl
+      etkileyeceği HENÜZ test edilmedi (bkz.
+      `docs/production-readiness-review.md`'nin Step 13 güncellemesi).
+- [ ] **Dashboard Web Service (`grafista-dashboard-staging`) oluşturuldu** —
+      native Node runtime (`buildCommand`/`startCommand`, Docker YOK —
+      `apps/dashboard`'ın hiç Dockerfile'ı yok, bu doğrulandı).
+- [ ] **Worker stratejisi doğrulandı: AYRI bir worker servisi
+      PROVİZYONLANMADI.** Bu bir "hangisini seçelim" sorusu DEĞİL —
+      `RENDER_QUEUE_ENABLED=true` yalnızca API service'in kendi
+      process'inde çalışır (`docs/managed-infrastructure-plan.md`
+      §3d/§9a'nın zaten kapattığı karar). Render'da "New Background
+      Worker" gibi ikinci bir servis AÇILMAMALI — açılırsa
+      `docs/production-readiness-review.md` §7'nin hiç test edilmediğini
+      belirttiği çoklu-worker senaryosu istemeden tetiklenir.
+- [ ] **Environment variables girildi** — bkz. aşağıdaki §23 (panel
+      bazlı tam eşleme).
+- [ ] **Health check path ayarlandı: `/api/health`** (API service'in
+      Render ayarlarında "Health Check Path" alanı — bu repo'nun mevcut,
+      DEĞİŞTİRİLMEMİŞ liveness endpoint'i, §8 doktrini).
+- [ ] **Deploy trigger ayarı yapıldı: başlangıçta `off`.**
+      `docs/render-staging-blueprint.template.yaml`'ın zaten koyduğu
+      güvenli varsayılan — ilk manuel deploy başarıyla bitene KADAR
+      otomatik deploy AÇILMAMALI; başarılı ilk deploy'dan SONRA
+      "Auto-Deploy: on commit"e çevrilebilir.
+
+**`render.yaml` kararı (bu Step 14'te netleşti):** kullanıcı, gerçek
+provizyonlama zamanı geldiğinde `docs/render-staging-blueprint.template.yaml`'ı
+repo köküne aktif bir `render.yaml` olarak taşımak yerine, servisleri
+Render dashboard'undan **elle** kurmayı seçti. Bu, o şablon dosyasının
+kendi başındaki gerekçeyle (Render'ın bir `render.yaml`'ı otomatik
+algılayıp sync teklif etmesi, henüz doğrulanmamış bir Dockerfile
+build-risk'i taşıyan bir şablondan gerçek servis oluşturma riski)
+TUTARLI — şablon dosyası PASİF kalmaya devam ediyor, bu adımda
+`render.yaml` olarak kopyalanmadı/aktifleştirilmedi. Kullanıcı ileride
+fikrini değiştirip aktifleştirmeyi isterse, bu ayrı bir açık onay
+gerektirir (bkz. görev tanımının kendi §7 sınırı).
+
+---
+
+## 22. Cloudflare R2 Staging Live Setup Checklist (Production Step 14)
+
+> **Status: LIVE SETUP REHBERİ — bu adımda hiçbir Cloudflare hesabı
+> açılmadı, hiçbir bucket oluşturulmadı, hiçbir access key üretilmedi.**
+> §19'un hazırlık adımlarının YERİNE geçmiyor, onu kullanıcının panelde
+> takip edebileceği bir checklist'e çeviriyor.
+
+- [ ] **Cloudflare hesabı oluşturuldu.** (cloudflare.com üzerinden signup
+      — Antigravity bu adımı YAPAMAZ.)
+- [ ] **R2 Object Storage aktifleştirildi** (bazı yeni hesaplarda R2 için
+      ayrı bir "Enable R2" adımı istenebilir — Cloudflare dashboard → R2).
+- [ ] **Staging bucket oluşturuldu.** Önerilen isim:
+      `<R2_BUCKET_STAGING>` (§19a'nın ilkesi — production bucket'ından
+      AYRI olmalı). Kullanıcı henüz kesin bir isim belirtmedi; bu belge
+      bir isim UYDURMUYOR, provizyonlama sırasında kullanıcı kendi
+      adlandırma tercihiyle (ör. `grafista-assets-staging`,
+      `.env.example`'daki `S3_BUCKET=grafista-assets` konvansiyonuyla
+      tutarlı bir öneri) doldurabilir.
+- [ ] **Bucket Locks kararı uygulandı** (kalıcı tier —
+      `brand-assets/`, `design-references/`, `generated-outputs/`
+      prefix'leri için) — **VERSIONING DEĞİL**, §19b'nin düzeltilmiş
+      mekanizması: WORM-tarzı bir retention kilidi, eski versiyonu geri
+      GETİRMEZ, yalnızca kilit süresince silme/üzerine-yazmayı ENGELLER.
+- [ ] **Lifecycle rules tanımlandı** (yalnız regenerable tier —
+      `render-jobs/*/exports/*` prefix'i için, §19b/§3b'nin ayrımı).
+- [ ] **Access key oluşturuldu — least privilege.** Token tipi: "Object
+      Read & Write", yalnızca staging bucket'ına scope'lu (§19c) — bucket
+      silme/policy değiştirme yetkisi olan bir "Admin" token
+      KULLANILMAMALI.
+- [ ] **S3-compatible endpoint alındı.** Format (Cloudflare'ın kendi
+      dokümantasyonundan doğrulanmış, §19d):
+      `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`,
+      `S3_REGION=auto`.
+- [ ] **`S3_FORCE_PATH_STYLE` davranışı test edildi.** §19d'nin
+      DOĞRULANMADI notu hâlâ geçerli — Cloudflare'ın S3-uyumluluk
+      dokümantasyonu path-style'a karşı virtual-hosted-style konusunda
+      açık değil; provizyonlama sırasında `apps/api/src/storage/s3-provider.ts`'nin
+      gerçek davranışına karşı test edilmeli, bir değer VARSAYILMAMALI.
+- [ ] **Render API service env'ine S3\_\* secret'ları girildi** — bkz.
+      aşağıdaki §23 (hangi panelde hangi değişken).
+
+---
+
+## 23. Staging Env/Secrets Entry Guide — Panel Mapping (Production Step 14)
+
+> **Değer YOK — yalnızca hangi PANELE hangi değişkenin gireceği.** §18c
+> zaten her değişkenin amacını/required-optional durumunu listeledi — bu
+> bölüm o listenin YERİNE geçmiyor, ona "hangi Render servisinin env
+> sekmesine, yoksa GitHub Secrets'a mı" sorusunu ekliyor. Bu repo'da
+> gerçek env değişken isimleri görev tanımının kullandığı jenerik
+> isimlerden (`PUBLIC_APP_URL`, `API_BASE_URL`) FARKLI —
+> `docs/managed-infrastructure-plan.md` §4'ün zaten netleştirdiği eşleme
+> burada da geçerli: `PUBLIC_APP_URL` → `NEXT_PUBLIC_API_URL`,
+> `API_BASE_URL` → `API_CORS_ORIGIN`.
+
+### 23a. Render API service (`grafista-api-staging`) env sekmesi
+
+| Değişken | Durum | Not |
+|---|---|---|
+| `NODE_ENV` | Optional/konvansiyonel | Kod bunu okumuyor (§4'ün doğruladığı gibi) — `production` set edilebilir, davranışı DEĞİŞTİRMEZ |
+| `DATABASE_URL` | **Required** | Elle YAZILMAZ — Render Blueprint'in `fromDatabase: {name: grafista-postgres-staging, property: connectionString}` mekanizmasıyla OTOMATİK bağlanır (§20b); panelden manuel kurulumda Render "Connect to a Database" seçeneğiyle aynı sonucu verir |
+| `AUTH_SECRET` | **Required (secret)** | `openssl rand -hex 32` ile ÜRETİLİP Render'ın kendi secret alanına girilir — asla repoya/chat'e yazılmaz |
+| `STORAGE_PROVIDER` | **Required** | Değer: `s3` |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | **Required (son ikisi secret)** | §22'nin R2 checklist'inden gelen değerler |
+| `S3_FORCE_PATH_STYLE` | Doğrulanmadı | §22'nin son maddesi test edilene kadar boş/varsayılan bırakılabilir |
+| `API_CORS_ORIGIN` | **Required** | `grafista-dashboard-staging`'in Render URL'i — bu servis oluşturulmadan bilinemez (circular dependency, blueprint template'in kendi notu) |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | **Required (presence-only secret)** | `AI_DEFAULT_PROVIDER=fake` iken bile dummy bir string zorunlu (boot fail-fast) |
+| `AI_DEFAULT_PROVIDER` / `RENDERER_PROVIDER` | **Required, staging'de `fake` önerilir** | İlk bring-up için Chromium/gerçek AI çağrısı riski sıfırlanır |
+| `RENDER_QUEUE_ENABLED` | **Required, staging'de `true` önerilir** | Worker davranışını gerçek (laptop-dışı) bir ortamda ilk kez gözlemlemek için (§3) |
+| `COOKIE_SECURE` | **Required, `true`** | Render kendi domain'lerinde TLS terminasyonu yapıyor (§18c) |
+| `CI_DEBUG_ROUTES` | **Debug-only** | Staging'de geçici açılabilir, PRODUCTION'DA ASLA |
+| `CI_DEBUG_ROUTES_LOG_FILE` | **Debug-only, optional** | Yalnız `CI_DEBUG_ROUTES=1` ile birlikte anlamlı |
+| `LOG_LEVEL` | Optional | Kod okumuyor (§4) — kozmetik |
+
+### 23b. Render Dashboard service (`grafista-dashboard-staging`) env sekmesi
+
+| Değişken | Durum | Not |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | **Required** | `grafista-api-staging`'in Render URL'i — aynı circular-dependency notu, bu servis API'den SONRA (veya en azından API'nin URL'i bilindikten sonra) doldurulabilir |
+
+### 23c. Render worker env sekmesi
+
+**Ayrı bir panel YOK.** Worker, API service'in kendi process'i
+(`RENDER_QUEUE_ENABLED=true`, §21'in "worker stratejisi" maddesi) — 23a
+dışında girilecek hiçbir ek env değişkeni/panel yok. Bu satır, görev
+tanımının istediği envanteri eksiksiz tutmak için var.
+
+### 23d. GitHub Actions secrets
+
+**Bu Step 14'te GEREKMEZ** — `docs/staging-deploy-workflow-template.yml`
+hâlâ `.github/workflows/` DIŞINDA, pasif bir taslak (§18d). Yalnızca
+kullanıcı bu şablonu gerçek bir GitHub Actions workflow'una
+dönüştürmeye karar verirse, o şablonun kendi sonundaki envanterdeki
+isimler (`RENDER_DEPLOY_HOOK_API`, `RENDER_DEPLOY_HOOK_DASHBOARD`,
+`STAGING_DATABASE_URL`, `STAGING_API_URL`, vb.) GitHub repo Settings →
+Secrets and variables → Actions altına girilir — bu belge o kararı
+VERMİYOR, yalnızca ne zaman gerekeceğini netleştiriyor.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
@@ -1362,7 +1543,9 @@ doğrulama — 001'den bugünkü en yüksek numaralı migration'a (bugün
   Production Step 13'te Render + R2'ye özgü hale güncellendi.
 - [`docs/render-staging-blueprint.template.yaml`](./render-staging-blueprint.template.yaml) —
   Production Step 13: pasif Render Blueprint taslağı, §19/§20'nin somut
-  servis modellemesi.
+  servis modellemesi. Production Step 14: dosya PASİF kalmaya devam
+  ediyor — kullanıcı servisleri Render panelinden elle kurmayı seçti
+  (§21'in "render.yaml kararı" notu).
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
   Production Step 9'un tam teslimatı: persistence envanteri, managed
   Postgres/S3 karar kriterleri, backup policy, restore/restore-drill

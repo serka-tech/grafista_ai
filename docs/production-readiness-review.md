@@ -1209,6 +1209,90 @@ bu Antigravity oturumunda yapılamaz (gerçek hesap/kredi kartı/secret
 işlemi gerektiriyor), kullanıcının kendi platformlarında yapması
 gerekiyor.
 
+## 22. Implementation status update (Render + Cloudflare R2 Live Staging Provisioning Guide — Production Step 14)
+
+**§21'in bıraktığı "somut sağlayıcı seçildi ama nasıl kurulacağı
+kullanıcıya net anlatılmadı" boşluğu bu adımda KAPANDI — gerçek servisler
+hâlâ KURULMADI.** Tam içerik `docs/deployment-runbook.md` §21/§22/§23'te
+— burada yalnızca bu belgenin production-gate sınıflandırmasına düşen
+özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **Kullanıcıdan dört non-secret karar alındı:** (1) Render VE Cloudflare
+  hesaplarının ikisi de henüz yok — sıfırdan başlanıyor; (2) staging
+  branch `phase-2-checkpoint` (§18a'nın decision required'ı kapandı); (3)
+  bölge tercihi Frankfurt/Avrupa (Türkiye'ye en yakın, provizyonlama
+  sırasında Render'ın gerçek bölge listesine karşı teyit edilmeli); (4)
+  `docs/render-staging-blueprint.template.yaml` PASİF kalacak, kullanıcı
+  servisleri Render panelinden elle kuracak — bu belge repo köküne
+  `render.yaml` olarak KOPYALANMADI.
+- **Üç yeni, sıralı, panelde takip edilebilir checklist yazıldı**
+  (`docs/deployment-runbook.md` §21/§22/§23): Render Staging Provisioning
+  Live Setup Checklist, Cloudflare R2 Staging Live Setup Checklist, ve
+  hangi env değişkeninin hangi Render servisinin (API/dashboard) env
+  sekmesine (veya hiçbirine — worker ayrı bir panel değil, §23c) gireceğini
+  gösteren panel-eşleme tablosu. Üçü de §17/§18/§19/§20'nin YERİNE
+  geçmiyor, onları tek, kullanıcının gerçekten tıklayarak ilerleyebileceği
+  bir sıraya topluyor.
+- **`docs/backup-restore-runbook.md`'ye yeni §15d eklendi** — managed
+  restore drill'in (§15) ÇALIŞTIRILABİLİR olması için gereken preflight
+  kriterleri (Render/R2 checklist'lerinin tamamlanmış olması, sentetik
+  veri kararı, staging-vs-production teyidi) — drill'in kendisi bu adımda
+  YAPILMADI, yalnızca "ne zaman yapılabilir" sorusu somutlaştırıldı.
+- **Repo doğrulaması bu adımda YENİDEN çalıştırıldı** (kod hiç
+  değişmedi, yalnızca dokümantasyon eklendi) — bkz. aşağıdaki
+  "Bu adımın kendi doğrulaması".
+
+**Kapatılmadı (bilinçli, dürüstçe restate — bu adımın kendi başarı
+kriteri budur, gerçek deploy/provizyonlama yapmak DEĞİL):**
+
+- Hiçbir gerçek Render/Cloudflare hesabı açılmadı — §21/§22'nin
+  checklist'lerinin HİÇBİR maddesi bu adımda işaretlenmedi.
+- Hiçbir gerçek servis (Render Web Service/Postgres, R2 bucket)
+  provizyonlanmadı, hiçbir gerçek secret/API key üretilmedi.
+- Repo köküne aktif bir `render.yaml` EKLENMEDİ — kullanıcının kendi
+  kararı, §21'in "render.yaml kararı" notu.
+- Hiçbir staging deploy'u yapılmadı.
+- Managed staging altyapıya karşı bir restore drill hâlâ hiç yapılmadı
+  (`docs/backup-restore-runbook.md` §15c hâlâ boş, §15d'nin preflight
+  kriterleri hâlâ karşılanmadı).
+- §21'in Render Docker build riskiyle ilgili notu (§13'ün HIGH-RISK
+  bulgusu) hâlâ gerçek Render altyapısına karşı TEST EDİLMEDİ.
+- Hiçbir production deploy yapılmadı, hiçbir yeni ürün özelliği
+  eklenmedi, hiçbir migration eklenmedi, hiçbir runtime storage driver
+  refactor'u yapılmadı.
+
+**Bu adımın kendi doğrulaması:** `pnpm run typecheck`/`pnpm run
+lint`/`pnpm run build` temiz. `pnpm run ci:stable` PASS — **433/433
+test yeşil (26/26 dosya)**. `pnpm run ci:staging` PASS — gerçek Docker
+Desktop'a karşı build+up+migrate+health/ready+smoke, `smoke:staging` 2
+pass, 2 warn (`providers` degraded — `KIE_AI_API_KEY` staging'de
+bilinçli boş, beklenen), 1 skip, 0 fail. `bash -n
+scripts/restore-drill-staging.sh` ve `bash -n scripts/ci-staging.sh`
+temiz (ikisine de dokunulmadı). `docs/render-staging-blueprint.template.yaml`
+VE `docs/staging-deploy-workflow-template.yml` YAML sözdizimi yeniden
+doğrulandı (`python3 -c "import yaml; yaml.safe_load(...)"`) — ikisi de
+temiz parse, ikisine de bu adımda içerik değişikliği YAPILMADI (yalnızca
+bir cross-reference notu eklendi). `git status` bu adımın başında ve
+validasyon komutları sonrasında temiz — hiçbir kalıntı/gizli değer
+working tree'de bırakılmadı.
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** Provider path SEÇİLDİ
+(Step 13), live provisioning rehberi HAZIR (bu adım). **Ama bu, projenin
+staging'e veya production'a HAZIR olduğu anlamına GELMEZ** — Render/R2
+gerçek servisleri hâlâ kurulmadı, managed staging deploy hâlâ yapılmadı,
+managed staging restore drill hâlâ yapılmadı. **Production deploy hâlâ
+BLOKEDE, DEĞİŞMEDİ.** **Bir sonraki somut adım:** kullanıcının
+`docs/deployment-runbook.md` §21/§22'nin checklist'lerini kendi
+platformlarında (Render dashboard, Cloudflare dashboard) gerçekten
+işaretleyerek yürütmesi — bunların HİÇBİRİ bu Antigravity oturumunda
+yapılamaz (gerçek hesap/kredi kartı/secret işlemi gerektiriyor).
+Provizyonlama tamamlandıktan SONRA sıradaki adım
+`docs/backup-restore-runbook.md` §15d'nin preflight listesini
+tamamlayıp §15b'nin managed restore drill'ini gerçekten çalıştırmak
+olacak — bu da HENÜZ bu adımın kapsamında DEĞİL.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

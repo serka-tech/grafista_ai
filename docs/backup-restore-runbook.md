@@ -721,6 +721,45 @@ Postgres + Cloudflare R2 gerçekten kurulmadan bu bölüm boş kalacak. Bu,
 aynı şekilde "managed staging restore drill henüz yapılmadı" olarak
 işaretleniyor.
 
+### 15d. Tetikleme kriterleri (preflight, Production Step 14)
+
+> **Bu alt bölüm drill'i ÇALIŞTIRMIYOR** — Render/R2 hâlâ provizyonlanmadı
+> (`docs/deployment-runbook.md` §21/§22'nin live setup checklist'leri hâlâ
+> tamamlanmadı). Amacı, provizyonlama bittiğinde "şimdi mi çalıştırabilir
+> miyiz" sorusuna kullanıcının kendi başına, tek tek madde işaretleyerek
+> cevap verebileceği somut bir ön-koşul listesi vermek — §15b'nin
+> "beklenen adımlar" taslağını YENİDEN YAZMIYOR, ondan ÖNCE gelen bir
+> hazır-mı kontrolü.
+
+Aşağıdaki maddelerin **HEPSİ** işaretlenmeden §15b'nin adımlarına
+başlanmamalı:
+
+- [ ] `docs/deployment-runbook.md` §21'in Render checklist'i tamamlandı
+      (Postgres + API service + dashboard service ayakta, health check
+      PASS).
+- [ ] `docs/deployment-runbook.md` §22'nin R2 checklist'i tamamlandı
+      (bucket + access key + endpoint doğrulandı).
+- [ ] `docs/deployment-runbook.md` §23'ün env/secrets'ı Render panelinde
+      girildi — `GET /api/health/ready`'nin `database`/`storage`
+      check'leri `ok` dönüyor (gerçek staging URL'ine karşı, local'e
+      değil).
+- [ ] Drill için kullanılacak veri **sentetik/test verisi** olacak
+      şekilde netleşti — `db:seed`/`db:seed-demo` ile, GERÇEK müşteri
+      verisiyle değil (§15b adım 1'in zaten koyduğu ilke, burada
+      tekrar altı çiziliyor: bu, gerçek müşteri verisi girmeden ÖNCE en
+      az bir kez çalıştırılmalı).
+- [ ] Drill'in hedef alacağı Postgres/R2 instance'ının **staging**
+      olduğu (production DEĞİL) iki kişi tarafından teyit edildi — §5/§8
+      "DESTRUCTIVE" uyarısının managed altyapı karşılığı: yanlış
+      instance'a karşı çalıştırmak gerçek veri kaybına yol açabilir.
+- [ ] Drill sonucu §15c'ye §12'nin formatıyla (tarih, ortam, komut,
+      PASS/FAIL, bulunan varsa bug) eklenecek şekilde bir zaman/sorumlu
+      ayrıldı — drill'in kendisi bu belgeyi güncellemeyecek, çalıştıran
+      kişi güncellemeli.
+
+**Bu liste tamamlanmadan §15c boş kalmaya devam edecek — bu Step 14'ün
+kendi bulgusu değil, §14'ün zaten koyduğu gate'in doğrudan devamı.**
+
 ---
 
 ## İlgili dokümanlar
