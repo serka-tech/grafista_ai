@@ -20,15 +20,31 @@
 # No real secrets are required by either job: `ci:stable`'s test step runs
 # against an embedded, ephemeral Postgres with hardcoded fake AI provider keys
 # (apps/api/vitest.config.ts), and `ci:staging` uses .env.staging.example's
-# fake-provider demo configuration (docker-compose.staging.yml). If real
-# provider smoke testing (`smoke:providers`) is ever added to a workflow, it
-# must read real keys from GitHub Actions secrets — never hardcoded here.
+# fake-provider demo configuration (docker-compose.staging.yml). The
+# "Prepare .env.staging" step below generates a random, disposable
+# AUTH_SECRET (openssl rand -hex 32) scoped only to that job's ephemeral,
+# torn-down-on-exit Compose stack — not a real credential, never stored as a
+# GitHub Secret. If real provider smoke testing (`smoke:providers`) is ever
+# added to a workflow, it must read real keys from GitHub Actions secrets —
+# never hardcoded here.
 #
 # Read docs/ci-stable-profile.md's "Remote Runner Validation Protocol" before
 # trusting a green run here as a merge gate — `ci:stable`'s test step has
 # documented, root-caused local flakiness (external ephemeral-port collision
 # with an unrelated process on the developer machine, not a code defect) that
 # has NOT yet been confirmed absent on an actual, otherwise-idle CI runner.
+#
+# Production Step 8 history (see docs/ci-stable-profile.md's "Production Step
+# 8" section for full evidence/root-cause writeups): the FIRST real run of
+# this workflow (against a genuinely fresh checkout — something no local
+# developer-machine test had ever exercised) found and this repo fixed two
+# 100%-deterministic bugs, neither a flake: (1) `ci:stable` ran `typecheck`
+# before `build`, but the internal workspace packages' types only exist after
+# `build` — fixed by reordering `ci:stable` in root package.json; (2)
+# `ci:staging`'s Compose stack requires `.env.staging`, which is gitignored
+# and never existed on a fresh checkout — fixed by the "Prepare .env.staging"
+# step below. Both were invisible on the developer's machine only because
+# leftover build/env artifacts from earlier manual sessions masked them.
 
 name: CI
 
@@ -66,4 +82,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Prepare .env.staging (disposable, CI-only secret — never a real credential)
+        run: |
+          cp .env.staging.example .env.staging
+          sed -i "s/^AUTH_SECRET=$/AUTH_SECRET=$(openssl rand -hex 32)/" .env.staging
       - run: pnpm run ci:staging
