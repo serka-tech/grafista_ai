@@ -690,8 +690,73 @@ hâlâ en düşük öncelik, talep doğmadan gündeme alınmaz.
 
 ---
 
+## 14. GitHub remote eklendikten sonra ilk CI doğrulama adımları (Production Step 7)
+
+> Bu bölüm [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin
+> "Production Step 7 — CI Runner Readiness & Remote Validation Package"
+> bölümünün doğrudan operasyonel devamıdır — protokolün TAM gerekçesi orada,
+> burada yalnız komut sırası var. Bu repo'da bugün `git remote -v` boş; aşağıdaki
+> adımlar bir remote eklendiğinde izlenecek sıra, gerçek bir repo/URL
+> UYDURULMADAN. `<GITHUB_REPO_URL>` ve `<OWNER>/<REPO>` placeholder'ları asıl
+> değerlerle değiştirilmeden hiçbiri çalıştırılmamalı.
+
+```bash
+# 1. Remote'u ekle (henüz eklenmediyse)
+git remote add origin <GITHUB_REPO_URL>
+
+# 2. Mevcut branch'i push et (repo'nun bugünkü çalışma branch'i)
+git push -u origin phase-2-checkpoint
+
+# 3. .github/workflows/stable-ci.yml artık dormant değil — push'un kendisi
+#    "CI" workflow'unu (stable + staging-smoke job'ları) otomatik tetikler
+#    (on: push, phase-2-checkpoint dahil — bkz. workflow dosyasının `on:` bloğu).
+#    Elle tetiklenecek ayrı bir adım YOK.
+
+# 4. GitHub Actions run'ını kontrol et
+gh run list --repo <OWNER>/<REPO> --workflow=stable-ci.yml --limit 5
+gh run view --repo <OWNER>/<REPO> <RUN_ID> --log
+
+# 5. Rerun protokolü — docs/ci-stable-profile.md'nin "Remote Runner
+#    Validation Protocol"unun 1. maddesi: EN AZ 5 AYRI çalıştırma gerekir.
+#    Aynı run'ı yeniden denemek (re-run) bunlardan biri SAYILMAZ — protokolün
+#    amacı bağımsız runner örnekleri gözlemlemek, aynı run'ın cache/state'ini
+#    tekrar kullanmak değil. Her biri ayrı bir push veya
+#    `gh workflow run stable-ci.yml --repo <OWNER>/<REPO>` ile tetiklenmeli.
+for i in 1 2 3 4 5; do
+  gh workflow run stable-ci.yml --repo <OWNER>/<REPO>
+  # her tetiklemeden sonra run'ın bitmesini bekle, sonucu kaydet
+  # (docs/ci-stable-profile.md'nin "Remote Runner Validation Protocol"
+  # 6. maddesi gereği, o dokümana ekle — burada tekrarlanmıyor)
+done
+
+# 6. Başarısızlıkta CI_DEBUG_ROUTES ile tekrar koşma
+#    (docs/ci-stable-profile.md Adım 4 — hangi log sinyalini arayacağınız da orada)
+gh workflow run stable-ci.yml --repo <OWNER>/<REPO> -f CI_DEBUG_ROUTES=1
+# NOT: yukarıdaki `-f` sözdizimi yalnız workflow `workflow_dispatch` inputu
+# tanımlıyorsa çalışır; bugünkü stable-ci.yml'de YOK (yalnız push/pull_request
+# tetikleyicisi var, bkz. .github/workflows/stable-ci.yml). CI_DEBUG_ROUTES=1
+# ile tekrar koşmak istenirse, en pratik yol geçici bir commit'te
+# `env: { CI_DEBUG_ROUTES: '1' }`'i job seviyesinde eklemek, log'u
+# `gh run view --log` ile okumak, sonra o geçici env'i geri almaktır — bu,
+# workflow dosyasına kalıcı bir CI_DEBUG_ROUTES desteği eklemek yerine
+# (henüz gerekmeyen bir scope genişletmesi) bilinçli bir tercih.
+```
+
+**Sonucu nereye kaydet:** her çalıştırmanın temiz/başarısız olduğu ve
+başarısızsa hangi sınıfa (§gerçek regresyon / bilinen dış-çakışma / başka)
+girdiği [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Remote
+Runner Validation Protocol" bölümüne eklenir (append, üzerine yazılmaz) —
+burada tekrarlanmıyor. 5/5 temiz olmadan `ci:stable`'ı bir merge gate olarak
+kabul etmeyin; 4/5 veya altıysa gerçek oranı dürüstçe raporlayın.
+
+---
+
 ## İlgili dokümanlar
 
+- [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — §14'ün doğrudan
+  kaynağı: Remote Runner Validation Protocol'ün tam gerekçesi, dormant
+  `.github/workflows/stable-ci.yml` kararı, ve `CI_DEBUG_ROUTES` teşhis
+  aracının kullanımı.
 - [`docs/staging-compose.md`](./staging-compose.md) — Production Step 2:
   bu runbook'un §2/§13'ünün önerdiği Docker Compose staging skeleton +
   `smoke-staging.ts`'in gerçek teslimatı — tasarım kararları, ne kapsıyor/ne

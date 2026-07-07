@@ -1,0 +1,69 @@
+# Grafista AI Studio — CI (Production Step 7)
+#
+# DORMANT UNTIL A GITHUB REMOTE EXISTS: this repo has no `git remote` configured
+# yet (see docs/ci-stable-profile.md, "Why no GitHub Actions file yet" /
+# "Production Step 7"). Committing this file today is a no-op — GitHub Actions
+# only evaluates workflow files inside an actual GitHub repository, and there
+# isn't one. It is committed now (rather than left as a docs-only drop-in) so
+# that the day `git remote add origin <...>` + `git push` happens, this
+# workflow is immediately live with zero extra transcription step — see
+# docs/deployment-runbook.md's "GitHub remote eklendikten sonra ilk CI
+# doğrulama adımları" section for the exact sequence.
+#
+# Mirrors the two existing, already-tested local scripts exactly:
+#   pnpm run ci:stable   -> typecheck && lint && build && test:ci
+#   pnpm run ci:staging  -> scripts/ci-staging.sh (Docker Compose build/up/migrate/smoke,
+#                           staging:down guaranteed via a trap regardless of outcome)
+# No new checks are invented here — this file only wires the existing scripts
+# into two independent GitHub Actions jobs.
+#
+# No real secrets are required by either job: `ci:stable`'s test step runs
+# against an embedded, ephemeral Postgres with hardcoded fake AI provider keys
+# (apps/api/vitest.config.ts), and `ci:staging` uses .env.staging.example's
+# fake-provider demo configuration (docker-compose.staging.yml). If real
+# provider smoke testing (`smoke:providers`) is ever added to a workflow, it
+# must read real keys from GitHub Actions secrets — never hardcoded here.
+#
+# Read docs/ci-stable-profile.md's "Remote Runner Validation Protocol" before
+# trusting a green run here as a merge gate — `ci:stable`'s test step has
+# documented, root-caused local flakiness (external ephemeral-port collision
+# with an unrelated process on the developer machine, not a code defect) that
+# has NOT yet been confirmed absent on an actual, otherwise-idle CI runner.
+
+name: CI
+
+on:
+  push:
+    branches: [main, phase-2-checkpoint]
+  pull_request:
+
+jobs:
+  stable:
+    name: Stable checks (typecheck/lint/build/test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.1.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run ci:stable
+
+  staging-smoke:
+    name: Docker staging build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.1.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run ci:staging

@@ -641,6 +641,68 @@ dürüst bir "ne kapandı / ne kapanmadı" notu var, o belge TEKRARLANMIYOR.
   [`docs/staging-compose.md`](./staging-compose.md)'nin "Production Step
   2C" bölümü — burada TEKRARLANMIYOR.
 
+## 15. Implementation status update (CI Runner Readiness & Remote Validation Package — Production Step 7)
+
+**UYGULANDI (dokümantasyon + dormant workflow dosyası, yeni product feature
+YOK)** — [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production
+Step 7" bölümünün tam teslimatı; tasarım kararları ve tam gerekçe orada,
+burada yalnız bu belgenin kendi kapsamına (production readiness durumu, gate)
+düşen kısım özetleniyor.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- Repo'da artık gerçek, statik olarak YAML-syntax-doğrulanmış bir
+  `.github/workflows/stable-ci.yml` var — §12/§14'ün tekrar tekrar doğruladığı
+  "`.github/` yok" bulgusu artık tam olarak kapandı, dosya şu an mevcut.
+  **Ama bu dosya bugün DORMANT** — repo'da hâlâ `git remote` yok
+  (`git remote -v` bu adımın başında yeniden kontrol edildi, boş), yani bu
+  workflow hiçbir gerçek GitHub Actions runner'ında HENÜZ ÇALIŞMADI.
+- İlk kez yazılı, somut bir **Remote Runner Validation Protocol** var
+  (`docs/ci-stable-profile.md`) — bir remote eklendiğinde `ci:stable`'ın kaç
+  kez, hangi kritere göre "candidate merge gate" sayılabileceğini (5/5 temiz)
+  ve temiz olmayan bir sonucun nasıl üç ayrı belirtiye (gerçek regresyon /
+  bilinen dış-çakışma / başka) sınıflandırılacağını PLANLIYOR — henüz
+  UYGULANMADI, çünkü uygulanacak bir remote yok.
+- `docs/deployment-runbook.md`'ye "GitHub remote eklendikten sonra ilk CI
+  doğrulama adımları" bölümü eklendi (§5) — placeholder repo/URL ile, gerçek
+  bir remote uydurulmadan.
+
+**Bu adımın KAPATMADIĞI şey — abartılmıyor:**
+
+- **Gerçek bir remote CI doğrulaması SIFIR kez yapıldı.** Protokolün
+  gerektirdiği 5 remote çalıştırmadan 0'ı gerçekleşti — bu belge veya
+  `docs/ci-stable-profile.md` bunun tersini iddia etmiyor.
+- **`ci:stable`'ın test adımının flakiness'i hâlâ çözülmedi, hâlâ Step 6'nın
+  bulduğu ~6/7 (~%86) yerel oranda** — bu adım flake'i kovalamadı, kasıtlı
+  olarak (görevin kendi kapsam sınırı: "flake'i lokal makinede sonsuza kadar
+  kovalamak değil"). Bu adımın kendi doğrulaması sırasında çalıştırılan
+  `pnpm run ci:stable`'ın sonucu bu belgenin altına dürüstçe kaydedildi (bkz.
+  bu bölümün "Bu adımın kendi doğrulaması" alt-başlığı).
+- **Production/deploy blokajı DEVAM EDİYOR, netleştirildi:** bu belge ve
+  `docs/ci-stable-profile.md`'nin ikisi de artık açıkça şu net kapıyı
+  taşıyor: **remote CI doğrulaması (yukarıdaki protokol, en az 5 çalıştırma)
+  tamamlanmadan production deploy'a geçilmez.** Bu, §11'in daha önce verdiği
+  "B+A → C → D → E" sıralamasını değiştirmiyor — yalnız D maddesinin (CI
+  stable profile) ne zaman "bitti" sayılabileceğine dair daha önce belirsiz
+  olan eşiği netleştiriyor.
+
+**Bu adımın kendi doğrulaması (dürüstçe kaydedilmiş, gerçek sayılarla):**
+
+`pnpm run typecheck` PASS, `pnpm run lint` PASS (yalnız iki pre-existing
+React Hook `exhaustive-deps` uyarısı, hata değil), `pnpm run build` PASS —
+üçü de bu adımda hiç değişiklik göstermedi (Steps 3-6'nın "bu üçü hep temiz"
+bulgusuyla tutarlı). `pnpm run ci:stable` bu adımda **iki kez** tam olarak
+çalıştırıldı — biri değişikliklerden ÖNCE (baseline), biri dokümantasyon/
+workflow dosyası değişikliklerinden SONRA (bu adım hiçbir kaynak/test kodu
+değiştirmediği için ikisinin de aynı sonucu vermesi beklenirdi): **ikisi de
+433/433 temiz geçti (2/2 bu oturumda).** Bu, Step 6'nın yerel ~6/7 (~%86)
+bulgusuyla ÇELİŞMİYOR — küçük bir örneklemde (2 deneme) hem tamamen temiz hem
+de kısmen flake sonucu görmek istatistiksel olarak beklenen bir varyans;
+**bu 2/2 sonucu flakiness'in ortadan kalktığı anlamına GELMEZ** ve böyle
+sunulmuyor — Step 6'nın 6/7'lik daha büyük örneklemi hâlâ bu makinedeki daha
+güvenilir yerel tahmin, ve her ikisi de zaten yukarıda netleştirilen tek
+gerçek standardın (remote runner'da 5/5) yerine geçmiyor.
+
 ## İlgili dokümanlar
 
 - [`docs/staging-compose.md`](./staging-compose.md) — bu §14'ün tam

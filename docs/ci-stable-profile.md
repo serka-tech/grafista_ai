@@ -1,19 +1,23 @@
-# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4, 405-flake root-caused in Step 5, substantially reduced in Step 6)
+# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4, 405-flake root-caused in Step 5, substantially reduced in Step 6, remote-runner package added in Step 7)
 
 > **Status: scripts + docs, plus real source fixes from Production Steps 4
-> and 6** (see "Production Step 4"/"Production Step 5"/"Production Step 6"
-> sections below for the full, honest account — Step 4 fixed a confirmed DB
-> pool leak but did NOT eliminate flakiness; Step 5 root-caused the
-> remaining 405/403/404/"socket hang up" flake to an external ephemeral-port
-> collision with an unrelated process on the developer machine, without
-> fixing it; Step 6 applied the fix Step 5 identified and measured 6 clean
-> full-suite `test:ci` runs out of 7 attempts afterward — up from ~1-in-3-to-6
-> before, but the flake recurred once within Step 6's own validation, so it
-> is reduced, not eliminated — see Step 6 for the full run-by-run account).
-> No `.github/workflows/` file was added — see "Why no GitHub Actions file
-> yet" below. Continues [`docs/staging-compose.md`](./staging-compose.md)
-> (Production Step 2/2B/2C) and [`docs/deployment-runbook.md`](./deployment-runbook.md)
-> — neither is re-derived here.
+> and 6, plus a real (but still dormant) `.github/workflows/stable-ci.yml`
+> from Production Step 7** (see "Production Step 4"/"Production Step
+> 5"/"Production Step 6"/"Production Step 7" sections below for the full,
+> honest account — Step 4 fixed a confirmed DB pool leak but did NOT
+> eliminate flakiness; Step 5 root-caused the remaining 405/403/404/"socket
+> hang up" flake to an external ephemeral-port collision with an unrelated
+> process on the developer machine, without fixing it; Step 6 applied the fix
+> Step 5 identified and measured 6 clean full-suite `test:ci` runs out of 7
+> attempts afterward — up from ~1-in-3-to-6 before, but the flake recurred
+> once within Step 6's own validation, so it is reduced, not eliminated; Step
+> 7 committed the workflow file itself (superseding the "why no GitHub
+> Actions file yet" decision below — see "Production Step 7: workflow file
+> decision" for why) and defined the protocol for actually trusting a remote
+> run once this repo has a GitHub remote to push to). Continues
+> [`docs/staging-compose.md`](./staging-compose.md) (Production Step 2/2B/2C)
+> and [`docs/deployment-runbook.md`](./deployment-runbook.md) — neither is
+> re-derived here.
 
 ## Production Step 4 — test isolation hardening (partial fix, honestly reported)
 
@@ -353,7 +357,167 @@ flakiness, and `CI_DEBUG_ROUTES`/`debug-routes.ts`/`app.ts` were left
 untouched — this step is scoped purely to the test HTTP client/server
 lifecycle described above.
 
-## Why no GitHub Actions file yet
+## Production Step 7 — CI Runner Readiness & Remote Validation Package
+
+**Goal of this step:** make the repo verifiable on a real GitHub Actions
+runner the moment it gets a remote, and define — in writing, before that
+first remote run happens — exactly what result would count as trustworthy.
+No product feature, no route behavior change, no test loosened, no retry
+added. `git remote -v` was re-checked at the start of this step and is still
+empty; nothing here assumes a remote exists yet.
+
+### Workflow file decision: commit the real file, not just a docs drop-in
+
+Step 3 chose to ship the ready-to-add YAML only inside this doc (see the
+"Ready-to-add GitHub Actions workflow" section below, kept as-is for
+reference) specifically because `.github/workflows/ci.yml` would sit
+"completely inert" with no remote to run against. That reasoning about
+inertness is still correct — a workflow file cannot execute without a GitHub
+repository behind it — but on reflection it argued for the wrong conclusion.
+An inert file is not a *risky* file: GitHub Actions never evaluates
+`.github/workflows/*.yml` outside an actual GitHub-hosted repo, so committing
+it today changes nothing about how this repo builds, tests, or runs locally
+(verified: `pnpm run ci:stable`/`pnpm run typecheck`/`pnpm run lint`/`pnpm run
+build` do not read `.github/`, confirmed by grep — no script references that
+path). Two options were weighed for this step:
+
+- **(A) Keep it doc-only** — zero new files, but means someone has to
+  correctly *transcribe* the doc's YAML into `.github/workflows/` the day a
+  remote is added, with no automated check that the transcription is
+  faithful, and the doc's copy can silently drift out of sync with whatever
+  actually gets committed later.
+- **(B) Commit `.github/workflows/stable-ci.yml` now, dormant** — the exact
+  file that will run is already in the repo, already YAML-syntax-validated
+  (see below), and already reviewed alongside this doc. The day a remote
+  exists, `git push` alone makes it live — no transcription step, no chance
+  of drift, nothing else to remember or get wrong.
+
+**(B) was chosen.** Given inertness removes the safety argument for (A), the
+practical argument (fewer manual steps between "remote exists" and "CI is
+actually running", zero drift risk) wins. The file lives at
+[`.github/workflows/stable-ci.yml`](../.github/workflows/stable-ci.yml) and
+mirrors `ci:stable`/`ci:staging` as two independent jobs, exactly as the
+Step 3 draft below already specified — no new checks were invented, only
+committed. Its own header comment repeats this dormancy note so a future
+reader opening that file directly (not this doc) still sees it.
+
+**YAML syntax validated statically** (no real GitHub Actions runner
+available in this environment to execute it): `python3 -c "import yaml;
+yaml.safe_load(open('.github/workflows/stable-ci.yml'))"` parsed cleanly and
+confirmed both expected jobs (`stable`, `staging-smoke`) and both expected
+triggers (`push` to `main`/`phase-2-checkpoint`, `pull_request`). This is a
+syntax check only, not a runtime validation — see the protocol below for
+what an actual runtime validation requires.
+
+**No secrets hardcoded, per this step's explicit constraint:** both jobs run
+entirely against fake providers (`ci:stable`'s embedded-Postgres test suite,
+`ci:staging`'s `.env.staging.example` fake-provider staging stack) — neither
+needs a single real credential. The env/secret catalog a future real-provider
+job would need is listed by name only (no values) in
+[`docs/deployment-runbook.md`](./deployment-runbook.md) §4.
+
+### Remote Runner Validation Protocol
+
+This is the standard this repo commits to **before** treating any GitHub
+Actions run of `ci:stable` as a merge gate — written now, in advance, so
+nobody is tempted to declare victory off a single green run once a remote
+exists:
+
+1. **Run `ci:stable` on the GitHub Actions runner at least 5 times** once a
+   remote exists (5 separate triggered runs — re-running the same run is not
+   a substitute, since the whole point is sampling independent runner
+   instances, not one runner's cache/state).
+2. **5/5 clean → candidate merge gate.** This is the first point at which
+   `ci:stable`'s test step may reasonably be called a candidate deterministic
+   gate — matching the same "small sample, state the number honestly" 
+   discipline Step 6 applied to its own 6/7 local result, just applied to a
+   clean-runner population instead of this developer's machine.
+3. **4/5 or fewer clean → the flake is still an open risk.** Do not raise the
+   sample size just to keep re-rolling until a lucky streak of 5 appears —
+   report the actual ratio observed (e.g. "4/6 clean over 6 attempts") and
+   treat the gate as still non-deterministic, exactly as this doc already
+   treats the local 6/7 result from Step 6.
+4. **On any failure, re-run with `CI_DEBUG_ROUTES=1`** (add a one-off
+   `workflow_dispatch` re-run, or re-push, with that env var set on the
+   `stable` job's `test:ci` step) to capture the same request/response log
+   Step 5 used to root-cause the local flake — see
+   `apps/api/src/middleware/debug-routes.ts`'s own doc comment for output
+   format and `CI_DEBUG_ROUTES_LOG_FILE` usage.
+5. **Classify the failure by its concrete symptom, not by vibes** — the
+   three signatures this doc already has direct evidence for are distinct
+   and should be told apart in whatever report follows a failed run:
+   - **405/403 on a `POST /api/auth/login` (or similar) call, with the
+     `CI_DEBUG_ROUTES` log showing a matching request/response pair** — this
+     is a real application-level regression (the log proves the response DID
+     come from this app's own Express pipeline) and must be treated as a
+     genuine bug, not dismissed as the known local flake.
+   - **405/403/404/"socket hang up", with `CI_DEBUG_ROUTES` showing NO
+     matching log entry for that call** — this is the exact external-collision
+     signature Step 5 root-caused (something other than this app's Express
+     pipeline answered the request). On a genuinely idle, dedicated GitHub
+     Actions runner this is expected to be far less likely than on the
+     developer machine where it was found (no known competing process shares
+     that runner's ephemeral port range) — but "far less likely" is not
+     "impossible," and a runner could still have contending system services;
+     this classification, once confirmed by the missing-log-entry check,
+     should not by itself block a merge, but every instance should still be
+     recorded in this doc's run log so the true remote rate is tracked
+     honestly rather than assumed to be zero.
+   - **Anything else (a new failing test, a build/typecheck/lint failure, a
+     genuinely different symptom)** — treat as a real regression requiring
+     the normal debugging process; none of this doc's local-machine findings
+     provide cover for a failure that doesn't match one of the two signatures
+     above.
+6. **Record every remote attempt's outcome in this doc** (append to this
+   section, do not silently overwrite) — clean/failed, and if failed, which
+   of the three classifications above it matched — so the "5 attempts"
+   standard in step 1 is an honest, auditable count and not a retroactive
+   claim.
+
+**Local-vs-remote environment difference, stated explicitly so it isn't
+lost:** every flake finding in this doc (Steps 3–6) was measured on **one
+specific developer's laptop**, running the Antigravity IDE, whose own
+background `language_server_macos_arm` process was directly implicated as
+the collision source (Step 5). A GitHub Actions `ubuntu-latest` runner is a
+different OS (Linux, not macOS), does not run the Antigravity IDE or any of
+its background processes, and is a fresh VM per run (no accumulated state
+across runs). This makes it plausible — not certain — that the specific
+collision mechanism Step 5 found does not reproduce there at all, or
+reproduces at a different rate. That plausibility is exactly why this
+protocol requires actually measuring 5 remote runs rather than assuming the
+local finding transfers, in either direction.
+
+### This step's own local validation (2/2 clean — not a substitute for the protocol above)
+
+`pnpm run ci:stable` was run twice in full during this step, on this same
+developer machine: once as a baseline before any change in this step, once
+after the docs/workflow-file changes above (which touch no source or test
+code, so an identical result was expected). **Both runs came back clean,
+433/433.** This is consistent with — not a contradiction of — Step 6's larger
+6/7 (~86%) local sample; a 2-run sample landing all-clean is ordinary
+variance, not evidence the flake is gone. This result is recorded honestly
+and explicitly does **not** substitute for the Remote Runner Validation
+Protocol above — it is a local, single-machine data point, exactly the kind
+of signal Steps 3–6 already showed is not sufficient on its own.
+
+### No production deploy until remote CI validation
+
+Restated here, not just in `docs/production-readiness-review.md` (§15), so
+it is visible from whichever doc is opened first: **no production deployment
+proceeds until the Remote Runner Validation Protocol above has actually been
+executed against a real GitHub Actions runner and produced a 5/5 (or
+honestly-reported partial) result.** A local `ci:stable` pass — on this
+machine or any other developer's machine — does not substitute for this; the
+whole documented history above (Steps 3–6) is direct evidence of why a local
+result alone is not sufficient signal.
+
+## Why no GitHub Actions file yet (superseded by Production Step 7 — kept for history)
+
+> **This section's conclusion no longer holds** — Production Step 7 (above)
+> committed the real `.github/workflows/stable-ci.yml` file. The reasoning
+> below (why nothing was committed in Steps 3–6) is left unmodified as an
+> honest historical record of what was decided and why, at the time it was
+> decided; do not read it as describing the current state of the repo.
 
 `git remote -v` returns nothing — this repo has never been pushed anywhere,
 there is no GitHub remote configured. A `.github/workflows/ci.yml` would sit
@@ -547,11 +711,15 @@ job.
 | `smoke-staging.ts`'s `demoFlow` section | Always reports SKIP by the script's own design (see above) — not a test that CI runs and passes/fails, just a pointer to `demo-flow.test.ts` (already covered under `ci:stable`). |
 | Any Playwright *real* Chromium render | `RENDERER_PROVIDER=fake` is the default everywhere in CI (`vitest.config.ts` for `ci:stable`, `.env.staging.example` for `ci:staging`) — real Chromium rendering is exercised manually only (`docs/manual-demo-pass.md`), never in either CI profile. |
 
-## Ready-to-add GitHub Actions workflow
+## Ready-to-add GitHub Actions workflow (now committed — see Production Step 7)
 
-Not committed as `.github/workflows/ci.yml` yet (see "Why no GitHub Actions
-file yet" above) — this is the exact file to add the day this repo gets a
-GitHub remote. It mirrors `ci:stable`/`ci:staging` as two independent jobs;
+**Update (Production Step 7): this is no longer a drop-in-later draft — it is
+now committed verbatim at
+[`.github/workflows/stable-ci.yml`](../.github/workflows/stable-ci.yml)**
+(see "Production Step 7 — CI Runner Readiness & Remote Validation Package"
+above for why). The copy below is kept for readability inside this doc; if
+the two ever disagree, the committed file is the source of truth. It mirrors
+`ci:stable`/`ci:staging` as two independent jobs;
 `staging-smoke` uses `if: always()` on its own teardown is unnecessary here
 because `scripts/ci-staging.sh`'s own `trap` already guarantees
 `staging:down` runs regardless of the job's outcome — GitHub Actions just
@@ -646,9 +814,12 @@ Docker-build minutes on a commit that already fails stable checks.
   correctly (`pnpm run build` runs first), but this remains a real
   constraint on the Docker build, not eliminated by this step.
 - **No GitHub Actions (or any other CI system) actually runs any of this
-  automatically yet** — both scripts are real, tested, and ready, but still
-  manually triggered until this repo gets a remote and the ready-to-add
-  workflow above is actually committed.
+  automatically yet** — the workflow file itself is now committed
+  (`.github/workflows/stable-ci.yml`, Production Step 7), but it is
+  necessarily dormant until this repo has a GitHub remote to push to; no run
+  of it has ever actually executed on a real runner, so the "5/5 clean"
+  Remote Runner Validation Protocol standard (Production Step 7, above) is
+  entirely unmet — 0 of the required 5 remote runs have happened.
 - **No real production deployment. No real production config.** Both
   profiles validate a disposable local/CI staging stack only
   (`RENDERER_PROVIDER=fake`, `AI_DEFAULT_PROVIDER=fake`,
