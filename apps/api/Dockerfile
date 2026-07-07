@@ -44,24 +44,32 @@ RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
 # copies into an earlier layer for better Docker layer-cache reuse.
 COPY . .
 RUN pnpm install --frozen-lockfile
-# Builds ONLY @grafista/api — deliberately NOT `--filter @grafista/api...`
-# (which would also rebuild packages/schemas, packages/model-router,
-# packages/prompt-engine via tsc). This Docker Desktop environment was found
-# to unreliably emit .js/.d.ts for those 3 packages when tsc runs against
-# COPY'd (not bind-mounted or host-native) source — reproduced consistently
-# across both the BuildKit and legacy builders, deterministic 0-file emission
-# every time, yet the identical tsc invocation never once failed when run
-# directly on the host. Root cause not fully pinned down (ruled out: this
-# repo's own tsconfig composite/extends setup — fixed separately in
-# tsconfig.base.json; ruled out: BuildKit-specific COPY mtime handling —
-# reproduces on the legacy builder too). Until that's root-caused, each of
-# those 3 packages' dist/ is instead HOST-BUILT and shipped via `.dockerignore`
-# deliberately NOT excluding packages/*/dist (unlike apps/*/dist, which is
-# excluded and built fresh below) — meaning `pnpm run build` must have been
-# run on the HOST for those 3 packages before `docker compose build`. See
-# docs/staging-compose.md and docs/deployment-runbook.md for the full
-# tradeoff writeup and the follow-up needed to remove this workaround.
-RUN pnpm --filter @grafista/api run build
+# No tsc build runs in this stage — every workspace package's dist/,
+# including @grafista/api's own, is HOST-BUILT and shipped in via the
+# `COPY . .` above (see .dockerignore's comment). This Docker Desktop
+# environment was found (Production Step 2B) to unreliably emit .js/.d.ts
+# for packages/schemas, packages/model-router, packages/prompt-engine when
+# their tsc build ran against COPY'd (not bind-mounted or host-native)
+# source — reproduced consistently across both the BuildKit and legacy
+# builders on that machine, deterministic 0-file emission every time, yet
+# the identical tsc invocation never once failed when run directly on the
+# host. This stage originally still built @grafista/api's own dist/ fresh
+# in-container on the theory that only the other 3 packages were affected —
+# Production Step 8's first real GitHub Actions run (a genuinely different
+# environment: amd64 Linux, not this Mac) hit the identical failure mode for
+# @grafista/api itself (`Error: Cannot find module '/repo/apps/api/dist/index.js'`
+# at container boot — the in-container tsc silently produced no output there
+# too). Root cause still not fully pinned down (ruled out: this repo's own
+# tsconfig composite/extends setup — fixed separately in tsconfig.base.json;
+# ruled out: BuildKit-specific COPY mtime handling — reproduces on the legacy
+# builder too), but the pattern now clearly generalizes across platforms
+# rather than being specific to one machine — so @grafista/api gets the same
+# host-build-and-ship treatment as the other 3 packages. `pnpm run build`
+# must have been run on the HOST for every workspace package before
+# `docker compose build`. See docs/staging-compose.md,
+# docs/ci-stable-profile.md ("Production Step 8"), and
+# docs/deployment-runbook.md for the full tradeoff writeup and the follow-up
+# still needed to root-cause and remove this workaround entirely.
 
 # ─── Runtime stage ───────────────────────────────────────────────────────
 FROM node:20-bookworm-slim AS runtime

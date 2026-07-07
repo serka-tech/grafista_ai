@@ -9,21 +9,23 @@ node_modules/
 **/node_modules/
 .pnpm-store/
 
-# apps/* and root `dist/` are excluded — those get built fresh in-container.
-# packages/*/dist is intentionally NOT excluded (see apps/api/Dockerfile's
-# comment on the build step): this Docker Desktop environment was found to
-# unreliably emit .js/.d.ts output for packages/schemas, packages/model-router
-# and packages/prompt-engine when their tsc build runs against COPY'd (not
-# bind-mounted) source — reproduced consistently across BuildKit and the
-# legacy builder, but never on the host directly. Until that environment
-# issue is root-caused, the pragmatic workaround is to ship each package's
-# already-host-built dist/ in the image and only build @grafista/api fresh
-# in-container. This means `pnpm run build` must have been run on the HOST
-# for packages/schemas, packages/model-router and packages/prompt-engine
+# Root `dist/` is excluded. packages/*/dist AND apps/*/dist are
+# intentionally NOT excluded (see apps/api/Dockerfile's comment on the build
+# stage): tsc running against COPY'd (not host-native) source inside a Docker
+# build was found unreliable — first for packages/schemas, packages/model-router
+# and packages/prompt-engine on this developer's Docker Desktop (Production
+# Step 2B), then confirmed to hit apps/api's own in-container build too, on a
+# genuinely different environment (a GitHub Actions amd64 Linux runner,
+# Production Step 8) — Step 2B's original theory that this was specific to
+# "this Docker Desktop installation" was too narrow; the same class of bug
+# can hit either platform. The pragmatic workaround, applied uniformly to
+# all four buildable workspace packages now: ship each one's already-host-built
+# dist/ in the image, build NOTHING with tsc inside the container. This means
+# `pnpm run build` must have been run on the HOST for every workspace package
 # before `docker compose -f docker-compose.staging.yml build` — see
-# docs/staging-compose.md and docs/deployment-runbook.md.
+# docs/staging-compose.md, docs/ci-stable-profile.md ("Production Step 8"),
+# and docs/deployment-runbook.md.
 /dist/
-apps/*/dist/
 .next/
 out/
 *.tsbuildinfo
