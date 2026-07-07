@@ -2053,6 +2053,97 @@ Sub-agent kaynak-doğrulaması:
 
 ---
 
+## 28. Dashboard Staging Deploy — Same-Origin Proxy (Production Step 19)
+
+> **§27a'nın dashboard deploy planı bu adımda KESİNLEŞTİ — mimari bir
+> blokaj bulunup çözüldü.** Servis henüz kullanıcı tarafından oluşturulmadı
+> (deploy kullanıcının kararı); bu adım deploy'u ÇALIŞIR hale getiren kod
+> değişikliğini yaptı + net kurulum adımlarını verdi. Production deploy
+> AÇILMADI, API tarafında hiçbir değişiklik YOK, secret yazılmadı.
+
+### 28a. Bulunan mimari blokaj (split-origin auth kırılması — kod-doğrulandı)
+
+Dashboard'ı ayrı bir `grafista-dashboard-staging.onrender.com` servisi
+olarak, tarayıcının doğrudan `api.onrender.com`'a çağrı yaptığı
+(`NEXT_PUBLIC_API_URL`) topolojiyle deploy etmek **authenticated akışı
+kırıyor** — iki bağımsız neden:
+
+1. **Cookie SameSite=Lax** (`apps/api/src/routes/auth.ts:23`, hardcoded) —
+   `dashboard.onrender.com` ve `api.onrender.com` farklı "site" (onrender.com
+   PSL'de). Tarayıcı Lax cookie'yi cross-site `fetch`'te göndermez → her
+   authenticated çağrı 401.
+2. **Dashboard middleware** (`apps/dashboard/src/middleware.ts:13`) oturum
+   cookie'sini dashboard'ın kendi origin'inde arar; ama cookie host-only olup
+   API host'una bağlı → dashboard sunucusu onu asla göremez → login sonrası
+   `window.location.href='/'` (`login/page.tsx:18`) middleware'e takılıp
+   /login'e geri savurur (bounce loop).
+
+Sonuç: split-origin'de `/login` 200 yüklenir ama giriş yapılamaz.
+
+### 28b. Çözüm: same-origin proxy (backend-for-frontend) — SEÇİLEN yol
+
+Tarayıcı yalnız dashboard'ın kendi origin'iyle konuşur; dashboard'ın
+Next.js sunucusu `/api/*`'ı gerçek API'ye proxy'ler. Böylece cookie
+first-party olur, SameSite=Lax çalışır, middleware cookie'yi görür ve
+**API tarafında CORS/cookie DEĞİŞİKLİĞİ GEREKMEZ** (proxy hop'u
+sunucu-sunucu, tarayıcı CORS'una tabi değil). Bu, uygulamanın orijinal
+tasarım niyetiyle uyumlu (`next.config.js`'te zaten bir dev rewrite'ı vardı).
+
+**Yapılan kod değişikliği (2 dosya, yalnız dashboard):**
+- `apps/dashboard/src/lib/api.ts` — `API_BASE` artık varsayılan olarak
+  BOŞ (same-origin/relative): tarayıcı `/api/...`'ı kendi origin'ine atar.
+- `apps/dashboard/next.config.js` — `/api/:path*` rewrite'ının hedefi
+  artık env-driven: `${API_PROXY_TARGET}/api/:path*` (yoksa dev fallback
+  `http://localhost:4000`).
+
+**Doğrulama (lokal):** `API_PROXY_TARGET` set ile `next build`, üretilen
+`routes-manifest.json`'da rewrite hedefinin
+`https://grafista-api-staging.onrender.com/api/:path*` olarak BAKE edildiği
+doğrulandı; set olmadan `http://localhost:4000/api/:path*` fallback'i
+doğrulandı. typecheck/lint/build + ci:stable 444/444 + ci:staging 0 fail
+(dashboard değişikliği api testlerini etkilemiyor).
+
+### 28c. Dashboard servisi oluşturma adımları (kullanıcı — Render panel)
+
+1. Render → **New → Web Service** → repo `serka-tech/grafista_ai`, branch
+   `phase-2-checkpoint`.
+2. Name: `grafista-dashboard-staging`; **Runtime: Node** (Docker DEĞİL);
+   Region: API ile aynı (Frankfurt).
+3. **Build Command:** `pnpm install --frozen-lockfile && pnpm run build`
+4. **Start Command:** `pnpm --filter @grafista/dashboard exec next start -p $PORT`
+5. **Environment** (present/missing — değer secret değil):
+   - `API_PROXY_TARGET = https://grafista-api-staging.onrender.com`
+     (build-time'da gerekli; Render build sırasında env enjekte eder).
+   - `NEXT_PUBLIC_API_URL`'i **GİRME** (boş kalsın — same-origin proxy için).
+6. **Health Check Path:** `/login` (§27a/§28d).
+7. Deploy et; **Live** olmasını bekle; servis URL'sini not al.
+
+**API tarafında yapılacak: HİÇBİR ŞEY** — `API_CORS_ORIGIN` proxy yolu
+için gerekmez (Adım 28b). (İleride doğrudan-tarayıcı topolojisine geçilirse
+gerekir, ama bu yol seçilmedi.)
+
+### 28d. Deploy sonrası doğrulama (ben yapacağım, secret'sız)
+
+Dashboard URL geldiğinde bağımsız `curl`/kontrol:
+- Dashboard erişilebilir mi (kök `/` → 302 `/login`'e redirect beklenir).
+- `/login` **200** dönüyor mu.
+- Same-origin API proxy çalışıyor mu: `GET <dashboard-url>/api/health` →
+  `200 {status:ok}` (proxy üzerinden API'ye ulaşmalı — bu, dashboard'ın
+  API'ye bağlandığının secret'sız kanıtı).
+- Not: tam authenticated login E2E (gerçek kullanıcı) `db:seed-admin` ile
+  bir login kullanıcısı gerektirir; bu adımda opsiyonel — proxy'nin
+  `/api/health`'i geçirmesi bağlantıyı zaten kanıtlar.
+
+### 28e. Kalan blokajlar / Step 20'ye
+
+- **`KIE_AI_API_KEY` eksik — bilinçli blokaj** (değişmedi).
+- Worker canlı gözlemi (queue açık) YAPILMADI — bu adımda `RENDER_QUEUE_ENABLED
+  =false` kaldı (bilinçli).
+- Managed restore drill ÇALIŞTIRILMADI (preflight hazır, §15c boş).
+- **Production deploy AÇILMADI.**
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

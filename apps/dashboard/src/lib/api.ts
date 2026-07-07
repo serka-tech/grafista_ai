@@ -1,4 +1,15 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Empty (same-origin/relative) by default — the browser calls the dashboard's
+// OWN origin at `/api/...`, and Next.js rewrites those to the real API
+// (next.config.js, destination driven by API_PROXY_TARGET). This is the
+// backend-for-frontend proxy pattern, chosen in Production Step 19 so the
+// split-origin auth trap is avoided: with the browser talking only to the
+// dashboard origin, the grafista_session cookie is a first-party cookie on
+// the dashboard host, SameSite=lax works, the dashboard middleware can read
+// it, and the API needs no CORS/cookie changes. Do NOT set NEXT_PUBLIC_API_URL
+// on the deployed dashboard — leaving it unset keeps calls same-origin; it
+// exists only as an escape hatch for a direct (non-proxied) same-site setup
+// like local dev on the same host. See docs/deployment-runbook.md §28.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // Carries the HTTP status code alongside the message so callers can branch on
 // specific statuses (e.g. 409 conflict vs 502 provider failure) without

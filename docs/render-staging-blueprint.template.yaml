@@ -169,10 +169,20 @@ services:
     plan: <RENDER_PLAN_TBD>
     region: <RENDER_REGION_TBD>
     autoDeployTrigger: off
-    healthCheckPath: /login # RESOLVED in Production Step 18 (was: "no override, default root-path, unverified"). apps/dashboard has no dedicated health route, and its middleware (apps/dashboard/src/middleware.ts:15-18) REDIRECTS any cookie-less request for "/" to /login (302) — so Render's default root-path check could see a redirect, not a 200. /login is the one path the middleware explicitly allows without a session cookie (`pathname !== '/login'`) and returns a real 200. Using it as the health target sidesteps the redirect-vs-200 ambiguity with zero code. (Alternative if a cleaner semantic is wanted at deploy time: add a /healthz route AND exclude it from the middleware matcher — but /login is sufficient and code-free.) See docs/deployment-runbook.md §27a.
+    healthCheckPath: /login # RESOLVED in Production Step 18 (was: "no override, default root-path, unverified"). apps/dashboard has no dedicated health route, and its middleware (apps/dashboard/src/middleware.ts:15-18) REDIRECTS any cookie-less request for "/" to /login (302) — so Render's default root-path check could see a redirect, not a 200. /login is the one path the middleware explicitly allows without a session cookie (`pathname !== '/login'`) and returns a real 200. Using it as the health target sidesteps the redirect-vs-200 ambiguity with zero code. See docs/deployment-runbook.md §27a/§28.
     envVars:
-      - key: NEXT_PUBLIC_API_URL
-        sync: false # grafista-api-staging's own Render URL. Production Step 16-17 UPDATE: the API side is now LIVE at https://grafista-api-staging.onrender.com, so the dashboard->API direction of the old circular dependency is now RESOLVABLE (set this to that URL). The API->dashboard direction (grafista-api-staging's own API_CORS_ORIGIN) still needs THIS dashboard service's Render URL, which only exists after this service is created — so provision order: create dashboard -> take its URL -> set the API service's API_CORS_ORIGIN to it (this NEXT_PUBLIC_API_URL is already known). See docs/deployment-runbook.md §27a.
+      # Production Step 19 CHANGE: the dashboard uses a SAME-ORIGIN PROXY, not a
+      # direct browser->API call, so it sets API_PROXY_TARGET (build-time, drives
+      # the Next.js /api/* rewrite in next.config.js) — NOT NEXT_PUBLIC_API_URL.
+      # Reason: a split-origin browser->API topology breaks the authenticated
+      # flow (SameSite=lax cookie not sent cross-site + the dashboard middleware
+      # can't see the API-host cookie — both confirmed in code). With the proxy,
+      # the browser only talks to the dashboard's own origin, the session cookie
+      # is first-party, and the API needs NO CORS/cookie change. Do NOT set
+      # NEXT_PUBLIC_API_URL here (leaving it unset keeps calls same-origin). See
+      # docs/deployment-runbook.md §28.
+      - key: API_PROXY_TARGET
+        value: https://grafista-api-staging.onrender.com # the live API base URL (Step 16-17); must be present at BUILD time (Render injects service env during build, so setting it here is enough — next build bakes the rewrite destination). NOT a secret. No API-side API_CORS_ORIGIN change is needed for the proxy path (server-to-server hop is not subject to browser CORS).
 
 # ── Worker: NOT a services: entry, intentionally ─────────────────────
 # This repo's render worker (apps/api/src/services/render-worker.ts) is

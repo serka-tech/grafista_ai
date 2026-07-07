@@ -1522,6 +1522,44 @@ yürütme adımı olmalı (dashboard'ı gerçekten deploy et, VEYA KIE ile
 gerçek görsel hattını aç, VEYA queue'yu açıp worker'ı gözlemle) — plan
 aşaması bitti, sıradaki değer yalnız gerçek çalıştırmadan gelir.
 
+## 27. Implementation status update (Dashboard Same-Origin Proxy Fix — Production Step 19)
+
+**§26'nın dashboard deploy planı canlıya alınmaya çalışılırken bir MİMARİ
+BLOKAJ bulundu ve çözüldü — dashboard servisi henüz oluşturulmadı (deploy
+kullanıcı kararı), ama artık ÇALIŞIR bir topolojiyle.** Tam detay
+`docs/deployment-runbook.md` §28.
+
+**Bulunan blokaj (kod-doğrulandı):** dashboard'ı ayrı bir Render servisi
+olarak, tarayıcı doğrudan API'ye çağrı yapacak şekilde (split-origin)
+deploy etmek authenticated akışı KIRIYOR — (1) cookie `SameSite=lax`
+(`auth.ts:23`) cross-site `fetch`'te gönderilmez, (2) dashboard middleware
+(`middleware.ts:13`) API-host'una bağlı cookie'yi kendi origin'inde göremez
+→ login sonrası /login'e bounce. `/login` yüklenir ama giriş yapılamaz.
+
+**Çözüm (seçilen, kullanıcı onayıyla): same-origin proxy.** Dashboard
+`/api/*`'ı Next.js rewrite ile API'ye proxy'ler; tarayıcı yalnız dashboard
+origin'iyle konuşur → cookie first-party, SameSite=lax çalışır, middleware
+çalışır, **API tarafında CORS/cookie değişikliği GEREKMEZ**. Kod (2 dosya,
+yalnız dashboard): `api.ts` API_BASE artık relative (same-origin);
+`next.config.js` rewrite hedefi env-driven (`API_PROXY_TARGET`). Lokal
+doğrulandı: build manifest'te rewrite'ın gerçek API URL'ine bake edildiği +
+dev fallback teyit edildi; typecheck/lint/build + ci:stable 444/444 +
+ci:staging 0 fail.
+
+**AÇIK kalan (Step 20'ye — production hâlâ BLOKEDE):**
+- Dashboard servisi HENÜZ OLUŞTURULMADI — kod + kurulum adımları hazır
+  (§28c); canlı deploy + doğrulama (dashboard erişilebilir mi, /login 200,
+  `/api/health` proxy üzerinden 200) kullanıcı servisi oluşturunca.
+- `KIE_AI_API_KEY` eksik (bilinçli blokaj); worker queue kapalı (bilinçli);
+  managed restore drill çalıştırılmadı.
+- Production deploy AÇILMADI, API tarafı değişmedi.
+
+**Production gate — DEVAM EDEN durum:** dashboard deploy'u artık ÇALIŞIR
+(mimari blokaj çözüldü), ama servis canlıya alınıp doğrulanana kadar
+dashboard gate'i AÇIK. **Production hâlâ BLOKEDE.** **Sıradaki:** kullanıcı
+`grafista-dashboard-staging`'i §28c ile oluşturur → URL'i verir → ben
+proxy'nin `/api/health`'i geçirdiğini (bağlantı kanıtı) doğrularım.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
