@@ -15,6 +15,16 @@
 > boşluğu ("backup/restore prosedürü hiçbir yerde yazılı değil, hiç
 > egzersiz edilmedi") kapatmak için yazıldı — **prosedür artık hem
 > yazılı HEM DE staging'de en az bir kez gerçekten doğrulanmış.**
+>
+> **GÜNCELLEME (Production Step 11):** bu adım, hâlâ bilinçli olarak
+> kapsam dışı bırakılan "managed Postgres/S3 sağlayıcısının seçilip
+> provizyonlanması" sorusuna bir karar KRİTERİ paketi ekledi (bkz. §13 ve
+> [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md))
+> — ama gerçek bir sağlayıcı hâlâ SEÇİLMEDİ, gerçek bir provizyonlama hâlâ
+> YAPILMADI, ve bu dosyanın §7/§12'sindeki drill hâlâ yalnızca
+> local/staging Docker'a karşı. §13, managed altyapıya karşı yapılacak
+> EK bir drill'in ne gerektirdiğini tarif ediyor — kendisi o drill
+> DEĞİL.
 
 ## Amaç
 
@@ -524,8 +534,72 @@ dokümante edilmesi gereken bir bulgu.
   başladı/bitti — ikinci koşum birincinin bıraktığı hiçbir kalıntıdan
   etkilenmedi.
 
+## 13. Managed Infrastructure Requirements (Production Step 11)
+
+> **Status: GEREKSİNİM TARİFİ — bu bölümdeki drill bu adımda
+> ÇALIŞTIRILMADI.** §12'nin drill'i sentetik veriyle, LOCAL Docker
+> ortamına karşıydı. Bu bölüm o drill'in managed Postgres/S3 karşılığının
+> NE gerektirdiğini tarif ediyor — kendisi bir egzersiz değil. Karar
+> kriterleri (hangi sağlayıcı seçilecek) için bkz.
+> [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
+> burada TEKRARLANMIYOR.
+
+### 13a. §12'nin drill'i ile managed-altyapı drill'i arasındaki fark
+
+| Boyut | §12'nin drill'i (Production Step 10) | Managed-altyapı drill'i (gerekli, henüz yapılmadı) |
+|---|---|---|
+| Postgres | `postgres:16-alpine` container, local Docker volume | Gerçek managed Postgres instance (sağlayıcı seçildikten sonra) |
+| Object storage | Local disk (`STORAGE_PROVIDER=local`, manuel host-side kopya) | Gerçek S3-uyumlu bucket, `STORAGE_PROVIDER=s3`, versioning açık |
+| Veri | Sentetik (drill'in kendi ürettiği tek `brand_assets` satırı) | Yine sentetik/test verisi ÖNERİLİR (gerçek müşteri verisi girmeden önce en az bir kez) — ASLA gerçek production verisiyle "ilk deneme" yapılmamalı |
+| Backup mekanizması | Manuel `pg_dump`/host-side kopya (script'in kendisi) | Sağlayıcının OTOMATİK snapshot/PITR mekanizmasından bir restore (script'in `pg_dump`/`pg_restore` adımları managed sağlayıcının restore CLI'ına/konsoluna uyarlanmalı) |
+| Amaç | Restore MEKANİĞİNİN (script/prosedür) doğru olduğunu kanıtlamak | Aynı prosedürün SEÇİLEN GERÇEK sağlayıcıda da çalıştığını kanıtlamak — sağlayıcıya özgü farklar (CLI syntax'ı, IAM/erişim modeli, snapshot restore akışı) burada ilk kez ortaya çıkar |
+
+**Net gate, tekrar altı çizilerek:** managed sağlayıcı seçilip
+provizyonlanmadan (bkz. `docs/managed-infrastructure-plan.md` §3a/§3b,
+`docs/deployment-runbook.md` §17) bu drill hiç başlatılamaz — bu bir
+sıralama sorunu, atlanabilir bir adım değil. **Managed sağlayıcı
+seçilmeden VE bu drill managed altyapıda tekrar edilip PASS almadan
+production deploy YOK.**
+
+### 13b. Managed-altyapı drill'inin beklenen adımları (taslak — sağlayıcı seçilince kesinleşir)
+
+Aşağıdaki adımlar §7'nin/`scripts/restore-drill-staging.sh`'ın yapısını
+İZLİYOR, ama sağlayıcıya özgü komutlar seçim yapılmadan YAZILAMAZ — bu
+yüzden burada yalnız placeholder'lı bir taslak var, gerçek sağlayıcı CLI
+syntax'ı değil:
+
+1. Managed Postgres'te sentetik/test verisiyle bir "before" snapshot al
+   (sağlayıcının kendi manuel/on-demand snapshot tetikleyicisi ile, otomatik
+   günlük snapshot'ı BEKLEMEDEN).
+2. Aynı test verisini S3-uyumlu bucket'a da yaz (bir `brand_assets`
+   satırının işaret ettiği gerçek bir obje).
+3. Yeni/boş bir Postgres instance'ına (AYNI sağlayıcıda, ayrı bir
+   instance/database) snapshot'tan restore et — §5'in `pg_restore`
+   adımlarının sağlayıcıya özel restore akışına (konsol/CLI) karşılığı.
+4. Bucket'ın versioning'i üzerinden aynı objenin önceki versiyonunu geri
+   getir (§6'nın `aws s3api copy-object` örneğinin gerçek sağlayıcı
+   karşılığı).
+5. §9'un verification checklist'ini AYNEN uygula (`schema_migrations`
+   eşleşmesi, `GET /api/health`/`/api/health/ready`, checksum doğrulaması,
+   `smoke:staging` veya production'a uyarlanmış eşdeğeri).
+6. Sonucu bu bölüme (13c) EKLE — üzerine yazma, §12'nin formatını izle
+   (tarih, ortam, komut, PASS/FAIL, bulunan varsa bug).
+
+### 13c. Sonuç kaydı
+
+**Henüz çalıştırılmadı.** Bu alt bölüm, drill gerçekten managed altyapıya
+karşı çalıştırıldığında §12'nin formatıyla (tarih/ortam/komut/sonuç
+tablosu) doldurulacak — bugün için boş, ve bu doğrudan
+`docs/production-readiness-review.md`'nin Step 11 güncellemesinde
+"planned, not provisioned" olarak da işaretleniyor.
+
+---
+
 ## İlgili dokümanlar
 
+- [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
+  Production Step 11: managed Postgres/S3/hosting/secrets/monitoring/backup
+  karar matrisi, env/secrets matrisi, §13'ün doğrudan kaynağı.
 - `scripts/restore-drill-staging.sh` — §12'nin tam otomasyonu, §7'nin
   kod hali. Güvenlik guard'ları (NODE_ENV/DATABASE_URL kontrolü),
   aşama-aşama loglama (setup/seed/backup/reset/restore/verify/cleanup),

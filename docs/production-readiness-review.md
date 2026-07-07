@@ -898,8 +898,97 @@ geçmeden önceki somut gate listesi netleştirildi:
 [`docs/deployment-runbook.md`](./deployment-runbook.md)'ün yeni
 "Production öncesi zorunlu gate'ler" bölümüne bkz.
 
+## 19. Implementation status update (Managed Infrastructure Plan — Production Step 11)
+
+**§18'in bıraktığı son açık kalemlerden biri (managed Postgres/S3 kararı)
+artık bir KARAR PAKETİNE sahip — sağlayıcı hâlâ SEÇİLMEDİ, hiçbir şey
+PROVİZYONLANMADI.** Tam içerik
+[`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md)'de
+(yeni doküman) — burada yalnızca bu belgenin production-gate
+sınıflandırmasına düşen özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **Infrastructure envanteri çıkarıldı** — API runtime, dashboard runtime,
+  managed Postgres, S3-uyumlu storage, queue/worker (AYRI bir servis
+  DEĞİL, §2'nin zaten doğruladığı gibi), Docker registry, domain/DNS,
+  SSL/TLS, secrets management, logs/monitoring, backup automation — her
+  biri için kodun bugün NE beklediği doğrudan kaynak/config
+  referanslarıyla dokümante edildi.
+- **Provider karar matrisi hazırlandı** (7 kategori: managed Postgres,
+  S3-uyumlu storage, app hosting/runtime, background worker hosting,
+  logs/monitoring, secrets management, backup automation) — her biri için
+  minimum gereksinim, önerilen kriter, aranacak özellikler, riskler, kabul
+  kriterleri. **Hiçbir güncel fiyat iddiası yok, hiçbir sağlayıcı
+  SEÇİLMEDİ** — her kategoride "decision required" olarak işaretlendi.
+  Güçlü bir yön önerisi var (küçük ekip/MVP için en az operasyon yükü,
+  local disk production'da KULLANILMAZ, Postgres PITR+snapshot ve object
+  storage versioning ZORUNLU gate) — ama bu bir sağlayıcı ismi değil, bir
+  kriter seti.
+- **Env/secrets matrisi hazırlandı** — `.env.example`/`apps/api/src/config/env.ts`
+  ile çapraz doğrulanmış, hangi değişkenin required/optional/local-only
+  olduğu netleştirildi. Görev tanımının istediği "PUBLIC_APP_URL"/
+  "API_BASE_URL" kavramlarının bu repo'daki GERÇEK karşılığının
+  `NEXT_PUBLIC_API_URL`/`API_CORS_ORIGIN` olduğu, ve `NODE_ENV`/`LOG_LEVEL`'in
+  `.env.example`'da var olduğu ama repo kodunun hiçbir yerinde
+  OKUNMADIĞI (grep ile doğrulandı, sıfır sonuç) dürüstçe not edildi —
+  icat edilmiş bir env değişkeni YOK.
+- **`docs/deployment-runbook.md`'ye §17 "Production Infrastructure
+  Provisioning Gate" eklendi** — somut, placeholder'lı, komut-seviyeli bir
+  checklist (Managed Postgres/S3 provizyonu, PITR/versioning, secret
+  girişi, domain/DNS/SSL, backup automation, managed-altyapı restore
+  drill) — **hiçbir maddesi işaretlenmedi**.
+- **`docs/backup-restore-runbook.md`'ye §13 "Managed Infrastructure
+  Requirements" eklendi** — §12'nin local/staging drill'i ile managed
+  altyapıya karşı yapılacak EK drill arasındaki farkın net tarifi, ve net
+  bir gate: "managed sağlayıcı seçilmeden VE restore drill managed
+  altyapıda tekrar edilmeden production deploy YOK."
+
+**Kapatılmadı (bilinçli, dürüstçe restate — bu adımın kendi başarı
+kriteri budur, provider hesabı açmak DEĞİL):**
+
+- Hiçbir gerçek provider hesabı/projesi açılmadı.
+- Hiçbir gerçek servis (Postgres/S3/hosting/secrets/monitoring)
+  provizyonlanmadı.
+- Hiçbir gerçek secret değeri yazılmadı — bu belge ve güncellenen üç
+  doküman yalnızca isim + amaç içeriyor.
+- Managed altyapıya karşı bir restore drill hâlâ hiç yapılmadı
+  (`docs/backup-restore-runbook.md` §13c hâlâ boş).
+- §16'nın listelediği diğer açık kalem (çoklu-worker yatay ölçek
+  koordinasyonu) bu adımın kapsamı DIŞI, değişmedi.
+- Hiçbir production deploy yapılmadı, hiçbir yeni ürün özelliği
+  eklenmedi, hiçbir migration eklenmedi.
+
+**Bu adımın kendi doğrulaması:** `pnpm run ci:stable` bu adımda
+dokümantasyon-öncesi bir baseline olarak çalıştırıldı — `build`/
+`typecheck`/`lint` temiz, `test:ci` **433/433 temiz (26/26 dosya, tek
+denemede)**. `pnpm run ci:staging` da bu adımda çalıştırıldı — **PASS**:
+`staging:up` sonrası her iki container (`postgres`/`api`) healthy oldu,
+migration'lar container içinde temiz uygulandı, `smoke:staging` **2 pass,
+2 warn, 1 skip, 0 fail** verdi (`ready` WARN yalnız `providers` check'inin
+`degraded` olmasından — `KIE_AI_API_KEY` staging'de bilinçli olarak boş,
+`.env.staging.example`'ın fake-provider demo modu; `database`/`storage`/
+`renderQueue`/`workerHeartbeat`/`playwright` hepsi `ok`; `demoFlow` her
+zamanki gibi SKIP, `docs/ci-stable-profile.md`'nin zaten belgelediği
+tasarım gereği), `staging:down` temiz teardown yaptı. `bash -n
+scripts/restore-drill-staging.sh` temiz (önceki adımlardan beri
+değişmedi, bu adımda script'e dokunulmadı).
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** kod-doğruluğu gate'i
+(`ci:stable`/`ci:staging`, Production Step 8) ve veri-güvenliği
+prosedürü/staging-mekanik gate'i (backup/restore, Production Step 9/10)
+her ikisi de tamamlandı. **Managed altyapı kararı/provizyonu hâlâ
+"planned, not provisioned"** — bu adım o kararın NASIL verileceğini
+netleştirdi, kararın kendisini vermedi. **Production deploy hâlâ
+BLOKEDE** — `docs/deployment-runbook.md` §17'nin checklist'inin TAMAMI
+işaretlenmeden, ve managed altyapıya karşı bir restore drill PASS
+almadan (`docs/backup-restore-runbook.md` §13) bu blokaj kalkmaz.
+
 ## İlgili dokümanlar
 
+- [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
+  §19'un tam teslimatı: infrastructure envanteri, provider karar matrisi,
+  env/secrets matrisi, ops decision (Option A/B/C).
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) — §17'nin
   tam teslimatı: persistence envanteri, managed Postgres/S3 karar
   kriterleri, backup policy, restore/restore-drill prosedürü; §12 —

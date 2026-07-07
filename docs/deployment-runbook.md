@@ -911,8 +911,126 @@ geçilmemeli.
 
 ---
 
+## 17. Production Infrastructure Provisioning Gate (Production Step 11)
+
+> **Status: CHECKLIST — bu bölümdeki hiçbir madde bu adımda
+> İŞARETLENMEDİ.** §16'nın "Production öncesi zorunlu gate'ler" listesi
+> yüksek seviyeli beş kalemdi; bu bölüm onun YERİNE geçmiyor, onu somut,
+> komut-seviyeli bir provizyonlama checklist'ine açıyor. Karar
+> kriterleri/gerekçeler için bkz.
+> [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
+> burada TEKRARLANMIYOR, yalnız yürütme sırası var. Tüm komutlar
+> placeholder içerir (`<DATABASE_URL>`, `<S3_BUCKET>`, `<S3_ENDPOINT>`,
+> `<PRODUCTION_APP_URL>`) — gerçek bir değerle bu adımda hiçbiri
+> çalıştırılmadı.
+
+**Sıra önemli** — her madde bir öncekine bağımlı (ör. connection string'i
+secret store'a eklemeden önce Postgres instance'ının var olması gerekir).
+
+- [ ] **Managed Postgres oluşturuldu.**
+  ```bash
+  # Sağlayıcıya özel — bu adımda seçilmedi (bkz. managed-infrastructure-plan.md §3a).
+  # Sağlayıcının kendi CLI/konsolu ile: PostgreSQL 14+, pgvector desteği
+  # (varsa) veya PGVECTOR_ENABLED=false kararı netleştirilmiş olmalı.
+  ```
+- [ ] **PITR/snapshot aktif.**
+  ```bash
+  # Sağlayıcıya özel — otomatik günlük snapshot AÇIK, destekleniyorsa PITR AÇIK.
+  # Doğrulama: sağlayıcının kendi arayüzünde "backups enabled: true" / eşdeğeri.
+  ```
+- [ ] **DB connection string secret store'a eklendi.**
+  ```bash
+  # Platform-native secret store'a (bkz. managed-infrastructure-plan.md §3f):
+  <PLATFORM_CLI> secrets set DATABASE_URL="<DATABASE_URL>" --env production
+  # DATABASE_URL sslmode=require İÇERMELİ (docs/backup-restore-runbook.md §3a).
+  ```
+- [ ] **S3 bucket oluşturuldu.**
+  ```bash
+  # Sağlayıcıya özel — bu adımda seçilmedi (bkz. managed-infrastructure-plan.md §3b).
+  # Adapter bucket'ı OTOMATİK OLUŞTURMAZ (apps/api/src/storage/factory.ts) —
+  # <S3_BUCKET> bucket'ı sağlayıcının kendi CLI/konsolunda önceden oluşturulmalı.
+  ```
+- [ ] **Versioning aktif.**
+  ```bash
+  # Örnek (AWS S3 CLI syntax'ı — seçilen sağlayıcıya göre uyarlanmalı):
+  aws s3api put-bucket-versioning --bucket <S3_BUCKET> \
+    --versioning-configuration Status=Enabled --endpoint-url <S3_ENDPOINT>
+  ```
+- [ ] **Lifecycle policy tanımlandı.**
+  ```bash
+  # Yalnız regenerable prefix'e (render-jobs/*/exports/*) — kalıcı tier'a
+  # (brand-assets/, design-references/, generated-outputs/) UYGULANMAMALI.
+  # (docs/backup-restore-runbook.md §3b'nin ayrımı — burada tekrarlanmıyor.)
+  ```
+- [ ] **Least privilege access key oluşturuldu.**
+  ```bash
+  # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY yalnız PutObject/GetObject/
+  # ListBucket yapabilmeli — bucket silme/policy değiştirme YAPAMAMALI
+  # (managed-infrastructure-plan.md §3b'nin kabul kriteri).
+  ```
+- [ ] **App runtime env/secrets girildi.**
+  ```bash
+  # §4'ün (managed-infrastructure-plan.md) tam listesi — değer YOK, yalnız isim:
+  <PLATFORM_CLI> secrets set AUTH_SECRET="$(openssl rand -hex 32)" --env production
+  <PLATFORM_CLI> env set STORAGE_PROVIDER=s3 S3_REGION=<...> S3_BUCKET=<S3_BUCKET> \
+    S3_ENDPOINT=<S3_ENDPOINT> NEXT_PUBLIC_API_URL=<PRODUCTION_APP_URL> \
+    API_CORS_ORIGIN=<PRODUCTION_APP_URL> COOKIE_SECURE=true \
+    RENDER_QUEUE_ENABLED=true --env production
+  <PLATFORM_CLI> secrets set S3_ACCESS_KEY_ID="<...>" S3_SECRET_ACCESS_KEY="<...>" \
+    OPENAI_API_KEY="<...>" ANTHROPIC_API_KEY="<...>" \
+    KIE_AI_API_KEY="<...>" KIE_AI_BASE_URL="<...>" --env production
+  ```
+- [ ] **Worker runtime env/secrets girildi.**
+  ```bash
+  # AYRI bir runtime DEĞİL (managed-infrastructure-plan.md §3d) — worker,
+  # App runtime (üst madde) ile AYNI instance/process. Bu madde yalnızca
+  # yanlışlıkla ayrı bir worker servisi provizyonlanmadığının doğrulaması:
+  <PLATFORM_CLI> services list --env production
+  # Beklenen: tek bir API+worker servisi, ikinci bir "worker" servisi YOK.
+  ```
+- [ ] **Domain/DNS hazır.**
+  ```bash
+  # <PRODUCTION_APP_URL> domain'inin DNS kaydı (A/CNAME) hedef platforma
+  # işaret ediyor — sağlayıcının kendi domain-bağlama adımları.
+  ```
+- [ ] **SSL hazır.**
+  ```bash
+  # Platformun kendi TLS terminasyonu (çoğu PaaS otomatik) veya ayrı bir
+  # reverse proxy/sertifika — seçilen hosting kararına bağlı
+  # (managed-infrastructure-plan.md §3c). Doğrulama:
+  curl -sf https://<PRODUCTION_APP_URL>/api/health
+  ```
+- [ ] **Backup automation planlandı.**
+  ```bash
+  # Managed Postgres'in otomatik snapshot'ı (üstteki madde) + haftalık
+  # pg_dump'ın sağlayıcıdan BAĞIMSIZ ikinci bir konuma yazılması
+  # (docs/backup-restore-runbook.md §3a) — "planlandı" burada "otomatik
+  # olarak ÇALIŞIYOR" anlamına gelir, yalnız dokümante edilmiş bir niyet
+  # DEĞİL.
+  ```
+- [ ] **Restore drill managed altyapıya karşı tekrar çalıştırılacak.**
+  ```bash
+  # scripts/restore-drill-staging.sh bugün YALNIZ local/staging Docker
+  # compose stack'ine karşı çalışır (kendi güvenlik guard'ları bunu
+  # zorunlu kılıyor) — managed altyapıya karşı EŞDEĞER bir drill
+  # gerekir; tam gerekçe ve fark için bkz.
+  # docs/backup-restore-runbook.md'nin "Managed Infrastructure
+  # Requirements" bölümü. Bu adım PASS almadan production deploy YOK.
+  ```
+
+**Bu checklist'in HİÇBİR maddesi bu Step 11'de tamamlanmadı** — hepsi
+gerçek bir provider hesabı/provizyonlama gerektiriyor, ki bu adımın
+kapsamı dışı (bkz. `docs/managed-infrastructure-plan.md` §1). Bu bölüm,
+bir sonraki adımın (gerçek provizyonlama) başlayacağı somut, sıralı
+listedir.
+
+---
+
 ## İlgili dokümanlar
 
+- [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
+  Production Step 11: §17'nin checklist'inin dayandığı karar
+  kriterleri/matrisi, env/secrets matrisi, ops decision (Option A/B/C).
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
   Production Step 9'un tam teslimatı: persistence envanteri, managed
   Postgres/S3 karar kriterleri, backup policy, restore/restore-drill
