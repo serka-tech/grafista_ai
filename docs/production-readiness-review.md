@@ -1471,6 +1471,57 @@ staging deploy + KIE_AI_API_KEY ile gerçek görsel üretimi / worker
 davranışı / managed restore drill'den birini seçip yürütmek — production
 karar noktası bunların hepsinden SONRA.
 
+## 26. Implementation status update (Dashboard Plan + Worker Verification + Restore Preflight — Production Step 18)
+
+**Bu adım readiness seviyesini yükseltti — canlı deploy/çalıştırma YOK,
+kod değişikliği YOK.** Kullanıcı kararı: dashboard servisi henüz
+oluşturulmadı, kapsam plan+readiness. Üç alan 3 paralel Sonnet sub-agent
+ile kaynak-doğrulandı; tam detay `docs/deployment-runbook.md` §27.
+
+**Bu adımın netleştirdiği şey:**
+
+- **Dashboard staging deploy PLANI hazır (servis yok).** Native Node
+  runtime, build `pnpm install --frozen-lockfile && pnpm run build`, start
+  `next start -p $PORT`, tek env `NEXT_PUBLIC_API_URL` (artık biliniyor:
+  `https://grafista-api-staging.onrender.com`). **Yeni readiness bulgusu +
+  çözümü:** dashboard'ın dedike health route'u yok ve middleware oturumsuz
+  `/`'i `/login`'e redirect ediyor → Render health-check'i **`/login`**'e
+  ayarla (oturumsuz 200 döner, sıfır kod). Kalan iş tamamen Render panel
+  aksiyonu.
+- **Worker davranışı KODDAN doğrulandı — canlı gözlem gereksiz/mümkün
+  değil.** `RENDER_QUEUE_ENABLED=false` iken worker loop `render-worker.ts:337`
+  self-gate ile hemen döner (poll/heartbeat/sweep YOK); render'lar
+  `render-engine.ts:226-272` ile senkron istek-içi çalışır. Health check'ler
+  (`health.ts:117,149`) queue kapalıyken yapısal olarak `ok`+"not
+  applicable" döner — canlıdaki `renderQueue/workerHeartbeat:ok` doğru,
+  sorun maskelenmemiş. **Sonuç: queue kapalı = degrade değil, PASİF
+  (rendering fonksiyonel).** Gerçek heartbeat/stale-lock gözlemi ancak
+  `RENDER_QUEUE_ENABLED=true`+restart ile mümkün (prosedür §27b; bu adımda
+  bilinçli YAPILMADI).
+- **Managed restore drill güvenli PREFLIGHT hazır — YIKICI çalıştırma
+  YOK.** Mevcut `restore-drill-staging.sh` yalnız local Docker'a çalışır ve
+  yıkıcıdır; Render/R2'ye yapısal olarak dokunamaz (kullanılmamalı).
+  Managed prosedür (`backup-restore-runbook.md` §15b) hâlâ taslak, §15c
+  boş; §15d preflight bu adımda güncellendi (infra kalemleri artık fiilen
+  doğru, ama dashboard eksik + insan-süreç maddeleri açık).
+
+**AÇIK kalan (Step 19'a — production hâlâ BLOKEDE):**
+
+- `KIE_AI_API_KEY` eksik — bilinçli blokaj (gerçek görsel üretimi kapalı).
+- Dashboard servisi oluşturulmadı (plan hazır).
+- Worker canlı gözlemi (queue açık) yapılmadı (prosedür hazır).
+- Managed restore drill çalıştırılmadı (preflight hazır, §15c boş).
+- Production deploy AÇILMADI, kod değişmedi, migration eklenmedi.
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** Üç temel infra gate'i
+(deploy/health, DB migration, R2 storage) Step 15-17'de yeşildi; Step 18
+kalan üç readiness alanının (dashboard, worker, restore) PLAN/PREFLIGHT
+seviyesini kapattı ama hiçbirini CANLI tamamlamadı. **Production hâlâ
+BLOKEDE.** **Step 19'a geçilebilir** — ama Step 19 artık bir CANLI
+yürütme adımı olmalı (dashboard'ı gerçekten deploy et, VEYA KIE ile
+gerçek görsel hattını aç, VEYA queue'yu açıp worker'ı gözlemle) — plan
+aşaması bitti, sıradaki değer yalnız gerçek çalıştırmadan gelir.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

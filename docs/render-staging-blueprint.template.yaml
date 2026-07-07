@@ -169,13 +169,10 @@ services:
     plan: <RENDER_PLAN_TBD>
     region: <RENDER_REGION_TBD>
     autoDeployTrigger: off
-    # No healthCheckPath override — apps/dashboard has no dedicated
-    # health endpoint (docs/production-readiness-review.md §20's
-    # recorded gap); Render's default root-path check applies, unverified
-    # against real behavior.
+    healthCheckPath: /login # RESOLVED in Production Step 18 (was: "no override, default root-path, unverified"). apps/dashboard has no dedicated health route, and its middleware (apps/dashboard/src/middleware.ts:15-18) REDIRECTS any cookie-less request for "/" to /login (302) — so Render's default root-path check could see a redirect, not a 200. /login is the one path the middleware explicitly allows without a session cookie (`pathname !== '/login'`) and returns a real 200. Using it as the health target sidesteps the redirect-vs-200 ambiguity with zero code. (Alternative if a cleaner semantic is wanted at deploy time: add a /healthz route AND exclude it from the middleware matcher — but /login is sufficient and code-free.) See docs/deployment-runbook.md §27a.
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        sync: false # grafista-api-staging's own Render URL — CIRCULAR with that service's API_CORS_ORIGIN above: both need each other's final URL, so both are sync:false placeholders here, filled in manually once both services exist and their URLs are known (Render assigns URLs at service creation, before this value can be known)
+        sync: false # grafista-api-staging's own Render URL. Production Step 16-17 UPDATE: the API side is now LIVE at https://grafista-api-staging.onrender.com, so the dashboard->API direction of the old circular dependency is now RESOLVABLE (set this to that URL). The API->dashboard direction (grafista-api-staging's own API_CORS_ORIGIN) still needs THIS dashboard service's Render URL, which only exists after this service is created — so provision order: create dashboard -> take its URL -> set the API service's API_CORS_ORIGIN to it (this NEXT_PUBLIC_API_URL is already known). See docs/deployment-runbook.md §27a.
 
 # ── Worker: NOT a services: entry, intentionally ─────────────────────
 # This repo's render worker (apps/api/src/services/render-worker.ts) is

@@ -1924,6 +1924,135 @@ pnpm --filter @grafista/api run smoke:providers -- storage
 
 ---
 
+## 27. Dashboard Deploy Plan + Worker Behavior + Restore Drill Preflight (Production Step 18)
+
+> **Bu adım readiness seviyesini yükseltir — canlı deploy/çalıştırma YOK.**
+> Dashboard staging servisi henüz OLUŞTURULMADI (kullanıcı kararı: bu adım
+> plan+readiness); worker davranışı KODDAN doğrulandı (canlı gözlem queue
+> kapalıyken zaten mümkün değil); managed restore drill için yalnız güvenli
+> preflight hazırlandı, YIKICI hiçbir şey çalıştırılmadı. Bu adımda kod
+> değişikliği YOK, gerçek secret değeri hiçbir yere yazılmadı. Üç alanın
+> analizi 3 paralel Sonnet sub-agent ile yapıldı, ana context'e yalnız
+> yapılandırılmış özet alındı.
+
+### 27a. Dashboard staging deploy PLANI (servis henüz yok)
+
+Kod gerçekleri (sub-agent, kaynak-doğrulandı):
+- **Dockerfile YOK** (`apps/dashboard`) — bilinçli; Render native Node
+  runtime yolu seçili (§18b/blueprint). Next.js için Dockerfile gerekmiyor.
+- **API adresi:** dashboard yalnız `NEXT_PUBLIC_API_URL`'i okuyor
+  (`apps/dashboard/src/lib/api.ts:1`, default `http://localhost:4000`).
+  `next.config.js`'teki rewrite yalnız dev'e özgü, staging runtime'ı
+  etkilemiyor.
+- **Dedike health endpoint YOK** — `apps/dashboard/src/app` altında hiçbir
+  `route.ts`/health route yok (`api.ts:228`'deki `health` yardımcısı
+  BACKEND'in `/api/health`'ini çağırır, dashboard'ın kendi route'u değil).
+
+**Deploy komutları (blueprint ile aynı):**
+- Build: `pnpm install --frozen-lockfile && pnpm run build`
+- Start: `pnpm --filter @grafista/dashboard exec next start -p $PORT`
+- Runtime: Render **native Node** (Docker değil), branch `phase-2-checkpoint`.
+
+**Env (Render panel — present/missing olarak, değer YOK):**
+- `NEXT_PUBLIC_API_URL` = **artık biliniyor**: `https://grafista-api-staging.onrender.com`
+  (API Step 16-17'de canlı — §24/§26). Step 13 blueprint'inde bu değer
+  "circular dependency, henüz bilinmiyor" diye placeholder'dı; API canlı
+  olduğu için circular bağımlılığın dashboard→API yönü ARTIK ÇÖZÜLEBİLİR.
+- API tarafında `API_CORS_ORIGIN` = dashboard'ın Render URL'i — bu HÂLÂ
+  bilinmiyor (dashboard servisi oluşana kadar). Yani circular'ın API→dashboard
+  yönü dashboard oluşturulunca kapanır: dashboard oluştur → URL'ini al →
+  API servisinin `API_CORS_ORIGIN`'ine gir → dashboard'ın
+  `NEXT_PUBLIC_API_URL`'i zaten API URL'i.
+
+**⚠️ Health-check readiness bulgusu (yeni, çözümüyle):** Render bir web
+service için varsayılan health check'i kök path `/`'e atar. Ama dashboard
+middleware'i (`apps/dashboard/src/middleware.ts:15-18`) oturum cookie'si
+OLMAYAN her isteği (kök `/` dahil) `/login`'e REDIRECT eder (302). Render'ın
+varsayılan check'i redirect'i sağlıklı sayar mı — DOĞRULANMADI (blueprint'in
+"unverified" notu). **Güvenli çözüm (sıfır kod):** Render'da dashboard
+servisinin **healthCheckPath = `/login`** olarak ayarla — `/login`
+middleware tarafından açıkça izinli (satır 15 `pathname !== '/login'`) ve
+oturumsuz **200** döner, redirect değil. (Alternatif, deploy anında
+uygulanabilir küçük kod: middleware matcher'ından muaf tutulmuş bir
+`/healthz` route'u eklemek — ama `/login` yolu sıfır-kod ve yeterli.)
+
+**Deploy READINESS özeti:** dashboard "designed but not provisioned" —
+plan tam, tek gerçek çözülmemiş readiness kalemi health-check path'iydi,
+o da yukarıda çözüldü (healthCheckPath=`/login`). Kalan işler tamamen
+Render panel aksiyonları (servis oluştur, iki env değerini gir), kod
+değişikliği gerektirmiyor.
+
+### 27b. Worker davranışı — KODDAN doğrulandı (canlı gözlem queue kapalıyken mümkün değil)
+
+Sub-agent kaynak-doğrulaması (`RENDER_QUEUE_ENABLED=false`, canlı staging
+durumu):
+- **Worker loop DORMANT (pasif):** `index.ts:31` `startRenderWorkerLoop()`'u
+  koşulsuz çağırır AMA fonksiyon kendi içinde gate'li
+  (`render-worker.ts:337` `if (!isRenderQueueEnabled()) return;`) — flag
+  false iken hemen döner: `setInterval` YOK, poll YOK, heartbeat yazımı YOK,
+  stale-lock sweep YOK. Hiçbir `render_worker_heartbeats` satırı yazılmaz.
+- **Render'lar yine ÇALIŞIR — senkron, istek-içi:** `render-engine.ts:226-272`
+  else dalı job'ı doğrudan `rendering`'e alıp `runRenderPipeline`'ı aynı
+  HTTP isteği içinde inline çalıştırır ve terminal sonucu döndürür (Step 5A
+  öncesi tam-senkron davranış). Yani **queue kapalı = worker/queue özelliği
+  için PASİF, ama rendering tamamen FONKSİYONEL (senkron).**
+- **Health check'ler doğru raporluyor (bug değil):** `health.ts`
+  `checkRenderQueue` (satır 117) ve `checkWorkerHeartbeat` (satır 149)
+  flag false iken DB'ye hiç sormadan `ok` + "not applicable"/"disabled,
+  renders run synchronously" döner. Yani queue kapalıyken bu iki check
+  yapısal olarak `degraded` DÖNEMEZ — canlıdaki
+  `renderQueue:ok`/`workerHeartbeat:ok` beklenen/doğru, bir sorunu
+  maskelemiyor.
+- **Sonuç (görev item 6):** Queue kapalıyken sistem **degrade değil,
+  PASİF** olmalı ve öyle — rendering senkron çalışıyor, worker altyapısı
+  kasıtlı uykuda. Bu bilinçli, doğru bir mod.
+
+**Worker'ı gerçek ortamda GÖZLEMLEMEK için (queue AÇILDIĞINDA — bu adımın
+kapsamı DIŞI, gelecek adım için prosedür):** `RENDER_QUEUE_ENABLED=true`
+set + servis restart → başlangıç log'u `[render-worker] starting poll loop`
+→ `GET /api/health/ready` `workerHeartbeat` bir poll aralığı (varsayılan
+~3sn) içinde `degraded`→`ok`'a döner (her tick heartbeat yazar). Stale-lock
+recovery'yi hızlı görmek için `RENDER_JOB_STALE_LOCK_MS`'i düşür (örn.
+5000), bir `rendering` satırını eskit, `renderQueue.details.staleLockedCount`
+`>0`→`0` geçişini izle. **Bu adımda YAPILMADI** — queue bilinçli kapalı
+tutuldu (canlı deneme + restart, ayrı ve kasıtlı bir gelecek kararı).
+
+### 27c. Managed restore drill — GÜVENLİ preflight (YIKICI çalıştırma YOK)
+
+Sub-agent kaynak-doğrulaması:
+- **Mevcut `scripts/restore-drill-staging.sh` SADECE local Docker'a çalışır**
+  ve YIKICIDIR (`docker compose down -v`). Render Postgres/R2'ye
+  YAPISAL OLARAK dokunamaz: `DATABASE_URL`/`S3_*` hiç okumaz, tüm işlemler
+  `docker compose exec` ile yerel `postgres`/`api` container'larına gider,
+  hiçbir AWS/Render/Cloudflare API çağrısı yok. 4 güvenlik guard'ı
+  (NODE_ENV≠production, DATABASE_URL localhost kontrolü, compose dosyası
+  varlığı, `grafista_staging_local_only` marker'ı) + `trap ... EXIT`.
+  **Sonuç: bu script'i Render/R2'ye karşı çalıştırMAK ne mümkün ne
+  amaçlanmış — Step 18 için doğru çıktı bir EXECUTION değil, preflight +
+  yazılacak managed prosedür.**
+- **Managed prosedür (`docs/backup-restore-runbook.md` §15b) hâlâ TASLAK**
+  (prose, sıfır çalıştırılabilir komut — sağlayıcı-spesifik CLI seçim
+  yapılmadan yazılamaz); **§15c (sonuç kaydı) hâlâ BOŞ.**
+- **§15d preflight (6 madde) bu adımda GÜNCELLENDİ** — infra tarafı
+  kalemlerin çoğu artık gerçekten karşılanıyor (Render API/Postgres
+  canlı+healthy, R2 canlı+roundtrip PASS, env/secrets `/api/health/ready`
+  ile doğrulandı) ama checklist dokümanı bunu yansıtmıyordu; ayrıca
+  dashboard deploy edilmediği için "3 servis de ayakta" maddesi hâlâ tam
+  değil, ve insan-süreç maddeleri (2-kişi staging teyidi, bu drill'e özgü
+  sentetik-veri taahhüdü, zaman/sahip ataması) hâlâ açık. Detay o dokümanda.
+
+### 27d. Kalan blokajlar / Step 19'a
+
+- **`KIE_AI_API_KEY` eksik — bilinçli blokaj** (§26f, değişmedi): gerçek
+  görsel üretimi kapalı.
+- Dashboard servisi henüz OLUŞTURULMADI — plan hazır (§27a), canlı deploy
+  kullanıcının kararı.
+- Worker canlı gözlemi (queue açık) YAPILMADI — prosedür hazır (§27b).
+- Managed restore drill ÇALIŞTIRILMADI — preflight hazır (§27c), §15c boş.
+- **Production deploy AÇILMADI.**
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

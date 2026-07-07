@@ -760,6 +760,35 @@ başlanmamalı:
 **Bu liste tamamlanmadan §15c boş kalmaya devam edecek — bu Step 14'ün
 kendi bulgusu değil, §14'ün zaten koyduğu gate'in doğrudan devamı.**
 
+**GÜNCELLEME (Production Step 18) — preflight'ın gerçek durumu:** Render
+Postgres + API + Cloudflare R2 Step 15-17'de gerçekten canlıya alındı ve
+doğrulandı, bu yüzden yukarıdaki maddelerin bir kısmı ARTIK fiilen doğru
+(ama drill hâlâ ÇALIŞTIRILMADI, §15c hâlâ boş):
+
+- **Madde 1 (3 servis ayakta + health PASS): KISMEN.** `grafista-postgres-staging`
+  + `grafista-api-staging` canlı, `/api/health` PASS
+  (`docs/deployment-runbook.md` §25/§26). **AMA `grafista-dashboard-staging`
+  HÂLÂ OLUŞTURULMADI** (§27a — plan hazır, deploy edilmedi) → bu madde tam
+  işaretlenemez.
+- **Madde 2 (R2 checklist): FİİLEN DOĞRU.** R2 canlı put/get/delete
+  roundtrip PASS (`bucket=grafista-staging-assets`, §26c) — ama §22'nin
+  checklist kutuları belgede işaretlenmedi.
+- **Madde 3 (env/secrets + health/ready ok): DOĞRU.** `/api/health/ready`
+  `database:ok` + `storage:ok` gerçek staging URL'ine karşı (§26d).
+- **Madde 4 (sentetik veri taahhüdü): AÇIK** — ilke var, bu drill'e özgü
+  operasyonel karar verilmedi.
+- **Madde 5 (2-kişi staging teyidi): AÇIK** — yapılmadı/kaydedilmedi.
+- **Madde 6 (zaman/sorumlu + §15c'ye kayıt): AÇIK.**
+
+**Kritik güvenlik notu (Step 18):** `scripts/restore-drill-staging.sh`
+managed Render/R2 için KULLANILAMAZ — yalnız local Docker compose stack'ine
+çalışır ve `docker compose down -v` ile YIKICIDIR; Render Postgres/R2'ye
+yapısal olarak dokunamaz (ne `DATABASE_URL`/`S3_*` okur ne cloud API çağırır).
+Yani managed drill için ne bu script çalıştırılmalı ne de Render/R2'ye
+yönlendirilmeye çalışılmalı — §15b'nin sağlayıcı-spesifik managed prosedürü
+AYRI ve henüz YAZILMADI (taslak). Step 18 bilinçli olarak yalnız bu
+preflight'ı güncelledi, hiçbir drill çalıştırmadı.
+
 ---
 
 ## İlgili dokümanlar
