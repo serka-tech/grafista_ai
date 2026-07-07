@@ -1830,6 +1830,100 @@ değişmedi (öneriler hâlâ geçerli), yalnız canlı gerçek not düşüldü.
 
 ---
 
+## 26. Staging DB Migration + R2 Live Roundtrip Gate (Production Step 16→17)
+
+> **§25'in bıraktığı iki açık gate — DB migration/şema ve R2 canlı
+> roundtrip — bu adımda KAPANDI.** Migration+seed Render Shell'de gerçek
+> Render Postgres'e karşı çalıştırıldı; R2 put/get/delete roundtrip'i
+> gerçek `grafista-staging-assets` bucket'ına karşı PASS verdi. İki commit
+> deploy edildi (`d784185`, `fe61a2d`). Bu adımda gerçek secret değeri
+> hiçbir yere yazılmadı — migration/R2 secret'ları Render/Cloudflare
+> panelinde kaldı.
+
+### 26a. Render Shell'de çalıştırılan komutlar (operatör, staging container içinde)
+
+`grafista-api-staging` → **Shell** (container'da kod + `DATABASE_URL` +
+S3/R2 env'leri Render tarafından enjekte, elle secret girilmedi):
+```
+pnpm --filter @grafista/api run db:migrate
+pnpm --filter @grafista/api run db:seed
+pnpm --filter @grafista/api run smoke:providers -- storage
+```
+
+### 26b. DB migration / schema gate — PASS (bağımsız doğrulandı)
+
+- `db:migrate` gerçek Render Postgres'e karşı çalıştı.
+- **Bağımsız doğrulama (bu oturumdan, secret'sız):** migration ÖNCESİ
+  `POST /api/auth/login` (bogus credential) `500 relation "users" does
+  not exist` veriyordu; migration SONRASI aynı istek `401 Invalid email
+  or password` veriyor. Bu 500→401 geçişi, `users` tablosunun (ve dolayısıyla
+  migration'ın gerçekten uygulandığının) doğrudan kanıtı — bu doğrulama
+  yalnız public HTTP endpoint'i kullanır, gerçek DB'ye/secret'a hiç
+  dokunmaz. `login` handler'ı `usersRepo.findByEmail` (users tablosu)
+  çağırdığı için bu temiz bir şema-probe'u (`apps/api/src/routes/auth.ts`).
+- `db:seed` (Flavora örnek client) çalıştırıldı — operatör raporuna göre
+  başarılı; bu oturumdan bağımsız olarak seed'e özgü ayrı bir signal
+  probe edilmedi (seed verisi authenticated endpoint'ler ardında, ve bu
+  adımda `db:seed-admin` login kullanıcısı bilinçli oluşturulmadı).
+
+### 26c. R2 canlı roundtrip gate — PASS
+
+- **İlk deneme FAIL etti ve gerçek bir config sorununu ortaya çıkardı**
+  (bu, Step 17'nin storage-smoke fix'inin ÇALIŞTIĞININ kanıtı — smoke
+  artık gerçekten R2'yi test ediyor, eskiden sessizce local disk'i test
+  edip yanıltıcı PASS veriyordu): `[smoke] storage FAIL s3 roundtrip
+  threw: S3 upload failed: Invalid URL`.
+- **Kök neden:** `S3_ENDPOINT` env'i geçerli bir absolute URL değildi
+  (AWS SDK'nın parse edemediği bir değer — büyük olasılıkla `https://`
+  şeması eksik veya placeholder). Diğer 4 zorunlu S3 var'ı mevcuttu
+  (değilse hata "required env var(s) missing" olurdu). Kod tarafı fix
+  (`fe61a2d`): factory artık `S3_ENDPOINT`'i önden doğruluyor ve değeri
+  LOGLAMADAN (R2 account id içerir) net bir hata veriyor
+  (`apps/api/src/storage/factory.ts`).
+- **Operatör düzeltmesi (Render panel):** `S3_ENDPOINT`
+  `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` formatına getirildi;
+  R2 Access Key ID / Secret, Cloudflare R2 Account API Token'dan
+  yenilendi.
+- **Sonuç (gerçek Render Shell çıktısı, düzeltme SONRASI):**
+  `[smoke] storage PASS s3 put/get/delete roundtrip ok
+  (bucket=grafista-staging-assets)` — `1 pass, 0 fail`. Bu roundtrip
+  gerçek bir nesneyi R2'ye yazıp okuyup sildiği için, R2 connectivity +
+  credential + bucket erişimi CANLI doğrulandı. (Not: `/api/health/ready`
+  `storage` check'i tasarım gereği hâlâ yalnız "config present" der —
+  canlı roundtrip kanıtı bu smoke çıktısıdır, health endpoint'i değil.)
+
+### 26d. Bu adımın canlı health durumu (bağımsız curl, düzeltme sonrası)
+
+| Endpoint | Sonuç |
+|---|---|
+| `GET /api/health` | 200 `status:ok` |
+| `GET /api/health/ready` | 200 `degraded` — `database:ok`, `storage:ok`(config-presence), `providers:degraded`(kie missing), `renderQueue/workerHeartbeat:ok`(queue kapalı), `playwright:ok` |
+| Schema probe (`POST /api/auth/login`, bogus) | 401 (şema mevcut) |
+
+### 26e. Kod değişiklikleri (2 commit, ci:stable 444/444)
+
+- **`d784185`** — storage smoke artık `getStorageProvider()` ile
+  YAPILANDIRILAN provider'ı test ediyor (Render'da `s3` → gerçek R2
+  roundtrip); `StorageProvider` arayüzüne + iki implementasyona
+  `deleteObject` eklendi (idempotent). 5 yeni unit test.
+- **`fe61a2d`** — factory'de `S3_ENDPOINT` absolute-URL validation'ı
+  (secret'sız, açık hata) + `.env.example`'da https:// şema/R2 endpoint
+  formatı netleştirildi. 6 yeni unit test.
+
+### 26f. Kalan açık kalemler (Step 18'e)
+
+- **`KIE_AI_API_KEY` eksik — bilinçli blokaj:** `/api/health/ready`
+  `providers:degraded`; gerçek görsel üretimi (KIE) bu env girilmeden
+  çalışmaz. Boot blocker değil; bilinçli olarak açık bırakıldı.
+- Dashboard (`grafista-dashboard-staging`) deploy edilmedi.
+- Worker davranışı (`RENDER_QUEUE_ENABLED=false`) gerçek ortamda hâlâ
+  gözlemlenmedi (§7'nin açık kalemi, drift §25f).
+- Managed staging restore drill yapılmadı
+  (`docs/backup-restore-runbook.md` §15c hâlâ boş).
+- Production deploy AÇILMADI.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

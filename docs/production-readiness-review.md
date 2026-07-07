@@ -1426,6 +1426,51 @@ BLOKEDE.** **Sıradaki somut adım:** Render Shell'de `db:migrate`+`db:seed`
 çalıştırmak (§25d) ve R2 canlı roundtrip'ini doğrulamak (§25e); ikisi de
 PASS olmadan dashboard/restore-drill/production adımlarına geçilmez.
 
+## 25. Implementation status update (Staging DB Migration + R2 Live Roundtrip Verified — Production Step 16→17)
+
+**§24'ün bıraktığı iki açık gate — DB migration/şema ve R2 canlı roundtrip
+— bu adımda KAPANDI.** Tam kök-neden + komut dökümü
+`docs/deployment-runbook.md` §26'da — burada yalnız production-gate özeti.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **DB migration/schema gate: PASS.** `db:migrate` Render Shell'de gerçek
+  Render Postgres'e karşı çalıştı. Bağımsız doğrulama (bu oturumdan,
+  secret'sız): bogus login şema-probe'u migration ÖNCESİ `500 relation
+  "users" does not exist`, SONRASI `401 Invalid email or password` —
+  500→401 geçişi `users` tablosunun oluştuğunun doğrudan kanıtı. `db:seed`
+  (Flavora örnek client) çalıştırıldı.
+- **R2 canlı roundtrip gate: PASS.** İlk deneme gerçek bir config sorununu
+  (`S3_ENDPOINT` geçersiz URL → AWS SDK "Invalid URL") ortaya çıkardı —
+  bu, Step 17'nin storage-smoke fix'inin çalıştığının kanıtı (smoke artık
+  local disk yerine gerçekten R2'yi test ediyor). Operatör `S3_ENDPOINT`'i
+  düzeltip R2 credential'larını yeniledikten sonra gerçek Render Shell
+  çıktısı: `storage PASS s3 put/get/delete roundtrip ok
+  (bucket=grafista-staging-assets)`. Gerçek nesne R2'ye yazıldı/okundu/
+  silindi — connectivity+credential+bucket CANLI doğrulandı.
+- **Kod (2 commit, ci:stable 444/444):** `d784185` (smoke gerçek
+  provider'ı test ediyor + `deleteObject`), `fe61a2d` (`S3_ENDPOINT`
+  secret-safe URL validation). İkisi de push edildi.
+
+**AÇIK kalan (Step 18'e — production hâlâ BLOKEDE):**
+
+- **`KIE_AI_API_KEY` eksik — bilinçli blokaj.** `providers:degraded`;
+  gerçek görsel üretimi bu env girilmeden çalışmaz. Boot blocker değil.
+- Dashboard deploy edilmedi; worker davranışı (`RENDER_QUEUE_ENABLED=false`)
+  gerçek ortamda gözlemlenmedi; managed restore drill yapılmadı
+  (`docs/backup-restore-runbook.md` §15c hâlâ boş).
+- Hiçbir production deploy yapılmadı, hiçbir yeni ürün özelliği eklenmedi.
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** Staging API artık
+CANLI + şemalı DB + doğrulanmış R2 storage ile çalışıyor — üç temel
+altyapı gate'i (deploy/health, DB migration, R2 storage) yeşil.
+**Ama production'a HAZIR DEĞİL** — dashboard deploy, worker doğrulaması,
+managed restore drill ve KIE gerçek-provider hattı hâlâ açık. **Production
+deploy hâlâ BLOKEDE.** **Sıradaki somut adım (Step 18):** dashboard
+staging deploy + KIE_AI_API_KEY ile gerçek görsel üretimi / worker
+davranışı / managed restore drill'den birini seçip yürütmek — production
+karar noktası bunların hepsinden SONRA.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
