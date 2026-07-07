@@ -56,8 +56,37 @@ export function getStorageProviderByName(name: StorageProviderName): StorageProv
     );
   }
 
+  // S3_ENDPOINT is optional (real AWS S3 derives its endpoint from the region),
+  // but when set — as it must be for Cloudflare R2, MinIO, etc. — a malformed
+  // value makes the AWS SDK throw a bare, contextless "Invalid URL" only later,
+  // at the first request (Production Step 17 hit exactly this against R2). Fail
+  // fast here with a message that names the offending var and the expected
+  // shape, WITHOUT echoing the value (it embeds the R2 account id — treat it as
+  // non-loggable). `endpoint` is also trimmed so stray copy/paste whitespace
+  // isn't itself the cause.
+  const endpoint = S3_ENDPOINT?.trim();
+  if (endpoint) {
+    let parsed: URL;
+    try {
+      parsed = new URL(endpoint);
+    } catch {
+      throw new StorageError(
+        'STORAGE_PROVIDER=s3 but S3_ENDPOINT is not a valid absolute URL. It must include the scheme, ' +
+          'e.g. https://<ACCOUNT_ID>.r2.cloudflarestorage.com for Cloudflare R2. (value hidden)',
+        500
+      );
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new StorageError(
+        `STORAGE_PROVIDER=s3 but S3_ENDPOINT uses an unsupported scheme "${parsed.protocol}" — use https://, ` +
+          'e.g. https://<ACCOUNT_ID>.r2.cloudflarestorage.com for Cloudflare R2.',
+        500
+      );
+    }
+  }
+
   return new S3StorageProvider({
-    endpoint: S3_ENDPOINT,
+    endpoint,
     region: S3_REGION!,
     bucket: S3_BUCKET!,
     accessKeyId: S3_ACCESS_KEY_ID!,
