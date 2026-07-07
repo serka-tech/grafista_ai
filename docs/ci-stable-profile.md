@@ -1,20 +1,21 @@
-# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4, 405-flake root-caused in Step 5, substantially reduced in Step 6, remote-runner package added in Step 7)
+# Grafista AI Studio — CI Stable Test Profile (Production Step 3, hardened in Step 4, 405-flake root-caused in Step 5, substantially reduced in Step 6, remote-runner package added in Step 7, remote validation EXECUTED in Step 8)
 
-> **Status: scripts + docs, plus real source fixes from Production Steps 4
-> and 6, plus a real (but still dormant) `.github/workflows/stable-ci.yml`
-> from Production Step 7** (see "Production Step 4"/"Production Step
-> 5"/"Production Step 6"/"Production Step 7" sections below for the full,
-> honest account — Step 4 fixed a confirmed DB pool leak but did NOT
-> eliminate flakiness; Step 5 root-caused the remaining 405/403/404/"socket
-> hang up" flake to an external ephemeral-port collision with an unrelated
-> process on the developer machine, without fixing it; Step 6 applied the fix
-> Step 5 identified and measured 6 clean full-suite `test:ci` runs out of 7
-> attempts afterward — up from ~1-in-3-to-6 before, but the flake recurred
-> once within Step 6's own validation, so it is reduced, not eliminated; Step
-> 7 committed the workflow file itself (superseding the "why no GitHub
-> Actions file yet" decision below — see "Production Step 7: workflow file
-> decision" for why) and defined the protocol for actually trusting a remote
-> run once this repo has a GitHub remote to push to). Continues
+> **Status: both GitHub Actions jobs (`stable`, `staging-smoke`) are now
+> candidate merge gates, validated against a real GitHub remote** — see
+> "Production Step 8 — Remote Runner Validation Protocol EXECUTED" below for
+> the full run log and the three real, deterministic CI-environment bugs
+> Step 8 found and fixed (none of them the local ephemeral-port flake, which
+> did not recur even once across 8 real runs). Earlier history, for full
+> context (see "Production Step 4"/"Production Step 5"/"Production Step
+> 6"/"Production Step 7" sections below for the full, honest account): Step
+> 4 fixed a confirmed DB pool leak but did NOT eliminate flakiness; Step 5
+> root-caused the remaining 405/403/404/"socket hang up" flake to an
+> external ephemeral-port collision with an unrelated process on the
+> developer machine, without fixing it; Step 6 applied the fix Step 5
+> identified and measured 6 clean full-suite `test:ci` runs out of 7
+> attempts afterward locally; Step 7 committed the workflow file itself and
+> defined the Remote Runner Validation Protocol; Step 8 actually executed
+> that protocol for the first time, against a real GitHub remote. Continues
 > [`docs/staging-compose.md`](./staging-compose.md) (Production Step 2/2B/2C)
 > and [`docs/deployment-runbook.md`](./deployment-runbook.md) — neither is
 > re-derived here.
@@ -500,16 +501,126 @@ and explicitly does **not** substitute for the Remote Runner Validation
 Protocol above — it is a local, single-machine data point, exactly the kind
 of signal Steps 3–6 already showed is not sufficient on its own.
 
-### No production deploy until remote CI validation
+### Production Step 8 — Remote Runner Validation Protocol EXECUTED (5/5+ clean, both jobs)
 
-Restated here, not just in `docs/production-readiness-review.md` (§15), so
-it is visible from whichever doc is opened first: **no production deployment
-proceeds until the Remote Runner Validation Protocol above has actually been
-executed against a real GitHub Actions runner and produced a 5/5 (or
-honestly-reported partial) result.** A local `ci:stable` pass — on this
-machine or any other developer's machine — does not substitute for this; the
-whole documented history above (Steps 3–6) is direct evidence of why a local
-result alone is not sufficient signal.
+**This is the first time this repo actually had a GitHub remote to validate
+against.** `git remote add origin` was run, `phase-2-checkpoint` was pushed
+(after the user gave explicit approval for both the remote add and the
+push — no destructive/irreversible action was taken without that
+confirmation), and the Remote Runner Validation Protocol above was executed
+for real, not just planned.
+
+**The first real run immediately found — and this step fixed — three
+genuine, 100%-deterministic bugs, none of them the previously-documented
+ephemeral-port flake.** All three were invisible on the developer's own
+machine only because of leftover state from earlier manual sessions
+(`dist/` output, a `.env.staging` file, a cached Docker layer) — exactly the
+scenario this whole protocol exists to catch. Each was root-caused with
+direct evidence (not guessed) and fixed only after explicit user approval,
+per this step's own constraint on config changes:
+
+1. **`ci:stable` ran `typecheck` before `build`** — but `apps/api`/
+   `apps/dashboard` resolve the internal workspace packages' types via each
+   package's `types` field, which points at `./dist/index.d.ts`, populated
+   only by `build`. 100% reproducible on a genuine fresh clone (verified:
+   `typecheck` failed with `Cannot find module '@grafista/schemas'` before
+   the fix, and passed once `build` had run first). **Fix:** reordered
+   `ci:stable` to `build && typecheck && lint && test:ci` in root
+   `package.json` (commit `4993f28`).
+2. **`ci:staging`'s Compose stack requires `.env.staging`**, gitignored by
+   design (holds a developer-filled `AUTH_SECRET`) and never created by CI.
+   **Fix:** a new workflow step generates it from `.env.staging.example`
+   with a random, disposable `AUTH_SECRET` (`openssl rand -hex 32`), scoped
+   only to that job's ephemeral, torn-down-on-exit stack — no real secret,
+   nothing added to GitHub Secrets (commit `b216583`). This fix alone wasn't
+   sufficient — the next run failed differently (see #3), so a second,
+   separate diagnostics-only fix (commit `a299d9e`) was needed first: the
+   health-check loop used `docker compose ps -q` (running containers only),
+   so a container that crashed and exited between polls silently vanished
+   from the health count instead of being flagged, and no container logs
+   were ever captured before teardown. Verified via a forced-failure
+   injection (invalid `AUTH_SECRET`, matching this doc's own Step 3
+   forced-failure precedent) that the loop now fails fast and the crash
+   reason actually appears in the CI log.
+3. **`apps/api`'s own Dockerfile build step (`RUN pnpm --filter @grafista/api
+   run build`) silently produced no output on the GitHub Actions amd64
+   runner** — `Error: Cannot find module '/repo/apps/api/dist/index.js'` at
+   container boot, only visible once fix #2's diagnostics were in place.
+   This is the *exact* failure mode Production Step 2B documented for
+   `packages/schemas`/`model-router`/`prompt-engine` on this developer's own
+   Mac — but Step 2B's fix (host-build-then-copy) was only ever applied to
+   those 3 packages, on the assumption the bug was specific to "this Docker
+   Desktop installation." **This run is direct evidence that assumption was
+   too narrow** — the identical class of bug hit a completely different
+   package on a completely different, genuinely fresh environment (amd64
+   Linux, not this Mac's arm64 Docker Desktop). **Fix:** applied the exact
+   same host-build-and-ship treatment to `apps/api` — removed `apps/*/dist/`
+   from `.dockerignore` and deleted the now-redundant in-container `tsc`
+   build step (commit `95c36d5`). Verified locally three ways before
+   pushing: full `ci-staging.sh` passed end-to-end on a fresh clone with a
+   clean rebuild; `docker run --entrypoint sh` on the built image directly
+   confirmed `/repo/apps/api/dist/index.js` exists (with the host build's
+   timestamp, proving it's the copied artifact); Node loads it without
+   error.
+
+**None of these three fixes touched product behavior, routes, or test
+expectations** — all three are build-order/CI-environment fixes, exactly
+within this step's scope.
+
+**Full run log (all runs against `phase-2-checkpoint`, `serka-tech/grafista_ai`):**
+
+| Run ID | Commit | `stable` job | `staging-smoke` job |
+|---|---|---|---|
+| 28846144007 | `fb30735` (pre-fix) | FAILURE (deterministic bug #1, not a flake sample) | FAILURE (deterministic bug #1, cascaded) |
+| 28847105359 | `4993f28` (fix #1) | **success** | FAILURE (bug #2, not yet fixed) |
+| 28848441633 | `b216583` (fix #2a) | **success** | FAILURE (bug #2b, undiagnosed) |
+| 28851431094 | `a299d9e` (fix #2b diagnostics) | **success** | FAILURE (bug #3, now diagnosed) |
+| 28852355872 | `95c36d5` (fix #3) | **success** | **success** |
+| 28852909977 | `a6b39c6` (workflow_dispatch add) | **success** | **success** |
+| 28853401263 | `a6b39c6` (manual trigger) | **success** | **success** |
+| 28853409931 | `a6b39c6` (manual trigger) | **success** | **success** |
+| 28853414631 | `a6b39c6` (manual trigger) | **success** | **success** |
+
+**Verdict, applying this doc's own protocol honestly:**
+- **`stable` job: 5/5 clean** counting only the runs after fix #1 (the last
+  one it needed) — actually **8/8 clean** across every run since. Per this
+  protocol's own step 2: **this qualifies as a candidate merge gate.** This
+  is the job the entire protocol above was written for (Steps 3–6's
+  ephemeral-port flake), and it has now run 8 times on real, independent
+  GitHub Actions runners with zero recurrence of that flake or anything
+  else.
+- **`staging-smoke` job: 5/5 clean** counting only the runs after fix #3
+  (its last needed fix) — the same 5/5 threshold, on a smaller total
+  history since this job needed two additional real fixes first. Also a
+  candidate merge gate, with the same caveat as always: 5 (or 8) clean runs
+  in one afternoon is a real, meaningful signal, not an infinite-sample
+  guarantee — if a spurious failure appears later, re-run once and classify
+  it per this doc's own signature-matching rules before assuming a
+  regression.
+- **The ephemeral-port flake this protocol was originally designed to catch
+  (Steps 3–6) did not recur even once** across 8 real runs — consistent
+  with Step 5's own hypothesis that the collision source
+  (`language_server_macos_arm`, this developer's own IDE background
+  process) has no reason to exist on a GitHub-hosted runner.
+
+**What this does NOT prove:** 8 (or 5) clean runs in one session, on one
+day, is a strong signal but still not an infinite-sample guarantee — the
+same epistemic humility this doc has applied to every local sample size
+throughout Steps 3–8 applies here too. If a spurious failure is ever
+observed on a future run, classify it per this section's step 5 rules
+before assuming either "it's fine, ignore it" or "the gate was wrong."
+
+### No production deploy until remote CI validation — RESOLVED (Production Step 8)
+
+The gate stated here since Production Step 7 — no production deployment
+until the Remote Runner Validation Protocol above actually executes against
+a real GitHub Actions runner and produces a 5/5 (or honestly-reported
+partial) result — **is now satisfied**: see the run log and verdict
+immediately above. Both `stable` and `staging-smoke` are candidate merge
+gates as of commit `a6b39c6`. This does not mean every future production
+readiness question is answered (see `docs/production-readiness-review.md`
+§16 for what remains) — only that the specific, narrow gate this doc
+imposed on remote CI trustworthiness is met.
 
 ## Why no GitHub Actions file yet (superseded by Production Step 7 — kept for history)
 
@@ -808,18 +919,34 @@ Docker-build minutes on a commit that already fails stable checks.
   share the embedded-Postgres-under-concurrent-vitest-workers architecture
   that `ci:stable`'s test step does, so it is not expected to inherit that
   risk, but it has a much smaller sample size than would be ideal.
+  **UPDATE (Production Step 8): this local-only reliability turned out to be
+  misleading, not wrong** — the very first real remote run found two
+  genuine, 100%-deterministic bugs in `ci:staging` (missing `.env.staging`,
+  and an `apps/api` Dockerfile build step that silently failed on amd64),
+  both invisible on this developer's machine purely because of leftover
+  state from earlier manual sessions. "Reliable in every local attempt" was
+  never false — it just wasn't testing what a genuinely fresh environment
+  tests. Both are now fixed and verified (see "Production Step 8" above);
+  the lesson generalizes beyond this one script.
 - **The Step 2C workaround is still in place and still unresolved at the
   root** — `packages/schemas`/`model-router`/`prompt-engine` must be
   host-built before `docker compose build`; `ci:staging` handles this
   correctly (`pnpm run build` runs first), but this remains a real
   constraint on the Docker build, not eliminated by this step.
-- **No GitHub Actions (or any other CI system) actually runs any of this
-  automatically yet** — the workflow file itself is now committed
-  (`.github/workflows/stable-ci.yml`, Production Step 7), but it is
-  necessarily dormant until this repo has a GitHub remote to push to; no run
-  of it has ever actually executed on a real runner, so the "5/5 clean"
-  Remote Runner Validation Protocol standard (Production Step 7, above) is
-  entirely unmet — 0 of the required 5 remote runs have happened.
+- **UPDATE (Production Step 8): GitHub Actions now runs this automatically,
+  and the "5/5 clean" standard IS met.** A GitHub remote was added and
+  `phase-2-checkpoint` pushed; `stable` has run 8 times on real runners
+  since its one needed fix, all 8 clean; `staging-smoke` needed two more
+  real fixes first (see "Production Step 8" section above for the full
+  root-cause writeups) and has run 5 times clean since its last one. The
+  ephemeral-port flake this whole protocol was designed to catch (Steps
+  3–6, local-machine only) **did not recur even once** across those 8 real
+  runs — consistent with Step 5's own hypothesis that the collision source
+  was specific to this developer's own machine (its IDE's background
+  process), not something inherent to the test suite. Both jobs are now
+  candidate merge gates. This entry is left in place (not deleted) as an
+  honest record of the "entirely unmet" state that existed for most of this
+  step's own duration, before the remote actually existed to test against.
 - **No real production deployment. No real production config.** Both
   profiles validate a disposable local/CI staging stack only
   (`RENDERER_PROVIDER=fake`, `AI_DEFAULT_PROVIDER=fake`,

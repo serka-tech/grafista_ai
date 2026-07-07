@@ -690,7 +690,20 @@ hâlâ en düşük öncelik, talep doğmadan gündeme alınmaz.
 
 ---
 
-## 14. GitHub remote eklendikten sonra ilk CI doğrulama adımları (Production Step 7)
+## 14. GitHub remote eklendikten sonra ilk CI doğrulama adımları (Production Step 7, GERÇEKTEN YÜRÜTÜLDÜ Production Step 8)
+
+> **GÜNCELLEME (Production Step 8): bu bölümün adımları artık gerçekten
+> uygulandı** — repo `git@github.com:serka-tech/grafista_ai.git`'e push
+> edildi (kullanıcı onayıyla), ve aşağıdaki 5-run protokolü gerçek bir
+> GitHub remote'a karşı çalıştırıldı. Tam sonuç, çalıştırma tablosu ve 3
+> bulunan/düzeltilen bug için bkz.
+> [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production Step
+> 8" bölümü — burada TEKRARLANMIYOR. Bu bölümün altındaki adım-adım komut
+> dizisi artık bir GELECEK tarifi değil, GERÇEKTEN İZLENMİŞ bir kayıt —
+> placeholder'lar (`<GITHUB_REPO_URL>`, `<OWNER>/<REPO>`) tarihsel doğruluk
+> için olduğu gibi bırakıldı, ama gerçek çalıştırmada bunların yerine
+> `git@github.com:serka-tech/grafista_ai.git` / `serka-tech/grafista_ai`
+> kullanıldı.
 
 > Bu bölüm [`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin
 > "Production Step 7 — CI Runner Readiness & Remote Validation Package"
@@ -732,15 +745,32 @@ done
 # 6. Başarısızlıkta CI_DEBUG_ROUTES ile tekrar koşma
 #    (docs/ci-stable-profile.md Adım 4 — hangi log sinyalini arayacağınız da orada)
 gh workflow run stable-ci.yml --repo <OWNER>/<REPO> -f CI_DEBUG_ROUTES=1
-# NOT: yukarıdaki `-f` sözdizimi yalnız workflow `workflow_dispatch` inputu
-# tanımlıyorsa çalışır; bugünkü stable-ci.yml'de YOK (yalnız push/pull_request
-# tetikleyicisi var, bkz. .github/workflows/stable-ci.yml). CI_DEBUG_ROUTES=1
-# ile tekrar koşmak istenirse, en pratik yol geçici bir commit'te
-# `env: { CI_DEBUG_ROUTES: '1' }`'i job seviyesinde eklemek, log'u
-# `gh run view --log` ile okumak, sonra o geçici env'i geri almaktır — bu,
-# workflow dosyasına kalıcı bir CI_DEBUG_ROUTES desteği eklemek yerine
-# (henüz gerekmeyen bir scope genişletmesi) bilinçli bir tercih.
+# NOT (GÜNCELLEME, Production Step 8): `workflow_dispatch` trigger'ı artık
+# stable-ci.yml'e eklendi (tam olarak bu adım 5'teki "5 bağımsız çalıştırma"
+# ihtiyacı için) — yukarıdaki `gh workflow run` komutu artık gerçekten
+# çalışır, `-f CI_DEBUG_ROUTES=1` inputu ise workflow bir `workflow_dispatch`
+# input'u TANIMLAMADIĞI için hâlâ çalışmaz (yalnız tetikleme çalışır, env
+# override'ı çalışmaz). CI_DEBUG_ROUTES=1 ile tekrar koşmak istenirse, en
+# pratik yol hâlâ geçici bir commit'te `env: { CI_DEBUG_ROUTES: '1' }`'i job
+# seviyesinde eklemek, log'u `gh run view --log` ile okumak, sonra o geçici
+# env'i geri almaktır — bu, workflow dosyasına kalıcı bir CI_DEBUG_ROUTES
+# input desteği eklemek yerine (henüz gerekmeyen bir scope genişletmesi)
+# bilinçli bir tercih.
 ```
+
+**NOT (Production Step 8'in kendi deneyiminden, önceden dokümante edilmemiş
+bir ön-koşul):** `gh` CLI bu adımın başında bu makinede kurulu DEĞİLDİ —
+`brew install gh` ile kuruldu, ardından kullanıcı kendi terminalinde `gh auth
+login` ile (GitHub.com → HTTPS → tarayıcı üzerinden device-code girişi)
+interaktif olarak authenticate etti. Bu adım BAŞKA BİRİSİ tarafından
+otomatikleştirilemez — OAuth device-code akışı bir insan onayı gerektirir.
+`gh auth login` çalıştırılmadan `gh run list`/`gh workflow run`/`gh run
+view --log` komutlarının HİÇBİRİ çalışmaz (kimliksiz `gh` CLI çağrıları
+kimlik doğrulama hatası verir). Ayrıca: `curl`/doğrudan `api.github.com`
+çağrıları kimliksiz de çalışır ama saatte yalnız 60 istekle sınırlıdır
+(`GET /rate_limit` ile kontrol edilebilir) — bu adımda gerçekten aşıldı ve
+sıfırlanmasını beklemek gerekti; `gh auth login` sonrası bu sınır çok daha
+yüksek bir kimlik doğrulanmış limite çıkar.
 
 **Sonucu nereye kaydet:** her çalıştırmanın temiz/başarısız olduğu ve
 başarısızsa hangi sınıfa (§gerçek regresyon / bilinen dış-çakışma / başka)

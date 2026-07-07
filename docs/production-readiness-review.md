@@ -703,8 +703,72 @@ sunulmuyor — Step 6'nın 6/7'lik daha büyük örneklemi hâlâ bu makinedeki 
 güvenilir yerel tahmin, ve her ikisi de zaten yukarıda netleştirilen tek
 gerçek standardın (remote runner'da 5/5) yerine geçmiyor.
 
+## 16. Implementation status update (GitHub Remote Setup & First Runner Validation — Production Step 8)
+
+**UYGULANDI — remote CI doğrulaması gerçekten yapıldı, §15'in bıraktığı
+"SIFIR kez yapıldı" boşluğu kapandı.** Tam gerekçe/kanıt
+[`docs/ci-stable-profile.md`](./ci-stable-profile.md)'nin "Production Step
+8" bölümünde — burada yalnız bu belgenin kapsamına (production gate durumu)
+düşen özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- Kullanıcıdan GitHub repo URL'si istendi, `git remote add origin` ve `git
+  push` HER İKİSİ İÇİN AYRI AYRI açık onay alındıktan sonra yapıldı — hiçbir
+  geri alınamaz işlem onaysız gerçekleştirilmedi.
+- İlk gerçek remote çalıştırma anında (`ci:stable` sırası hatası) ve
+  ardından iki adım daha (`.env.staging` eksikliği, sonra `apps/api`
+  Dockerfile'ının amd64'te sessizce dist/ üretmemesi) olmak üzere **3 gerçek,
+  %100 deterministik bug bulundu ve düzeltildi** — hiçbiri Steps 3-6'nın
+  belgelediği efemer-port flake'i DEĞİL. Her biri kanıtla kök nedenine
+  ulaştırıldı (tahmin değil) ve yalnız kullanıcı onayı alındıktan sonra
+  düzeltildi (bu adımın kendi "config değişikliği onaysız yapılmaz" kuralı
+  tutarlı şekilde uygulandı — 4 ayrı onay noktası: fix #1, fix #2, fix #3,
+  workflow_dispatch eklentisi).
+- **Remote Runner Validation Protocol SONUCU: `stable` job 8/8 temiz
+  (gerekli 5'i fazlasıyla aşıyor), `staging-smoke` job kendi son düzeltmesi
+  sonrası 5/5 temiz.** Tam çalıştırma tablosu
+  `docs/ci-stable-profile.md`'nin "Production Step 8" bölümünde — burada
+  TEKRARLANMIYOR. **Efemer-port flake'i (Steps 3-6) 8 gerçek çalıştırma
+  boyunca BİR KEZ BİLE tekrarlanmadı** — Step 5'in "çakışma kaynağı bu
+  geliştiricinin kendi makinesine özgü" hipotezini destekleyen güçlü, dolaylı
+  bir kanıt.
+
+**Production gate — yeniden sınıflandırıldı, dürüstçe:**
+
+`docs/ci-stable-profile.md`'nin (Production Step 7'den beri taşıdığı) "remote
+CI doğrulaması (en az 5 çalıştırma) tamamlanmadan production deploy'a
+geçilmez" kapısı **artık KARŞILANDI** — hem `stable` hem `staging-smoke`
+candidate merge gate sayılabilir durumda. **Ama bu, projenin production'a
+HAZIR olduğu anlamına GELMEZ** — yalnızca bu belgenin §11'de tanımladığı beş
+adaydan D maddesinin (CI Stable Test Profile) kendi dar kapsamlı kapısının
+kapandığı anlamına gelir. Hâlâ açık kalan, bu belgenin önceki bölümlerinin
+doğruladığı gerçek production-readiness boşlukları (bu adımın kapsamı DIŞI,
+DEĞİŞTİRİLMEDİ):
+
+- §7'nin doğruladığı worker heartbeat/stale-lock riskleri — B+A adımıyla
+  ZATEN kapatılmıştı (bkz. §13 implementation notu), bu adımla ilgisi yok.
+- §9'un backup/restore boşluğu (storage artifact backup'ı, özellikle `local`
+  modda) — hâlâ kapatılmadı.
+- §7'nin çoklu-worker yatay ölçek koordinasyonu — hâlâ test edilmedi.
+- Gerçek production ortamına HİÇ deploy yapılmadı — bu adım yalnız CI
+  runner'ı doğruladı, bir production ortamını değil. `RENDERER_PROVIDER=fake`/
+  `AI_DEFAULT_PROVIDER=fake`/`STORAGE_PROVIDER=local` fake-provider disposable
+  bir CI/staging stack'i doğruluyor, gerçek bir müşteri ortamını değil.
+
+**Sonraki mantıklı adım, bu belgenin kendi §13'ünün sıralamasıyla tutarlı:**
+CI/remote doğrulama artık bitti (D maddesi kapandı); sırada production'a
+GERÇEKTEN çıkmadan önce kapatılması gereken somut boşluklar var — özellikle
+backup/restore prosedürü (bugün hâlâ hiçbir yerde yazılı değil) ve managed
+Postgres/S3 seçimi gibi gerçek altyapı kararları. Bu belge bunları YENİDEN
+ÖNCELİKLENDİRMİYOR, yalnız hangisinin hâlâ açık olduğunu netleştiriyor.
+
 ## İlgili dokümanlar
 
+- [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — §16'nın doğrudan
+  kaynağı: Production Step 8'in tam çalıştırma tablosu, 3 bulunan bug'ın
+  kanıtlı kök-neden yazımı, ve Remote Runner Validation Protocol'ün gerçek
+  sonucu.
 - [`docs/staging-compose.md`](./staging-compose.md) — bu §14'ün tam
   teslimatı: Dockerfile/Compose/env/smoke script tasarım kararları, ne
   doğrulanıp ne doğrulanmadığı, ve Docker-yok dürüst notu.
