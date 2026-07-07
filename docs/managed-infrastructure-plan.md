@@ -1,9 +1,17 @@
-# Grafista AI Studio — Managed Infrastructure Plan (Production Step 11, Option A seçildi Production Step 12)
+# Grafista AI Studio — Managed Infrastructure Plan (Production Step 11, Option A seçildi Production Step 12, somut sağlayıcı seçildi Production Step 13)
 
 > **Status: KARAR PAKETİ + PROVIZYONLAMA CHECKLIST'İ — bu adımda hiçbir
 > gerçek provider hesabı açılmadı, hiçbir gerçek servis provizyonlanmadı,
 > hiçbir production deploy yapılmadı.** Bu belge
 >
+> **GÜNCELLEME (Production Step 13):** kullanıcı somut bir provider path
+> SEÇTİ — Render (API/dashboard/worker runtime + managed Postgres) +
+> Cloudflare R2 (S3-uyumlu object storage). **Bu hâlâ gerçek bir
+> hesap/servis provizyonlaması DEĞİL** — "selected, not provisioned"
+> durumu geçerli, bkz. yeni §9. Bu adımda ayrıca R2'nin bucket versioning'i
+> DESTEKLEMEDİĞİ (§8b'nin daha önceki hatalı iddiasının aksine)
+> Cloudflare'ın güncel dokümantasyonuna karşı doğrulanıp düzeltildi — bkz.
+> §8b'nin güncellenmiş satırı ve §9'un "R2 veri koruması" notu.
 > **GÜNCELLEME (Production Step 12):** kullanıcı §7'deki üç ops
 > seçeneğinden **Option A'yı (düşük operasyon / hızlı MVP) SEÇTİ** — bkz.
 > §7'nin güncellenmiş "SEÇİLEN YÖN" işareti ve yeni §8 "Option A Provider
@@ -333,7 +341,7 @@ hâlâ `pgvector` desteği (§3a).
 
 | Aday (örnek, seçilmedi) | Kolay kurulum | GitHub Actions entegrasyonu | Object storage versioning | Docker/Node runtime desteği | Türkiye'den erişim/latency notu |
 |---|---|---|---|---|---|
-| Cloudflare R2 | S3 API uyumlu, `S3_ENDPOINT` override ile sıfır kod değişikliği (§2'nin zaten doğruladığı abstraction) | CLI/API üzerinden script'lenebilir, native bir GitHub Action YOK ama S3-uyumlu CLI'larla otomatikleştirilebilir | Bucket versioning destekleniyor | Herhangi bir Node runtime'dan `aws-sdk`/S3-uyumlu client ile erişilebilir | Egress ücretsiz iddiası var (bu belge güncel fiyat iddiası YAPMIYOR, yalnız bir değerlendirme ekseni olarak not) — CDN/edge ağı geniş |
+| Cloudflare R2 | S3 API uyumlu, `S3_ENDPOINT` override ile sıfır kod değişikliği (§2'nin zaten doğruladığı abstraction) | CLI/API üzerinden script'lenebilir, native bir GitHub Action YOK ama S3-uyumlu CLI'larla otomatikleştirilebilir | **Düzeltme (Production Step 13, Cloudflare'ın kendi güncel dokümantasyonuna karşı doğrulandı):** S3-style bucket versioning (`GetBucketVersioning`/`PutBucketVersioning`) R2'de DESTEKLENMİYOR — R2'nin kendi dokümantasyon indeksinde (`developers.cloudflare.com/r2/llms.txt`) "versioning" konusuna dair TEK bir sayfa bile yok. Bunun yerine R2 "Bucket Locks" (WORM-tarzı, zaman/tarih-bazlı veya süresiz silme/üzerine-yazma engeli) VE lifecycle rules (dashboard/Wrangler/S3 API üzerinden, bu ikisi gerçekten destekleniyor) sunuyor — versioning'in YERİNE geçen, ama AYNI ŞEY OLMAYAN bir mekanizma (eski bir versiyonu geri getiremezsiniz, yalnızca kilit süresince silme/üzerine yazmayı engeller). Detay: `docs/deployment-runbook.md`'nin yeni "Cloudflare R2 Staging Setup" bölümü | Herhangi bir Node runtime'dan `aws-sdk`/S3-uyumlu client ile erişilebilir | Egress ücretsiz iddiası var (bu belge güncel fiyat iddiası YAPMIYOR, yalnız bir değerlendirme ekseni olarak not) — CDN/edge ağı geniş |
 | AWS S3 | S3 API'nin kendisi, referans implementasyon | `aws-actions/configure-aws-credentials` gibi resmi GitHub Action'lar var | Bucket versioning native destekleniyor | Standart `S3StorageProvider` (`apps/api/src/storage/s3-provider.ts`) doğrudan uyumlu | AWS bölgeleri geniş, Türkiye'ye yakın bölge seçilebilir |
 | Backblaze B2 | S3-uyumlu API, basit kurulum | Native bir GitHub Action YOK, S3-uyumlu CLI ile script'lenebilir | Bucket versioning destekleniyor | S3-uyumlu client ile erişilebilir | Bölge seçenekleri AWS/R2'ye göre daha sınırlı — latency provizyonlama öncesi test edilmeli |
 | Platformun kendi object storage'ı (ör. Railway'in kendi eklentisi, mevcutsa) | Tek platform içinde ek hesap gerektirmez (Option A'nın "tek platform" ilkesiyle en uyumlu seçenek) | Platformun kendi deploy akışına dahil | Sağlayıcıya göre değişir — provizyonlama öncesi AYRICA doğrulanmalı (§3b'nin ZORUNLU kabul kriteri) | S3-uyumlu ise `S3_ENDPOINT` override ile sıfır kod değişikliği | Platformun kendi bölge/latency profiline bağlı |
@@ -373,13 +381,107 @@ aracı, ilk staging/production için YETERLİ kabul edilir (§3e'nin
 platformun native aracı `GET /api/health/ready`'nin `error` durumuna
 alarm bağlayamıyorsa gerekli hale gelir (§3e'nin kabul kriteri).
 
+## 9. Option A Concrete Provider Selection — Render + Cloudflare R2 (Production Step 13)
+
+> **Status: SEÇİLDİ, PROVİZYONLANMADI — bu adımda hiçbir Render/Cloudflare
+> hesabı açılmadı, hiçbir gerçek servis kurulmadı, hiçbir gerçek secret
+> üretilmedi.** §8'in short-list'inden somut bir seçim yapıldı — bu bölüm o
+> seçimi ve gerekçesini kaydediyor.
+
+### 9a. Seçilen staging provider path
+
+| Bileşen | Seçilen sağlayıcı | Durum |
+|---|---|---|
+| App/API runtime | **Render** (Web Service) | Selected, not provisioned |
+| Dashboard runtime | **Render** (Web Service — Next.js için native Node buildpack, Docker GEREKMEZ) | Selected, not provisioned |
+| Worker | **Ayrı bir servis DEĞİL** — API Web Service'inin kendi process'i, `RENDER_QUEUE_ENABLED=true` | Selected (mimari zaten böyle, §3d/§8c'nin tekrarı) |
+| Managed Postgres | **Render Postgres** | Selected, not provisioned |
+| S3-uyumlu object storage | **Cloudflare R2** | Selected, not provisioned |
+| DNS/TLS | **Render custom domain/TLS** (staging alt-domain) + mevcut domain sağlayıcısının DNS yönetimi | Selected, not provisioned |
+| Logs/monitoring | **İlk aşamada Render'ın kendi native log paneli**; sonrasında daha güçlü bir observability entegrasyonu (hangi araç — decision required, bu adımın kapsamı dışı) | Selected (ilk faz), ikinci faz decision required |
+
+### 9b. Neden bu seçim — §3/§8'in kriterlerine karşı gerekçe
+
+- **Düşük operasyon yükü:** Render, API+dashboard+Postgres'i TEK platform/tek fatura altında topluyor — Option A'nın 1. prensibiyle (§7) birebir örtüşüyor; R2 tek bir ek hesap (Cloudflare), managed storage için ayrı bir "sunucu yönetimi" gerektirmiyor.
+- **GitHub bağlantılı deploy akışı:** Render'ın native GitHub entegrasyonu (push-to-deploy, `docs/managed-infrastructure-plan.md` §8c'nin zaten doğruladığı) `docs/deployment-runbook.md` §18a'nın "GitHub branch seçimi" ihtiyacını doğrudan karşılıyor.
+- **Managed Postgres:** Render Postgres, §3a'nın minimum gereksinimini (otomatik snapshot) karşılıyor — PITR granülerliği HENÜZ doğrulanmadı (bkz. §9d'nin "decision required/verify" notu, `docs/deployment-runbook.md`'nin yeni "Render Postgres Staging Setup" bölümü).
+- **Env/secrets yönetimi:** Render'ın kendi native secret store'u (§3f'nin "platform-native yeterli" kriteriyle tutarlı) — Blueprint'in `sync: false` mekanizması (bkz. `docs/render-staging-blueprint.template.yaml`) secret DEĞERİNİ asla repoya/blueprint dosyasına yazmadan, yalnızca ismini deklare etmeyi sağlıyor.
+- **Background worker desteği:** §3d/§8c'nin zaten koyduğu ilke DEĞİŞMEDİ — Render'da worker için AYRI bir servis PROVİZYONLANMAYACAK, API Web Service'inin kendi process'i (`RENDER_QUEUE_ENABLED=true`) kullanılacak.
+- **S3-uyumlu object storage:** R2, `STORAGE_PROVIDER=s3` + `S3_ENDPOINT` override abstraction'ına (§2'nin zaten doğruladığı, sıfır kod değişikliği) tam uyumlu.
+- **Güncel fiyat iddiası YOK** — bu seçim yalnızca yukarıdaki teknik/operasyonel kriterlere dayanıyor, bu belge hiçbir yerde bir ücret/tier rakamı iddia etmiyor.
+
+### 9c. R2 veri koruması — düzeltilmiş, doğru mekanizma
+
+**§8b'nin daha önceki hali YANLIŞTI** (bu adımda düzeltildi): R2, S3-style
+bucket versioning'i (`GetBucketVersioning`/`PutBucketVersioning`)
+DESTEKLEMİYOR — **düzeltme (adversarial doc-review workflow'u bulup
+doğruladı):** bu belgenin önceki hali "not currently supported" ifadesini
+Cloudflare'ın sayfasından DOĞRUDAN ALINTI gibi sunuyordu, bu YANLIŞTI —
+gerçek kaynak (`developers.cloudflare.com/r2/api/s3/api/`) bu ifadeyi
+literal metin olarak İÇERMİYOR, `GetBucketVersioning`/`PutBucketVersioning`'i
+"Unimplemented bucket-level operations" tablosunda bir ❌ sembolüyle
+işaretliyor. Cloudflare'ın kendi güncel dokümantasyon indeksinde
+versioning'e dair tek bir sayfa bile yok. **Alt satırdaki sonuç (R2
+versioning'i desteklemiyor) doğru, ama önceki alıntı YANLIŞ atfedilmişti
+— düzeltildi.** `docs/backup-restore-runbook.md`
+§3b'nin "kalıcı tier'da bucket versioning AÇIK olmalı" ilkesi genel bir
+prensip olarak yazıldığında (Production Step 9) henüz sağlayıcı
+seçilmemişti — R2 için bu ilkenin somut karşılığı ARTIK netleşti:
+
+- **R2 Bucket Locks** — zaman-bazlı, tarih-bazlı veya süresiz bir
+  retention/WORM kilidi; silme/üzerine-yazmayı belirtilen süre boyunca
+  ENGELLER. **Versioning'den FARKLI**: eski bir versiyonu geri
+  GETİREMEZSİNİZ, yalnızca kilit süresince değişikliği/silmeyi
+  engelliyor. Dashboard, Wrangler CLI veya API ile yapılandırılır.
+- **Lifecycle rules** — GERÇEKTEN destekleniyor (dashboard/Wrangler/S3
+  API'nin hepsinden), yalnızca regenerable tier'a (`render-jobs/*/exports/*`)
+  uygulanmalı — `docs/backup-restore-runbook.md` §3b'nin ilkesi burada
+  DEĞİŞMİYOR.
+- **Kalıcı tier (`brand-assets/`, `design-references/`,
+  `generated-outputs/`) için önerilen somut mekanizma:** Bucket Locks
+  (süresiz veya uzun süreli), çünkü versioning YOK. Bu, "yanlışlıkla
+  silinen/üzerine yazılan bir obje versioning sayesinde geri getirilebilir"
+  (`docs/backup-restore-runbook.md` §3b'nin orijinal cümlesi) iddiasının
+  R2 için GEÇERLİ OLMADIĞI anlamına geliyor — objeyi geri getirmenin tek
+  yolu haftalık logical dump/ayrı bir backup kopyasıdır (§3a'nın zaten
+  önerdiği "sağlayıcıdan bağımsız ikinci konum" ilkesiyle AYNI mantık,
+  şimdi object storage'a da genişletiliyor).
+- **Bu, `docs/backup-restore-runbook.md` §3b'yi GEÇERSİZ KILMIYOR** — o
+  bölümün "kazayla silme koruması" ve "least privilege access key" ilkeleri
+  aynen geçerli, yalnızca "versioning" kelimesinin R2'deki somut karşılığı
+  netleşti.
+
+### 9d. Açık/doğrulanmamış noktalar (decision required veya verify-at-provisioning)
+
+- **Render Postgres PITR granülerliği** — §3a'nın "Neon/RDS daha granüler"
+  notu Render'a özgü olarak HENÜZ doğrulanmadı; provizyonlama öncesi
+  Render'ın kendi güncel dokümantasyonundan teyit edilmeli.
+  `docs/deployment-runbook.md`'nin yeni "Render Postgres Staging Setup"
+  bölümüne bkz.
+  Bu belge güncel fiyat/plan iddiası YAPMIYOR.
+- **Render Docker port binding** — `apps/api/Dockerfile`'ın `EXPOSE 4000`'i
+  ile Render'ın port-algılama mekanizması arasındaki tam eşleşme HENÜZ
+  gerçek bir deploy'da doğrulanmadı; `docs/render-staging-blueprint.template.yaml`
+  bu konudaki mevcut kanıtı (Render'ın kendi dokümantasyonundan) yansıtıyor,
+  ama "kesin çalışır" iddiası YAPMIYOR — bkz.
+  `docs/production-readiness-review.md`'nin yeni Step 13 güncellemesindeki
+  risk notu.
+- **İkinci faz observability aracı** — hangi araç (§9a'nın son satırı),
+  bu adımın kapsamı dışı, decision required.
+
 ## İlgili dokümanlar
 
+- [`docs/render-staging-blueprint.template.yaml`](./render-staging-blueprint.template.yaml) —
+  Production Step 13: §9'un pasif Render Blueprint taslağı.
 - [`docs/deployment-runbook.md`](./deployment-runbook.md) — "Production
   Infrastructure Provisioning Gate" bölümü (§5'in somut checklist'i).
+  Production Step 13: yeni "Cloudflare R2 Staging Setup" ve "Render
+  Postgres Staging Setup" bölümleri, §9'un doğrudan teslimatı.
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
   "Managed Infrastructure Requirements" bölümü (§6'nın managed restore
-  drill gate'i).
+  drill gate'i). §15 "Render + R2 Managed Staging Restore Drill" —
+  Production Step 13: §9'un somut sağlayıcı seçiminin doğrudan
+  teslimatı.
 - [`docs/production-readiness-review.md`](./production-readiness-review.md) —
   Step 11 sonuç güncellemesi, production deploy'un hâlâ blokede olduğunun
   net kaydı.

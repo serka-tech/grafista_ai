@@ -1093,21 +1093,25 @@ gerçek provizyonlama gerektiriyor:**
 tablo `docs/managed-infrastructure-plan.md` §4'ün genel env/secrets
 matrisini STAGING PROFİLİNE daraltıyor — o matrisin YERİNE geçmiyor,
 `.env.staging.example`'ın (bkz. `docs/staging-compose.md`) staging'e özgü
-varsayılanlarıyla çapraz okunmalı.
+varsayılanlarıyla çapraz okunmalı. **Güncelleme (Production Step 13):**
+somut sağlayıcı (Render + Cloudflare R2) seçildiği için "Not" kolonu artık
+o sağlayıcılara özgü — genel/sağlayıcı-agnostik hali hâlâ
+`docs/managed-infrastructure-plan.md` §4'te.
 
 | Değişken | Amaç | Durum (staging) | Not |
 |---|---|---|---|
 | `NODE_ENV` | Çalışma ortamı | **Optional/konvansiyonel** | `docs/managed-infrastructure-plan.md` §4'ün doğruladığı gibi kod bunu okumuyor — staging'de `production` veya `staging` değeri set edilebilir, davranışı DEĞİŞTİRMEZ |
-| `DATABASE_URL` | Managed staging Postgres connection string | **Required** — boot'ta Zod fail-fast | `apps/api/src/config/env.ts:21-26` |
+| `DATABASE_URL` | Managed staging Postgres connection string | **Required** — boot'ta Zod fail-fast | `apps/api/src/config/env.ts:21-26`; Render Postgres'te elle kopyalanmaz — Render Blueprint'in `fromDatabase: {name, property: connectionString}` mekanizmasıyla otomatik bağlanır, bkz. §20b |
 | `AUTH_SECRET` | Session imzalama anahtarı | **Required** — boot'ta Zod fail-fast | Staging için AYRI, production'dan FARKLI bir değer üretilmeli (`openssl rand -hex 32`) — `docs/ci-stable-profile.md` Production Step 8'in CI'da zaten yaptığı gibi |
 | `OPENAI_API_KEY` | OpenAI API anahtarı | **Required (presence-only)** — boot'ta Zod fail-fast, `AI_DEFAULT_PROVIDER=fake` iken bile dummy bir string zorunlu | `apps/api/src/config/env.ts:11` — **düzeltme, bu adımda eklendi:** bu satır Step 12'nin ilk taslağında eksikti, adversarial doc-review workflow'u bulup doğruladı |
 | `ANTHROPIC_API_KEY` | Anthropic API anahtarı | **Required (presence-only)** — boot'ta Zod fail-fast, `AI_DEFAULT_PROVIDER=fake` iken bile dummy bir string zorunlu | `apps/api/src/config/env.ts:12` — aynı düzeltme |
-| `STORAGE_PROVIDER` | `local` \| `s3` | **Required, staging'de `s3` önerilir** | Option A'nın 6. prensibi (local disk YOK) staging için de geçerli — bugünkü `docker-compose.staging.yml` skeleton'ı `local` kullanıyor (`docs/backup-restore-runbook.md` §1d'nin bilinçli basit-başlangıç kararı), managed staging'e geçişte `s3`'e çevrilmeli |
-| `S3_BUCKET` | Staging bucket adı | **Required, `STORAGE_PROVIDER=s3` iken** | Production bucket'ından AYRI olmalı — ortamlar arası veri karışmasını önler |
-| `S3_REGION` | Bucket bölgesi | **Required, `STORAGE_PROVIDER=s3` iken** | |
-| `S3_ENDPOINT` | AWS-dışı sağlayıcılar için custom endpoint | **Optional** | |
-| `S3_ACCESS_KEY_ID` | Bucket erişim kimliği | **Required (secret), `STORAGE_PROVIDER=s3` iken** | Staging'e özgü, least-privilege, production'dan AYRI bir key |
-| `S3_SECRET_ACCESS_KEY` | Bucket erişim sırrı | **Required (secret), `STORAGE_PROVIDER=s3` iken** | Aynı — asla commit edilmez |
+| `STORAGE_PROVIDER` | `local` \| `s3` | **Required, staging'de `s3` önerilir** | Option A'nın 6. prensibi (local disk YOK) staging için de geçerli — bugünkü `docker-compose.staging.yml` skeleton'ı `local` kullanıyor (`docs/backup-restore-runbook.md` §1d'nin bilinçli basit-başlangıç kararı), R2'ye geçişte `s3`'e çevrilmeli |
+| `S3_BUCKET` | Staging bucket adı (R2) | **Required, `STORAGE_PROVIDER=s3` iken** | `<R2_BUCKET_STAGING>` — production bucket'ından AYRI olmalı, bkz. §19a |
+| `S3_REGION` | Bucket bölgesi | **Required, `STORAGE_PROVIDER=s3` iken** | R2-özel: `auto` — Cloudflare'ın kendi dokümantasyonu, bkz. §19d |
+| `S3_ENDPOINT` | R2'nin S3-uyumlu endpoint'i | **Required (R2 için — AWS S3'ten farklı olarak boş bırakılamaz)** | `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` — Cloudflare'ın kendi dokümantasyonundan doğrulanmış format, bkz. §19d |
+| `S3_ACCESS_KEY_ID` | Bucket erişim kimliği | **Required (secret), `STORAGE_PROVIDER=s3` iken** | R2 "Object Read & Write" token'ı, `<R2_BUCKET_STAGING>`'e scope'lu, least-privilege, production'dan AYRI bir key — bkz. §19c |
+| `S3_SECRET_ACCESS_KEY` | Bucket erişim sırrı | **Required (secret), `STORAGE_PROVIDER=s3` iken** | Aynı token'ın secret'ı — asla commit edilmez, bkz. §19c |
+| `S3_FORCE_PATH_STYLE` | Path-style adresleme zorunluluğu | **Doğrulanmadı, R2 için — provizyonlama sırasında test edilmeli** | Cloudflare'ın S3-uyumluluk dokümantasyonu bu konuda açık değil, bkz. §19d |
 | `NEXT_PUBLIC_API_URL` ("PUBLIC_APP_URL"/"API_BASE_URL"'in bu repo'daki karşılığı) | Dashboard'ın API'ye erişim URL'i | **Required, dashboard runtime'ı için** | `docs/managed-infrastructure-plan.md` §4'ün zaten netleştirdiği gibi ayrı bir "genel app URL" kavramı bugün kodda YOK |
 | `API_CORS_ORIGIN` ("API_BASE_URL" kavramının API tarafındaki karşılığı) | API'nin izin verdiği origin | **Required, staging domain'iyle** | Staging dashboard URL'i neyse ona eşit olmalı |
 | `LOG_LEVEL` | Log ayrıntı seviyesi | **Optional, kod tarafından okunmuyor** | `docs/managed-infrastructure-plan.md` §4'ün doğruladığı gibi — yalnızca gelecekteki bir implementasyon için ayrılmış isim |
@@ -1162,15 +1166,203 @@ belgenin görev tanımının kendi sınırı).
 
 ---
 
+## 19. Cloudflare R2 Staging Setup (Production Step 13)
+
+> **Status: HAZIRLIK ADIMLARI — bu adımda hiçbir Cloudflare hesabı
+> açılmadı, hiçbir bucket oluşturulmadı, hiçbir access key üretilmedi.**
+> Kullanıcı Option A'nın somut S3-uyumlu storage sağlayıcısı olarak
+> **Cloudflare R2**'yi seçti
+> (`docs/managed-infrastructure-plan.md` §9). Bu bölüm gerçek
+> provizyonlama sırasında izlenecek adımları, doğrulanmış Cloudflare
+> dokümantasyonuna dayanarak tarif ediyor — hiçbir adım bu Step 13'te
+> gerçekten YÜRÜTÜLMEDİ.
+
+### 19a. Staging bucket oluştur
+
+1. Cloudflare dashboard → R2 Object Storage → "Create bucket".
+2. Bucket adı: `<R2_BUCKET_STAGING>` (production bucket'ından AYRI
+   olmalı — ortamlar arası veri karışmasını önler, `docs/deployment-runbook.md`
+   §18c'nin zaten koyduğu ilke).
+3. Bölge/jurisdiction: sağlayıcının sunduğu seçenekler arasından —
+   Türkiye'den latency'yi optimize eden seçim provizyonlama sırasında
+   test edilmeli (`docs/managed-infrastructure-plan.md` §8b'nin zaten
+   işaretlediği "decision required" notu).
+
+### 19b. Versioning/lifecycle kararlarını uygula — DÜZELTİLMİŞ mekanizma
+
+**Bu adımda yapılan araştırma, önceki bir varsayımı YANLIŞ bulup
+düzeltti** — bkz. `docs/managed-infrastructure-plan.md` §9c ve
+`docs/backup-restore-runbook.md` §3b'nin güncellenmiş notu. Kısa özet:
+R2, S3-style bucket versioning'i DESTEKLEMİYOR (Cloudflare'ın kendi güncel
+dokümantasyon indeksinde bu konuya dair tek bir sayfa yok, S3 API
+uyumluluk referansı `GetBucketVersioning`/`PutBucketVersioning`'i
+"Unimplemented bucket-level operations" tablosunda ❌ ile işaretliyor —
+**düzeltme:** bu belgenin önceki hali bunu yanlışlıkla Cloudflare'dan
+DOĞRUDAN bir alıntı gibi sunmuştu, gerçek sayfa o literal ifadeyi
+içermiyor; sonuç aynı, atıf düzeltildi, bkz.
+`docs/managed-infrastructure-plan.md` §9c).
+Bu yüzden aşağıdaki adımlar "versioning açma" DEĞİL, R2'nin GERÇEKTEN
+sunduğu iki mekanizmayı kullanıyor:
+
+1. **Bucket Locks (kalıcı tier için, `brand-assets/`, `design-references/`,
+   `generated-outputs/` prefix'lerine karşılık gelen bucket için)** —
+   Cloudflare dashboard → bucket → Settings → "Object Lifecycle
+   Rules"/"Bucket Locks" (Cloudflare'ın kendi dokümantasyonuna göre
+   dashboard, Wrangler CLI veya API ile yapılandırılabilir) — süresiz
+   veya uzun süreli bir retention kilidi ÖNERİLİR. **Önemli sınırlama
+   (Cloudflare'ın kendi dokümantasyonundan doğrulandı):** kilit
+   AKTİFKEN bucket boşaltılamaz/silinemez — bu, staging bucket'ının
+   test amaçlı sık sık temizlenmesi gerekiyorsa dikkate alınmalı bir
+   trade-off.
+2. **Lifecycle rules (yalnız regenerable tier için,
+   `render-jobs/*/exports/*` prefix'i)** — bu GERÇEKTEN destekleniyor
+   (dashboard/Wrangler/S3 API'nin hepsinden) — eski export'lar 90 gün
+   sonra expire edilebilir (`docs/backup-restore-runbook.md` §3b'nin
+   maliyet-kontrolü ilkesiyle tutarlı).
+3. **Kalıcı tier için asıl geri-getirme mekanizması artık versioning
+   DEĞİL, haftalık logical dump/ayrı bir backup kopyasıdır** —
+   `docs/backup-restore-runbook.md` §3a'nın "sağlayıcıdan bağımsız
+   ikinci konum" ilkesi burada object storage'a da genişletiliyor. Bu,
+   bu adımın kapsamında bir OTOMASYON DEĞİL — yalnızca hangi mekanizmanın
+   doğru olduğunun netleşmesi.
+
+### 19c. Access key oluştur — least privilege
+
+1. Cloudflare dashboard → R2 → "Manage API Tokens" (Account Details
+   altında).
+2. Token tipi: **Object Read & Write**, **yalnızca `<R2_BUCKET_STAGING>`
+   bucket'ına scope'lanmış** (Cloudflare'ın kendi dokümantasyonu: "Object
+   Read and Write" ve "Object Read only" izinleri belirli bucket'lara
+   scope'lanabiliyor — bu izin seviyeleri yalnızca S3-uyumlu API
+   üzerinden destekleniyor, Cloudflare REST API'sinden DEĞİL).
+3. Bucket-seviyesi silme/policy değişikliği için AYRI, daha yüksek
+   yetkili bir "Admin" token KULLANILMAMALI — uygulamanın kendi
+   `S3_ACCESS_KEY_ID`'si yalnızca Object Read & Write olmalı
+   (`docs/backup-restore-runbook.md` §3b'nin "least privilege" ilkesiyle
+   tutarlı).
+4. Token oluşturulduğunda dönen Access Key ID + Secret Access Key —
+   **bu adımda hiçbiri üretilmedi, gerçek bir değer bu dokümanda YOK.**
+
+### 19d. S3 endpoint formatı ve env/secrets eşlemesi
+
+Cloudflare'ın kendi dokümantasyonundan doğrulanmış, gerçek format:
+
+```
+S3_ENDPOINT=https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
+S3_REGION=auto
+```
+
+`S3_REGION=auto` — Cloudflare'ın kendi notu: "the region for an R2 bucket
+is `auto`... an empty value and `us-east-1` will alias to the `auto`
+region" — yani bu repo'nun `.env.example`'daki `S3_REGION=us-east-1`
+varsayılanı R2 için de TEKNİK OLARAK çalışır, ama `auto` açık ve doğru
+olan değer.
+
+**`S3_FORCE_PATH_STYLE` — DOĞRULANMADI:** Cloudflare'ın S3-uyumluluk
+dokümantasyonu path-style'a karşı virtual-hosted-style adresleme
+konusunda AÇIK bir ifade içermiyor. Bu belge bir varsayım YAPMIYOR —
+provizyonlama sırasında `apps/api/src/storage/s3-provider.ts`'nin gerçek
+davranışına karşı test edilmeli (bkz. `docs/managed-infrastructure-plan.md`
+§9d'nin "decision required/verify" notu).
+
+| Env değişkeni | R2'deki karşılığı |
+|---|---|
+| `STORAGE_PROVIDER` | `s3` |
+| `S3_ENDPOINT` | `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
+| `S3_REGION` | `auto` |
+| `S3_BUCKET` | `<R2_BUCKET_STAGING>` |
+| `S3_ACCESS_KEY_ID` | §19c'nin ürettiği token'ın Access Key ID'si (secret) |
+| `S3_SECRET_ACCESS_KEY` | §19c'nin ürettiği token'ın Secret Access Key'i (secret) |
+| `S3_FORCE_PATH_STYLE` | Doğrulanmadı — provizyonlama sırasında test edilmeli |
+
+## 20. Render Postgres Staging Setup (Production Step 13)
+
+> **Status: HAZIRLIK ADIMLARI — bu adımda hiçbir Render hesabı açılmadı,
+> hiçbir Postgres servisi oluşturulmadı.** Kullanıcı Option A'nın somut
+> managed Postgres sağlayıcısı olarak **Render Postgres**'i seçti
+> (`docs/managed-infrastructure-plan.md` §9).
+
+### 20a. Postgres service oluştur
+
+1. Render dashboard → New → PostgreSQL (veya
+   `docs/render-staging-blueprint.template.yaml`'daki `databases:`
+   bloğunun sync'lenmesiyle).
+2. İsim: `grafista-postgres-staging`, `databaseName: grafista_staging`,
+   `user: grafista` (template'in zaten önerdiği değerler).
+3. Postgres major version: `16` (bu repo'nun kendi minimum gereksinimi
+   "PostgreSQL 14+", `docker-compose.staging.yml`'in kullandığı
+   `postgres:16-alpine` ile parite için `16` önerilir).
+4. Plan/region: **decision required** — bu belge güncel fiyat/plan
+   iddiası YAPMIYOR.
+
+### 20b. `DATABASE_URL` secret olarak bağla
+
+`docs/render-staging-blueprint.template.yaml`'ın zaten modellediği gibi,
+`grafista-api-staging`'in `DATABASE_URL` env değişkeni Render'ın kendi
+`fromDatabase: {name: grafista-postgres-staging, property:
+connectionString}` mekanizmasıyla OTOMATİK bağlanabilir — elle bir
+connection string kopyalamak GEREKMEZ (Render'ın kendi Blueprint
+özelliği). **Bu adımda hiçbir gerçek `DATABASE_URL` üretilmedi/yazılmadı.**
+
+### 20c. Migration çalıştır
+
+```bash
+# Render Postgres'e (staging) karşı, gerçek provizyonlama SONRASI:
+DATABASE_URL="<RENDER_STAGING_DATABASE_URL>" \
+  pnpm --filter @grafista/api run db:migrate
+```
+
+Bu komut `docs/deployment-runbook.md` §5 adım 5'in ZATEN belgelediği
+`db:migrate` script'inin AYNISI — sağlayıcı DEĞİŞTİ, komut değişmedi
+(`apps/api/src/db/migrate.ts`'in sağlayıcı-agnostik tasarımı).
+
+### 20d. `schema_migrations` kontrol et
+
+```bash
+psql "<RENDER_STAGING_DATABASE_URL>" \
+  -c "SELECT filename, applied_at FROM schema_migrations ORDER BY filename;"
+```
+
+`docs/backup-restore-runbook.md` §5 adım 3'ün zaten belgelediği
+doğrulama — 001'den bugünkü en yüksek numaralı migration'a (bugün
+`025_render_worker_heartbeats.sql`) kadar EKSİKSİZ olmalı.
+
+### 20e. Connection pooling / PITR / backup notları — production öncesi ZORUNLU gate
+
+- **Connection pooling:** Render Blueprint spec'inin `connectionPool:
+  "pgbouncer" | "none"` alanı var (bu adımda doğrulandı) — bu repo'nun
+  `apps/api/src/db/pool.ts`'nin kendi `pg.Pool` singleton'ıyla (Production
+  Step 4'te connection-leak sorunu bulunup düzeltilen aynı mekanizma)
+  etkileşimi HENÜZ test edilmedi — provizyonlama sırasında doğrulanmalı.
+- **PITR granülerliği:** `docs/managed-infrastructure-plan.md` §3a'nın
+  "Neon/RDS daha granüler PITR sunuyor olabilir" notu Render'a özgü
+  olarak HENÜZ doğrulanmadı — bu belge bunu VARSAYMIYOR, provizyonlama
+  öncesi Render'ın güncel dokümantasyonundan teyit edilmeli.
+- **Backup automation:** `docs/deployment-runbook.md` §17'nin PRODUCTION
+  provisioning gate'i ("PITR/snapshot aktif") burada da geçerli — Render
+  Postgres'in kendi otomatik snapshot'ı doğrulanmalı, provizyonlama
+  sırasında AÇIK olduğu teyit edilmeden production'a geçilmemeli.
+- **Restore drill gate DEĞİŞMEDİ:** `docs/backup-restore-runbook.md`'nin
+  yeni "Render + R2 Managed Staging Restore Drill" bölümü (bkz. o
+  belgenin kendisi) — managed staging altyapıya karşı bir restore drill
+  PASS almadan production deploy YOK, bu Step 13'te de DEĞİŞMEDİ.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
   Production Step 11: §17'nin checklist'inin dayandığı karar
   kriterleri/matrisi, env/secrets matrisi, ops decision (Option A/B/C).
   Production Step 12: §7'nin güncellenmiş Option A işareti, §8'in provider
-  short-list'i — §18'in doğrudan girdisi.
+  short-list'i — §18'in doğrudan girdisi. Production Step 13: §9 — somut
+  Render + Cloudflare R2 seçimi, §19/§20'nin doğrudan kaynağı.
 - [`docs/staging-deploy-workflow-template.yml`](./staging-deploy-workflow-template.yml) —
   §18d'nin pasif GitHub Actions taslağı — AKTİF bir workflow DEĞİL.
+  Production Step 13'te Render + R2'ye özgü hale güncellendi.
+- [`docs/render-staging-blueprint.template.yaml`](./render-staging-blueprint.template.yaml) —
+  Production Step 13: pasif Render Blueprint taslağı, §19/§20'nin somut
+  servis modellemesi.
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
   Production Step 9'un tam teslimatı: persistence envanteri, managed
   Postgres/S3 karar kriterleri, backup policy, restore/restore-drill

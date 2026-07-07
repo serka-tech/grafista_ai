@@ -1,0 +1,231 @@
+# Grafista AI Studio — Render Staging Blueprint TEMPLATE (Production Step 13)
+#
+# ═══════════════════════════════════════════════════════════════════════
+# THIS IS A PASSIVE TEMPLATE, NOT AN ACTIVE render.yaml.
+# ═══════════════════════════════════════════════════════════════════════
+#
+# It lives at docs/render-staging-blueprint.template.yaml, NOT at the
+# repo root as `render.yaml` — deliberately. Render auto-detects a
+# `render.yaml` at the repo root the moment a repo is connected to a
+# Render account and can offer to sync/provision from it automatically.
+# Placing an unreviewed, not-yet-provisioned blueprint at the repo root
+# risks a real service being created from a template that (a) has never
+# been used to build this Dockerfile before (see the HIGH-RISK note
+# below) and (b) still has `<PLACEHOLDER>` values that are not valid
+# Render config. This task's own scope explicitly excludes provisioning
+# any real Render service — keeping this file out of repo-root
+# `render.yaml` is how that boundary is enforced structurally, not just
+# by convention.
+#
+# Field names below are taken from Render's own Blueprint spec
+# (fetched and verified against https://render.com/docs/blueprint-spec
+# during this step — not invented). Cross-check against Render's current
+# docs before actually syncing this, since blueprint schemas can change.
+#
+# Every `sync: false` env var below is a REAL variable name this repo's
+# code actually reads (cross-referenced against
+# docs/deployment-runbook.md §18c's staging env/secrets matrix and
+# apps/api/src/config/env.ts) — but this file contains ZERO secret
+# VALUES, and copying it into `render.yaml` does not create, request, or
+# imply any real Render/Cloudflare account or credential.
+#
+# ═══════════════════════════════════════════════════════════════════════
+# HIGH-RISK, UNVERIFIED: apps/api/Dockerfile's "host-build-first"
+# requirement vs. Render's own build pipeline
+# ═══════════════════════════════════════════════════════════════════════
+#
+# apps/api/Dockerfile's build stage does NOT run `tsc` inside the
+# container for ANY of the four workspace packages (packages/schemas,
+# packages/model-router, packages/prompt-engine, apps/api itself) — it
+# ships each package's ALREADY-HOST-BUILT `dist/` via `COPY . .`
+# (.dockerignore intentionally does NOT exclude `packages/*/dist` or
+# `apps/*/dist`). This exists because Production Step 2B/Step 8 found,
+# on TWO independent environments (this developer's local Docker
+# Desktop, and a GitHub Actions amd64 Linux runner), that running `tsc`
+# against COPY'd source inside a Docker build silently produces ZERO
+# output — a confirmed, reproduced, but still not-root-caused bug (see
+# docs/ci-stable-profile.md "Production Step 8" and
+# docs/staging-compose.md "Production Step 2B"/"2C"). The workaround:
+# `pnpm run build` MUST run on the HOST (or the CI runner, as
+# scripts/ci-staging.sh does) BEFORE `docker build`/`docker compose
+# build` — the Dockerfile has no host-build step of its own.
+#
+# Render's own hosted build infrastructure for a `runtime: docker`
+# service runs `docker build` directly against your repo — there is no
+# documented Render mechanism (per the Blueprint spec fetched this step)
+# for running an arbitrary host command BEFORE a Docker build starts
+# (`buildCommand`/`startCommand` are documented as fields for NON-Docker
+# runtimes only). This means: AS WRITTEN TODAY, deploying
+# apps/api/Dockerfile via Render's Docker runtime would very plausibly
+# hit the *exact same* "Cannot find module dist/index.js" failure
+# Production Step 8 found and fixed for GitHub Actions — because
+# Render's build has no host-build-first step, and the dist/ directories
+# are (correctly) gitignored, so a fresh Render checkout would not have
+# them. **This has NOT been tested against real Render infrastructure —
+# it is a documented, evidence-based RISK, not a confirmed failure, and
+# not something this step attempts to fix (that would mean redesigning
+# the Dockerfile's build stage or finding a genuine Render pre-build
+# hook — out of this step's "no big refactor" scope).** See
+# docs/production-readiness-review.md's Step 13 update for the same risk
+# recorded as a production-readiness item.
+#
+# TWO documented paths forward — pick one at actual provisioning time,
+# neither is activated here:
+#
+#   (A) Docker runtime (modeled below as the primary `grafista-api-staging`
+#       service) — closer to the full architecture (real Playwright
+#       rendering possible later), but carries the unverified build risk
+#       above. Before relying on this path, either confirm Render's build
+#       environment does NOT hit the tsc-in-container bug (test it), or
+#       find/use a genuine Render pre-build hook if one exists in current
+#       Render docs (unconfirmed here).
+#   (B) Native Node runtime (see the commented-out alternative block
+#       below `grafista-api-staging`) — sidesteps the Docker build risk
+#       entirely by using Render's own `buildCommand`/`startCommand`
+#       (which DOES support running `pnpm run build` before start, since
+#       it's Render's own build step, not a Dockerfile COPY). Only viable
+#       for INITIAL staging bring-up with `RENDERER_PROVIDER=fake` (no
+#       Chromium dependency) — matches the same "fake renderer for first
+#       bring-up" convention docs/deployment-runbook.md §18c already
+#       recommends. Real Playwright rendering would need Chromium system
+#       dependencies a bare Node buildpack does not provide
+#       (docs/production-readiness-review.md §4's own reasoning).
+#
+# ═══════════════════════════════════════════════════════════════════════
+
+services:
+  # ── API runtime (Path A: Docker — see HIGH-RISK note above) ──────────
+  - type: web
+    name: grafista-api-staging
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: . # repo root — apps/api/Dockerfile's own header comment requires this (pnpm workspace resolution needs the whole monorepo)
+    branch: phase-2-checkpoint # matches this repo's current working branch (git status -sb, verified at the start of this step) — NOT a decision, just today's fact; re-verify before actually syncing
+    plan: <RENDER_PLAN_TBD> # decision required — no pricing/tier claim made here
+    region: <RENDER_REGION_TBD> # decision required — see docs/managed-infrastructure-plan.md §8c's Türkiye-latency note
+    autoDeployTrigger: off # deliberately OFF as a starting default for a not-yet-verified blueprint — flip to "commit" only after a manual first deploy succeeds
+    healthCheckPath: /api/health # matches apps/api/src/routes/health.ts's existing liveness endpoint, unchanged by this step
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000" # explicit — Render's own docs (fetched this step) say it defaults to 10000 and recommends binding your server to $PORT; this repo's app reads API_PORT instead (see below), so PORT is set here only so Render's own port-detection has a value to check against. UNVERIFIED whether Render's Docker port-detection requires the env var to be literally named PORT or does live TCP probing — confirm against Render's current docs at provisioning time.
+      - key: API_PORT
+        value: "4000" # apps/api/src/config/env.ts's actual var name — must match PORT above and apps/api/Dockerfile's EXPOSE 4000
+      - key: API_HOST
+        value: "0.0.0.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: grafista-postgres-staging
+          property: connectionString
+      - key: AUTH_SECRET
+        sync: false # generate at provisioning time, e.g. `openssl rand -hex 32` — never commit a value here
+      - key: OPENAI_API_KEY
+        sync: false # presence-only required even in fake mode — apps/api/src/config/env.ts:11
+      - key: ANTHROPIC_API_KEY
+        sync: false # presence-only required even in fake mode — apps/api/src/config/env.ts:12
+      - key: AI_DEFAULT_PROVIDER
+        value: fake # safe first bring-up — see docs/deployment-runbook.md §18c
+      - key: RENDERER_PROVIDER
+        value: fake # safe first bring-up, zero Chromium dependency — see docs/deployment-runbook.md §18c
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: S3_ENDPOINT
+        sync: false # https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com — see docs/deployment-runbook.md's new "Cloudflare R2 Staging Setup" section
+      - key: S3_REGION
+        value: auto # R2-specific — Cloudflare's own docs (fetched this step): the S3 API region for an R2 bucket is "auto"
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        sync: false # UNVERIFIED for R2 — Cloudflare's S3-compatibility docs (fetched this step) did not state whether path-style or virtual-hosted-style addressing is required; confirm at provisioning time instead of assuming either value
+      - key: RENDER_QUEUE_ENABLED
+        value: "true" # staging trial per docs/deployment-runbook.md §3 — worker runs IN THIS SAME service, no separate service (see the worker note below, not a services: entry)
+      - key: API_CORS_ORIGIN
+        sync: false # staging dashboard's URL — fill in once grafista-dashboard-staging's URL is known (see the circular-dependency note on that service below)
+      - key: COOKIE_SECURE
+        value: "true" # Render terminates TLS for you on its own domains/custom domains — see the "Cloudflare R2 Staging Setup" doc section's DNS/TLS note
+      - key: CI_DEBUG_ROUTES
+        value: "" # never on by default — apps/api/src/middleware/debug-routes.ts, staging-only opt-in, never production
+      - key: LOG_LEVEL
+        value: info # cosmetic only — docs/managed-infrastructure-plan.md §4 already documented that no code in this repo reads LOG_LEVEL
+
+  # ── API runtime (Path B: native Node, NOT active — see HIGH-RISK note
+  # above). Uncomment this block AND remove/comment the Docker block
+  # above to use this path instead; do not run both. ───────────────────
+  # - type: web
+  #   name: grafista-api-staging
+  #   runtime: node
+  #   buildCommand: pnpm install --frozen-lockfile && pnpm run build
+  #   startCommand: pnpm --filter @grafista/api run start
+  #   branch: phase-2-checkpoint
+  #   plan: <RENDER_PLAN_TBD>
+  #   region: <RENDER_REGION_TBD>
+  #   autoDeployTrigger: off
+  #   healthCheckPath: /api/health
+  #   envVars:
+  #     - key: PORT
+  #       value: "4000" # UNVERIFIED, same caveat as the Docker path above — düzeltme (adversarial doc-review workflow'u bulup doğruladı): Render's own docs (render.com/docs/web-services) only say they "recommend" binding to $PORT and show example app code that itself must call process.env.PORT + .listen() — Render does NOT bind your server for you. This repo's own apps/api/src/config/env.ts never reads process.env.PORT at all (only API_PORT), so this PORT value has NO effect on the app's actual bind address regardless of what Render does with it — set API_PORT to the SAME value below so the app itself binds correctly; whether Render's own routing correctly reaches that port is unverified, confirm at provisioning time
+  #     - key: API_PORT
+  #       value: "4000"
+  #     # ... all other envVars identical to the Docker block above, EXCEPT
+  #     # RENDERER_PROVIDER must stay "fake" — this path has no Chromium
+  #     # system dependencies (no Dockerfile), so real Playwright
+  #     # rendering is NOT available here.
+
+  # ── Dashboard runtime (native Node — no Dockerfile needed for
+  # Next.js; resolves the "apps/dashboard has no Dockerfile" gap
+  # docs/production-readiness-review.md §20 already recorded, for THIS
+  # specific provider) ──────────────────────────────────────────────────
+  - type: web
+    name: grafista-dashboard-staging
+    runtime: node
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build # builds the whole workspace — apps/dashboard has no cross-package dependency on apps/api, but the monorepo's pnpm install step is shared; a narrower per-package build was not attempted here (small/safe scope, not a refactor)
+    startCommand: pnpm --filter @grafista/dashboard exec next start -p $PORT # explicit -p $PORT because apps/dashboard/package.json's own "start" script ("next start") does not itself read $PORT — verify against Render's actual injected PORT value at provisioning time
+    branch: phase-2-checkpoint
+    plan: <RENDER_PLAN_TBD>
+    region: <RENDER_REGION_TBD>
+    autoDeployTrigger: off
+    # No healthCheckPath override — apps/dashboard has no dedicated
+    # health endpoint (docs/production-readiness-review.md §20's
+    # recorded gap); Render's default root-path check applies, unverified
+    # against real behavior.
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        sync: false # grafista-api-staging's own Render URL — CIRCULAR with that service's API_CORS_ORIGIN above: both need each other's final URL, so both are sync:false placeholders here, filled in manually once both services exist and their URLs are known (Render assigns URLs at service creation, before this value can be known)
+
+# ── Worker: NOT a services: entry, intentionally ─────────────────────
+# This repo's render worker (apps/api/src/services/render-worker.ts) is
+# an in-process setInterval loop inside the API's own Node process,
+# toggled by RENDER_QUEUE_ENABLED (set to "true" on
+# grafista-api-staging above) — it is NOT a separate deployable unit.
+# docs/managed-infrastructure-plan.md §3d/§8c already established this;
+# repeated here so a reader of this template specifically does NOT
+# provision a second "grafista-worker-staging" service, which would
+# silently create an untested multi-worker/horizontal-scale scenario
+# docs/production-readiness-review.md §7 already flags as unverified.
+
+databases:
+  - name: grafista-postgres-staging
+    plan: <RENDER_PLAN_TBD> # decision required — no pricing/tier claim made here
+    databaseName: grafista_staging
+    user: grafista
+    postgresMajorVersion: "16" # matches docker-compose.staging.yml's postgres:16-alpine for parity; repo's own minimum is "PostgreSQL 14+" (docs/production-readiness-review.md §2)
+    region: <RENDER_REGION_TBD> # should match the web services' region above — cross-region adds latency, not confirmed here
+    # PITR/connection-pooling plan-tier behavior UNVERIFIED for Render —
+    # see docs/deployment-runbook.md's new "Render Postgres Staging
+    # Setup" section and docs/managed-infrastructure-plan.md §9d.
+
+# ── Secrets/placeholders this template requires you to fill in at real
+# provisioning time (names only — see docs/deployment-runbook.md §18c
+# for the full staging env/secrets matrix; NO values live in this repo):
+#   AUTH_SECRET
+#   OPENAI_API_KEY / ANTHROPIC_API_KEY
+#   S3_ENDPOINT / S3_BUCKET / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY / S3_FORCE_PATH_STYLE
+#   API_CORS_ORIGIN (grafista-dashboard-staging's URL)
+#   NEXT_PUBLIC_API_URL (grafista-api-staging's URL)
+#   <RENDER_PLAN_TBD> / <RENDER_REGION_TBD> — not secrets, but explicit
+#     decisions this template does not make for you

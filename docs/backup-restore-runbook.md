@@ -33,6 +33,16 @@
 > çalıştırılamaz durumda. Yeni §14, bu gate'i açıkça netleştiriyor: local/
 > staging drill (§12) PASS + managed staging drill (§13, henüz yapılmadı)
 > PASS, İKİSİ BİRDEN olmadan production deploy yok.
+>
+> **GÜNCELLEME (Production Step 13):** kullanıcı somut sağlayıcıları
+> seçti — Render Postgres + Cloudflare R2
+> (`docs/managed-infrastructure-plan.md` §9). Yeni §15, §13/§14'ün
+> managed drill'ini artık bu iki sağlayıcıya özgü, somut bir prosedürle
+> tarif ediyor — **"pending provider provisioning" durumu DEĞİŞMEDİ**,
+> gerçek Render/R2 servisleri hâlâ kurulmadı, bu drill hâlâ
+> ÇALIŞTIRILAMAZ. Ayrıca bu adımda §3b'nin "bucket versioning" ilkesinin
+> R2 için YANLIŞ olduğu (Cloudflare'ın güncel dokümantasyonuna karşı
+> doğrulanarak) bulunup düzeltildi — bkz. §3b'nin güncellenmiş notu.
 
 ## Amaç
 
@@ -147,7 +157,14 @@ yönü netleştiriyor:
 - **Object storage:** `STORAGE_PROVIDER=s3` + gerçek bir S3-uyumlu bucket
   (AWS S3 veya Cloudflare R2 gibi egress-ücretsiz bir alternatif) —
   versioning açık, aşağıdaki "Backup policy" bölümünde detaylandırılan
-  lifecycle ile.
+  lifecycle ile. **Düzeltme (Production Step 13, somut sağlayıcı Cloudflare
+  R2 seçildikten sonra doğrulandı):** bu cümle R2 için YANLIŞ — R2
+  S3-style versioning DESTEKLEMİYOR (bkz. §3b'nin ve §15'in güncellenmiş
+  notu, `docs/managed-infrastructure-plan.md` §9c). AWS S3 için bu cümle
+  hâlâ doğru; R2 seçildiği için somut mekanizma "Bucket Locks + lifecycle"
+  (versioning DEĞİL) — bu paragraf genel bir prensip olarak Step 9'da
+  sağlayıcı seçilmeden önce yazıldığı için burada TEKRARLANMIYOR, düzeltme
+  yalnızca §3b/§9c'de.
 - **Local disk (`STORAGE_PROVIDER=local`):** production'da KULLANILMAMALI.
   Bugünkü staging skeleti bunu zaten disposable olarak işaretliyor (§1d);
   kod tarafında hiçbir dosya sistemi geçici/cache kullanımı tespit
@@ -201,7 +218,17 @@ yönü netleştiriyor:
 - **Versioning:** kalıcı tier prefix'lerinde (`brand-assets/`,
   `design-references/`, `generated-outputs/`) bucket versioning AÇIK
   olmalı — yanlışlıkla silinen/üzerine yazılan bir obje, versioning
-  sayesinde geri getirilebilir.
+  sayesinde geri getirilebilir. **Düzeltme (Production Step 13):** bu
+  ilke, Production Step 9'da sağlayıcı seçilmeden önce yazıldı; Step 13'te
+  seçilen somut sağlayıcı Cloudflare R2'nin S3-style versioning'i
+  DESTEKLEMEDİĞİ Cloudflare'ın güncel dokümantasyonuna karşı doğrulandı —
+  bu ilkenin R2'deki somut karşılığı "Bucket Locks" (WORM-tarzı
+  retention, eski versiyonu GERİ GETİRMEZ, yalnızca silme/üzerine yazmayı
+  belirli bir süre ENGELLER) + ayrı bir logical dump/backup kopyasıdır,
+  klasik S3 versioning DEĞİL. Tam detay:
+  `docs/managed-infrastructure-plan.md` §9c ve
+  `docs/deployment-runbook.md`'nin yeni "Cloudflare R2 Staging Setup"
+  bölümü.
 - **Lifecycle policy:** yalnızca regenerable tier'a (`render-jobs/*/exports/*`)
   uygulanmalı — eski versiyonlar 90 gün sonra expire edilebilir (maliyet
   kontrolü). Kalıcı tier'ın eski versiyonları EXPIRE EDİLMEMELİ.
@@ -215,12 +242,20 @@ yönü netleştiriyor:
 
 ### 3c. Minimum hedefler
 
+**Düzeltme (Production Step 13, somut sağlayıcı Cloudflare R2 seçildikten
+sonra doğrulandı):** aşağıdaki tablonun Object storage kolonundaki
+"Sürekli (versioning)" hücreleri bu adımda YANLIŞ bulundu — R2, S3-style
+versioning DESTEKLEMİYOR (bkz. §3b/§15, `docs/managed-infrastructure-plan.md`
+§9c). Tablo R2'nin gerçek mekanizmasını (Bucket Locks + haftalık logical
+dump) yansıtacak şekilde güncellendi; bu tablo genel bir prensip olarak
+Step 9'da sağlayıcı seçilmeden önce yazılmıştı.
+
 | Metrik | Postgres | Object storage |
 |---|---|---|
-| RPO (MVP, gerçek müşteri verisi yokken) | ≤ 24 saat (günlük snapshot) | Sürekli (her yazma kendi versiyonu) |
-| RPO (gerçek müşteri verisi girdikten sonra) | ≤ 1 saat (PITR) | Sürekli (değişmez) |
-| RTO | ≤ 4 saat (staging'de doğrulanmış tam restore) | ≤ 2 saat (tek obje veya tam bucket senkronizasyonu) |
-| Backup frequency | Günlük otomatik snapshot + haftalık logical dump | Sürekli (versioning) |
+| RPO (MVP, gerçek müşteri verisi yokken) | ≤ 24 saat (günlük snapshot) | ≤ 1 hafta (haftalık logical dump/backup kopyası — R2 versioning desteklemiyor, Bucket Locks yalnızca silme/üzerine-yazmayı ÖNLÜYOR, önceki içeriği geri GETİRMİYOR) |
+| RPO (gerçek müşteri verisi girdikten sonra) | ≤ 1 saat (PITR) | Aynı ≤ 1 hafta sınırı geçerli — daha sık logical dump/backup, gerçek müşteri verisi girmeden önce SIKILAŞTIRILMALI |
+| RTO | ≤ 4 saat (staging'de doğrulanmış tam restore) | ≤ 2 saat (tek obje veya tam bucket senkronizasyonu, backup kopyasından) |
+| Backup frequency | Günlük otomatik snapshot + haftalık logical dump | Haftalık logical dump/backup kopyası (R2 versioning YOK) + Bucket Locks (sürekli AKTİF, ama bu bir BACKUP değil, yalnızca kilit süresince silme/üzerine-yazma koruması) |
 | Restore drill frequency | Production öncesi 1×, sonra 3 ayda 1 | Postgres drill'iyle birlikte |
 
 ## 4. Restore ön koşulları
@@ -633,16 +668,74 @@ yazılı:**
 
 ---
 
+## 15. Render + R2 Managed Staging Restore Drill (Production Step 13)
+
+> **Status: PROSEDÜR TARİFİ — bu adımda hiçbir drill çalıştırılmadı,
+> "pending provider provisioning" olarak işaretli.** Kullanıcı somut
+> sağlayıcıları seçti (Render Postgres + Cloudflare R2,
+> `docs/managed-infrastructure-plan.md` §9) — §14'ün "managed staging
+> drill'i henüz yapılamaz" durumu artık DAHA SOMUT bir prosedürle
+> tarif edilebiliyor, ama **gerçek Render/R2 servisleri kurulmadan bu
+> drill ÇALIŞTIRILAMAZ.**
+
+### 15a. Bu drill'in §7/§12'nin local drill'inden farkı
+
+| Aşama | §7/§12'nin local drill'i (`scripts/restore-drill-staging.sh`) | Render + R2 drill'i (bu bölüm, henüz yapılamaz) |
+|---|---|---|
+| Postgres | `postgres:16-alpine` container, local Docker volume | Render Postgres (staging instance) |
+| Dump/restore mekanizması | `docker compose exec postgres pg_dump/pg_restore` | `pg_dump`/`pg_restore` DOĞRUDAN Render Postgres'in dışa açık connection string'ine karşı (host'ta `psql`/`pg_dump` client araçları KURULU olmalı — §4'ün "container-dışı bir Postgres'e doğrudan bağlanmak host-side kurulum gerektirir" notu burada GEÇERLİ, local drill'in aksine) |
+| Object storage | Local disk (`STORAGE_PROVIDER=local`, manuel host-side kopya) | Cloudflare R2 (gerçek `S3_ENDPOINT`/bucket'a karşı, `STORAGE_PROVIDER=s3`) |
+| Backup mekanizması | Manuel `pg_dump`/host-side kopya | Render Postgres'in kendi otomatik snapshot'ından bir restore (§20e'nin doğrulanmamış PITR notuyla tutarlı — snapshot restore akışı Render'a özgü, henüz test edilmedi) |
+| Veri koruması | N/A (local, disposable) | R2 Bucket Locks + lifecycle rules (§9c'nin düzeltilmiş mekanizması — versioning DEĞİL) |
+
+### 15b. Beklenen adımlar (taslak — Render/R2 gerçekten provizyonlanınca kesinleşir)
+
+1. Render Postgres staging instance'ında sentetik/test verisiyle bir
+   "before" durumu oluştur (`db:seed`/`db:seed-demo` ile, PRODUCTION
+   VERİSİ DEĞİL — `docs/deployment-runbook.md` §3'ün zaten koyduğu
+   "db:seed-demo yalnız staging/local" ilkesi).
+2. Render Postgres'in kendi manuel/on-demand snapshot mekanizmasını
+   tetikle (otomatik günlük snapshot'ı BEKLEMEDEN) — tam mekanizma
+   Render'ın kendi dokümantasyonundan provizyonlama sırasında teyit
+   edilmeli, bu belge bir komut UYDURMUYOR.
+3. R2 staging bucket'ına aynı test verisiyle ilişkili bir obje yaz (bir
+   `brand_assets` satırının işaret ettiği gerçek bir dosya).
+4. Yeni/boş bir Render Postgres instance'ına (AYNI staging ortamında,
+   ayrı bir database) snapshot'tan restore et.
+5. R2'de Bucket Locks aktifse, kilit süresi İÇİNDE bir objenin
+   silinemediğini/üzerine yazılamadığını doğrula (§9c'nin "versioning
+   DEĞİL, WORM-tarzı" ayrımının pratik doğrulaması) — bu, S3 versioning
+   testinin YERİNE geçen, R2'ye özgü bir doğrulama adımı.
+6. §9'un verification checklist'ini AYNEN uygula (`schema_migrations`
+   eşleşmesi, `GET /api/health`/`/api/health/ready` Render staging
+   URL'ine karşı, R2'den geri okunan objenin checksum'ı, `smoke:staging`
+   Render staging'e karşı).
+7. Sonucu §15c'ye (aşağı) EKLE — §12'nin formatını izle (tarih, ortam,
+   komut, PASS/FAIL, bulunan varsa bug).
+
+### 15c. Sonuç kaydı
+
+**Henüz çalıştırılmadı — "pending provider provisioning".** Render
+Postgres + Cloudflare R2 gerçekten kurulmadan bu bölüm boş kalacak. Bu,
+`docs/production-readiness-review.md`'nin Step 13 güncellemesinde de
+aynı şekilde "managed staging restore drill henüz yapılmadı" olarak
+işaretleniyor.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
   Production Step 11: managed Postgres/S3/hosting/secrets/monitoring/backup
   karar matrisi, env/secrets matrisi, §13'ün doğrudan kaynağı. Production
   Step 12: §7/§8 — Option A seçimi ve provider short-list'i, §14'ün
-  doğrudan girdisi.
+  doğrudan girdisi. Production Step 13: §9 — Render + R2 somut seçimi,
+  §9c'nin R2 versioning düzeltmesi, §15'in doğrudan kaynağı.
 - [`docs/deployment-runbook.md`](./deployment-runbook.md) §18 — Production
   Step 12: Staging Deployment Gate checklist'i, §14'ün "managed staging
-  drill" adımının restore-drill maddesiyle eşleştiği yer.
+  drill" adımının restore-drill maddesiyle eşleştiği yer. §19/§20 —
+  Production Step 13: Cloudflare R2 ve Render Postgres staging setup,
+  §15'in doğrudan girdisi.
 - `scripts/restore-drill-staging.sh` — §12'nin tam otomasyonu, §7'nin
   kod hali. Güvenlik guard'ları (NODE_ENV/DATABASE_URL kontrolü),
   aşama-aşama loglama (setup/seed/backup/reset/restore/verify/cleanup),

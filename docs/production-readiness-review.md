@@ -1082,17 +1082,150 @@ short-list'inden somut bir Postgres/S3/hosting sağlayıcısı seçilip
 `docs/deployment-runbook.md` §18b'nin checklist'i gerçekten
 işaretlenmeye başlanmalı.
 
+## 21. Implementation status update (Render + Cloudflare R2 Staging Provisioning Package — Production Step 13)
+
+**§20'nin bıraktığı "hangi somut sağlayıcı" sorusu artık CEVAPLANDI —
+gerçek servisler hâlâ KURULMADI.** Tam içerik
+[`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md)
+§9'da, [`docs/deployment-runbook.md`](./deployment-runbook.md) §19/§20'de
+— burada yalnızca bu belgenin production-gate sınıflandırmasına düşen
+özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **Provider path SEÇİLDİ:** Render (API/dashboard/worker runtime +
+  managed Postgres) + Cloudflare R2 (S3-uyumlu object storage) —
+  `docs/managed-infrastructure-plan.md` §9. **"Selected, not
+  provisioned"** — hiçbir hesap açılmadı, hiçbir servis kuruldu.
+- **Provisioning package HAZIRLANDI:**
+  - `docs/render-staging-blueprint.template.yaml` — pasif Render
+    Blueprint taslağı (repo köküne `render.yaml` olarak EKLENMEDİ,
+    bilinçli — bkz. aşağıdaki HIGH-RISK bulgusu ve dosyanın kendi
+    gerekçesi), 2 web service (API — Docker, dashboard — native Node) +
+    1 Postgres database modelledi, worker AYRI bir servis olarak
+    modellenmedi (mimari zaten böyle).
+  - `docs/deployment-runbook.md` §19 "Cloudflare R2 Staging Setup" —
+    bucket oluşturma, veri koruması (bkz. aşağıdaki R2 versioning
+    düzeltmesi), least-privilege access key, S3 endpoint formatı.
+  - `docs/deployment-runbook.md` §20 "Render Postgres Staging Setup" —
+    Postgres oluşturma, `DATABASE_URL` bağlama, migration, PITR/backup
+    notları.
+  - `docs/deployment-runbook.md` §18c'nin staging env/secrets matrisi
+    Render/R2'ye özgü hale getirildi (`S3_REGION=auto`, gerçek
+    `S3_ENDPOINT` formatı, vb.).
+  - `docs/staging-deploy-workflow-template.yml` Render Deploy Hook
+    mekanizmasına (Cloudflare/Render'ın kendi dokümantasyonundan
+    doğrulandı) göre güncellendi — CI gate job'ı eklendi, restore drill
+    bilinçli olarak MANUEL bir gate olarak bırakıldı (otomatik
+    değil — bir restore drill kendi hedefine karşı YIKICI).
+  - `docs/backup-restore-runbook.md` §15 "Render + R2 Managed Staging
+    Restore Drill" — somut, Render/R2'ye özgü prosedür; **"pending
+    provider provisioning"** olarak işaretli, §15c hâlâ boş.
+- **GERÇEK BİR HATA BULUNUP DÜZELTİLDİ (bu adımın kendi araştırması,
+  Cloudflare'ın güncel dokümantasyonuna karşı doğrulandı):**
+  `docs/managed-infrastructure-plan.md` §8b ve `docs/backup-restore-runbook.md`
+  §3b, R2'nin "bucket versioning destekliyor" dediği YANLIŞ bir iddia
+  içeriyordu (Production Step 9/11'de, sağlayıcı seçilmeden önce
+  yazılmıştı) — Cloudflare'ın kendi dokümantasyonu (S3 API uyumluluk
+  referansı + versioning'e dair sıfır sayfa) bunun DOĞRU OLMADIĞINI
+  gösteriyor. Düzeltildi: R2'nin gerçek mekanizması "Bucket Locks"
+  (WORM-tarzı retention, eski versiyon geri getirilemiyor) + lifecycle
+  rules (bu GERÇEKTEN destekleniyor) — versioning DEĞİL. Detay:
+  `docs/managed-infrastructure-plan.md` §9c.
+- **YENİ, GERÇEK BİR RİSK BULUNDU (runtime readiness doğrulaması,
+  Render'ın kendi dokümantasyonuna karşı):** `apps/api/Dockerfile`,
+  Production Step 2B/8'in bulduğu "tsc COPY'lenen kaynağa karşı Docker
+  içinde güvenilir çalışmıyor" bug'ı yüzünden HOST-BUILT `dist/`
+  klasörlerinin `COPY . .` ile image'a taşınmasına dayanıyor — yani
+  `docker build`'den ÖNCE host'ta (veya CI runner'da)
+  `pnpm run build` çalıştırılmış OLMALI. Render'ın kendi Blueprint
+  dokümantasyonu (bu adımda doğrulandı), Docker-runtime bir servis için
+  `docker build`'den önce host komutu çalıştıran bir mekanizma
+  TANIMLAMIYOR — `buildCommand`/`startCommand` alanları yalnız
+  Docker-DIŞI runtime'lar için. **Sonuç: bugünkü Dockerfile, Render'ın
+  Docker runtime'ında, GitHub Actions'ta (Step 8) bulunan AYNI
+  "Cannot find module dist/index.js" hatasını verme riski taşıyor —
+  bu HENÜZ gerçek Render altyapısına karşı TEST EDİLMEDİ, doğrulanmış bir
+  arıza değil, kanıta dayalı bir RİSK.** İki yol dokümante edildi
+  (`docs/render-staging-blueprint.template.yaml`'ın kendi HIGH-RISK
+  notu): (A) Docker runtime, risk yukarıdaki gibi; (B) native Node
+  runtime (Docker YOK), `RENDERER_PROVIDER=fake` ile ilk staging
+  bring-up için uygun (Chromium bağımlılığı yok) — ikisi arasında seçim
+  provizyonlama sırasına bırakıldı, bu belge bir seçim YAPMIYOR. Bu,
+  büyük bir refactor GEREKTİRMEDİ — yalnızca iki alternatif dokümante
+  edildi.
+- **Worker start command belirsizliği YOK** — §20/§9a'nın zaten
+  doğruladığı gibi worker, API Web Service'in KENDİ process'i
+  (`RENDER_QUEUE_ENABLED=true`), ayrı bir start command/servis
+  GEREKTİRMİYOR. Bu, task'ın "worker start command belirsizse risk
+  yaz" şartını TETİKLEMİYOR — belirsizlik yok.
+- **Render port binding — kısmen doğrulanmış, kısmen değil:** Render'ın
+  kendi dokümantasyonu (bu adımda fetch edildi) her iki runtime türü
+  için de `PORT` env değişkenine bağlanmayı öneriyor
+  (varsayılan `10000`, override edilebilir). Bu repo'nun API'si
+  `API_PORT` (özel isim) okuyor — `docs/render-staging-blueprint.template.yaml`
+  hem `PORT` hem `API_PORT`'u `4000`'e set ederek bunu ele alıyor, ama
+  Render'ın port-algılama mekanizmasının TAM OLARAK nasıl çalıştığı
+  (env değişkeni okuması mı, TCP probe mu) bu adımda kesin
+  DOĞRULANAMADI — provizyonlama sırasında teyit edilmeli.
+
+**Kapatılmadı (bilinçli, dürüstçe restate — bu adımın kendi başarı
+kriteri budur, gerçek deploy/provizyonlama yapmak DEĞİL):**
+
+- Hiçbir gerçek Render/Cloudflare hesabı açılmadı.
+- Hiçbir gerçek servis (Render Web Service/Postgres, R2 bucket)
+  provizyonlanmadı.
+- Hiçbir staging deploy'u yapılmadı.
+- Hiçbir gerçek secret/API key üretilmedi.
+- Managed staging altyapıya karşı bir restore drill hâlâ hiç yapılmadı
+  (`docs/backup-restore-runbook.md` §15c hâlâ boş).
+- Render Docker build riski GERÇEKTEN test edilmedi — yalnızca kanıta
+  dayalı bir risk olarak kaydedildi.
+- §16'nın listelediği diğer açık kalem (çoklu-worker yatay ölçek
+  koordinasyonu) bu adımın kapsamı DIŞI, değişmedi.
+- Hiçbir production deploy yapılmadı, hiçbir yeni ürün özelliği
+  eklenmedi, hiçbir migration eklenmedi.
+
+**Bu adımın kendi doğrulaması:** `pnpm run ci:stable` PASS — `build`/
+`typecheck`/`lint` temiz, `test:ci` **433/433 temiz (26/26 dosya)**.
+`pnpm run ci:staging` PASS — `smoke:staging` 2 pass, 2 warn (`providers`
+degraded, `KIE_AI_API_KEY` staging'de bilinçli boş — beklenen), 1 skip, 0
+fail. `bash -n scripts/restore-drill-staging.sh` temiz (script'e
+dokunulmadı). Yeni `docs/render-staging-blueprint.template.yaml` VE
+güncellenen `docs/staging-deploy-workflow-template.yml` YAML sözdizimi
+`python3 -c "import yaml; yaml.safe_load(...)"` ile doğrulandı — ikisi de
+temiz parse.
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** Provider path SEÇİLDİ,
+provisioning paketi HAZIR. **Ama bu, projenin staging'e veya
+production'a HAZIR olduğu anlamına GELMEZ** — Render/R2 gerçek
+servisleri hâlâ kurulmadı, managed staging deploy hâlâ yapılmadı,
+managed staging restore drill hâlâ yapılmadı. **Production deploy hâlâ
+BLOKEDE, DEĞİŞMEDİ.** **Bir sonraki somut adım:** kullanıcının gerçek
+Render hesabı/Cloudflare hesabı açması, `docs/render-staging-blueprint.template.yaml`'ı
+gerçek `render.yaml`'a dönüştürüp sync etmesi (Docker vs native Node
+kararını vererek), R2 bucket'ı gerçekten oluşturması — bunların HİÇBİRİ
+bu Antigravity oturumunda yapılamaz (gerçek hesap/kredi kartı/secret
+işlemi gerektiriyor), kullanıcının kendi platformlarında yapması
+gerekiyor.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
   §19'un tam teslimatı: infrastructure envanteri, provider karar matrisi,
   env/secrets matrisi, ops decision (Option A/B/C). §7/§8 — §20'nin
   kaynağı: Option A'nın "SEÇİLEN YÖN" işareti ve provider short-list'i.
+  §9 — §21'in kaynağı: somut Render + R2 seçimi, R2 versioning
+  düzeltmesi.
 - [`docs/deployment-runbook.md`](./deployment-runbook.md) §18 — §20'nin
   doğrudan teslimatı: Staging Deployment Gate checklist'i, staging
-  env/secrets matrisi, provider-agnostic deploy akışı.
+  env/secrets matrisi, provider-agnostic deploy akışı. §19/§20 — §21'in
+  doğrudan teslimatı: Cloudflare R2 ve Render Postgres staging setup.
 - [`docs/staging-deploy-workflow-template.yml`](./staging-deploy-workflow-template.yml) —
-  §20'nin pasif GitHub Actions taslağı.
+  §20'nin pasif GitHub Actions taslağı, §21'de Render/R2'ye özgü hale
+  güncellendi.
+- [`docs/render-staging-blueprint.template.yaml`](./render-staging-blueprint.template.yaml) —
+  §21'in pasif Render Blueprint taslağı, Docker build riskinin kaynağı.
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) — §17'nin
   tam teslimatı: persistence envanteri, managed Postgres/S3 karar
   kriterleri, backup policy, restore/restore-drill prosedürü; §12 —
