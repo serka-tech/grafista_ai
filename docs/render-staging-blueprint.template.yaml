@@ -107,7 +107,7 @@ services:
       - key: AI_DEFAULT_PROVIDER
         value: fake # safe first bring-up — see docs/deployment-runbook.md §18c
       - key: RENDERER_PROVIDER
-        value: fake # safe first bring-up, zero Chromium dependency — see docs/deployment-runbook.md §18c
+        value: fake # safe first bring-up, zero Chromium dependency — see docs/deployment-runbook.md §18c. LIVE DRIFT (Production Step 16, observed via /api/health/ready): the actual grafista-api-staging panel was set to "playwright", not "fake" — a valid alternative choice (image ships Chromium via the Dockerfile), but it means the real render path is active and was NOT yet exercised. This recommendation ("fake") stands for a conservative first bring-up; see docs/deployment-runbook.md §25f for the drift record.
       - key: STORAGE_PROVIDER
         value: s3
       - key: S3_ENDPOINT
@@ -123,7 +123,7 @@ services:
       - key: S3_FORCE_PATH_STYLE
         sync: false # UNVERIFIED for R2 — Cloudflare's S3-compatibility docs (fetched this step) did not state whether path-style or virtual-hosted-style addressing is required; confirm at provisioning time instead of assuming either value
       - key: RENDER_QUEUE_ENABLED
-        value: "true" # staging trial per docs/deployment-runbook.md §3 — worker runs IN THIS SAME service, no separate service (see the worker note below, not a services: entry)
+        value: "true" # staging trial per docs/deployment-runbook.md §3 — worker runs IN THIS SAME service, no separate service (see the worker note below, not a services: entry). LIVE DRIFT (Production Step 16, observed via /api/health/ready): the actual panel was set to "false" — renders run synchronously and the worker heartbeat/stale-lock behavior is therefore STILL unexercised in a real environment (§7's open item persists). This recommendation ("true") stands; see docs/deployment-runbook.md §25f for the drift record.
       - key: API_CORS_ORIGIN
         sync: false # staging dashboard's URL — fill in once grafista-dashboard-staging's URL is known (see the circular-dependency note on that service below)
       - key: COOKIE_SECURE

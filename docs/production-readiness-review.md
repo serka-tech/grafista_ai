@@ -1361,6 +1361,71 @@ denenmedi. **Bir sonraki somut adım:** kullanıcının Render panelinden
 `grafista-api-staging` için manuel bir yeniden deploy tetikleyip build
 logunun `apps/api/dist/index.js`'i artık bulduğunu doğrulaması.
 
+## 24. Implementation status update (Render API Staging Deploy Validated & Health Gate — Production Step 16)
+
+**§23'ün "gerçek Render deploy'u bu düzeltmeyle henüz yeniden denenmedi"
+notu bu adımda KAPANDI — Render API staging servisi gerçek ortamda boot
+etti, `/api/health` PASS, DB bağlantısı ilk-seviye PASS.** Tam gate
+sınıflandırması ve migration prosedürü `docs/deployment-runbook.md`
+§25'te — burada yalnız production-gate özeti. Bu adımda HİÇBİR kod
+değişikliği yapılmadı (yalnız dış redeploy doğrulaması + dokümantasyon).
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **API staging deploy: PASS.** `grafista-api-staging` (Docker runtime,
+  commit `b785398`) Render'da **Live** — Step 15'in Docker fix'i gerçek
+  Render build altyapısında da çalıştı, `MODULE_NOT_FOUND` tekrarlamadı.
+  URL: `https://grafista-api-staging.onrender.com`.
+- **`/api/health` (liveness): PASS** — `status:ok`, HTTP 200, bu oturumda
+  bağımsız `curl` ile de doğrulandı.
+- **DB bağlantı gate'i (ilk seviye): PASS** — `/api/health/ready`'nin
+  `database` check'i (`SELECT 1`, `health.ts:64`) gerçek Render
+  Postgres'e karşı `ok "reachable"` döndü. Uygulama managed DB'ye
+  bağlanabiliyor.
+
+**AÇIK kalan gate'ler / blokajlar (dürüstçe):**
+
+- **DB migration / schema gate: AÇIK.** Kod-doğrulaması yapıldı
+  (`apps/api/src/index.ts` boot'ta migration çalıştırmıyor;
+  `database` check'i yalnız `SELECT 1`, şema kontrolü değil) — yani
+  Render Postgres bağlanılabilir ama muhtemelen ŞEMASIZ. Migration
+  bu adımda ÇALIŞTIRILMADI (gerçek `DATABASE_URL`'e erişilmedi);
+  `docs/deployment-runbook.md` §25d üç yolu (Render Shell önerilen,
+  Pre-Deploy Command opt-in/boş bırakıldı, GitHub Actions ağır)
+  netleştirdi.
+- **R2 / managed staging storage gate: AÇIK — "not validated" riski.**
+  `storage: ok` yalnız S3/R2 env'lerinin panelde MEVCUT olduğunu
+  gösteriyor (config-presence), gerçek bir R2 put/get roundtrip'i
+  YAPILMADI ("no live connectivity check"). API boot + health PASS ama
+  **upload/render-artifact gate GEÇMEDİ** — R2 canlı doğrulanmadan
+  production deploy'a geçilmez (§25e).
+- **Provider gate: degraded (beklenen)** — `openai`/`anthropic` present,
+  `KIE_AI_API_KEY` bilinçli boş; gerçek görsel üretimi bu env girilmeden
+  çalışmaz, ama boot blocker değil.
+- **Config drift (blocker değil, kayıtlı):** canlı panel
+  `RENDER_QUEUE_ENABLED=false` (blueprint `true` öneriyordu) ve
+  `RENDERER_PROVIDER=playwright` (blueprint `fake` öneriyordu) —
+  worker heartbeat/stale-lock davranışı gerçek ortamda hâlâ gözlemlenmedi
+  (§7'nin açık kalemi sürüyor). Detay §25f.
+- **Dashboard deploy, managed restore drill: DEĞİŞMEDİ** — bu adımın
+  kapsamı dışı, API health gate'i öncelikliydi.
+
+**Bu adımın kendi doğrulaması:** başlangıç yerel validasyonu (`b785398`'e
+karşı) — `typecheck`/`lint`/`build`/`ci:stable`/`ci:staging` +
+`docker build -f apps/api/Dockerfile` hepsi PASS, image içinde
+`apps/api/dist/index.js` doğrulandı. Render redeploy Live + `/api/health`
++ `/api/health/ready` bağımsız `curl` ile doğrulandı. `git status` bu
+adım boyunca temiz (yalnız dokümantasyon değişikliği).
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** API staging artık
+canlıda boot ediyor ve health PASS — projenin İLK gerçek deploy edilmiş
+çalışan bileşeni. **Ama production'a HAZIR DEĞİL** — DB şeması yok
+(migration çalıştırılmadı), R2 canlı doğrulanmadı, dashboard deploy
+edilmedi, managed restore drill yapılmadı. **Production deploy hâlâ
+BLOKEDE.** **Sıradaki somut adım:** Render Shell'de `db:migrate`+`db:seed`
+çalıştırmak (§25d) ve R2 canlı roundtrip'ini doğrulamak (§25e); ikisi de
+PASS olmadan dashboard/restore-drill/production adımlarına geçilmez.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

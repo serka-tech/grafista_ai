@@ -1658,6 +1658,178 @@ kaydediliyor, gizlenmiyor.
 
 ---
 
+## 25. Render API Redeploy Validation & Staging API Health Gate (Production Step 16)
+
+> **§24'ün "gerçek Render altyapısına karşı yeniden deploy TETİKLENMEDİ"
+> notu bu adımda KAPANDI — Render API staging servisi gerçek ortamda
+> boot etti ve `/api/health` doğrulandı.** Step 15'in Docker build
+> fix'i (`b785398`) Render'ın kendi build altyapısında da çalıştı;
+> ilk deploy'u kesen `Cannot find module '/repo/apps/api/dist/index.js'`
+> hatası TEKRARLAMADI. Bu adımda HİÇBİR kod değişikliği yapılmadı —
+> yalnızca dış (Render panel) redeploy doğrulandı, health/DB/storage
+> gate'leri sınıflandırıldı ve dokümante edildi.
+
+### 25a. Redeploy sonucu
+
+| Alan | Değer |
+|---|---|
+| Deploy status | **Live** |
+| Deploy edilen commit | `b785398` (Step 15 Docker build fix) |
+| Servis URL | `https://grafista-api-staging.onrender.com` |
+| Build adımı | `RUN pnpm --filter @grafista/api... run build` çalıştı, `apps/api/dist/index.js` üretildi |
+| MODULE_NOT_FOUND | TEKRARLAMADI — Step 15 fix gerçek Render ortamında doğrulandı |
+
+Yerel önceden-doğrulama (bu adımın başında, `b785398`'e karşı):
+`typecheck`/`lint`/`build`/`ci:stable`/`ci:staging` + `docker build -f
+apps/api/Dockerfile` hepsi PASS, image içinde `apps/api/dist/index.js`
+doğrulandı (Render'ın çalıştıracağı build'in en yakın yerel proxy'si).
+
+### 25b. Health gate — `/api/health` (liveness)
+
+```
+GET https://grafista-api-staging.onrender.com/api/health
+→ 200 {"status":"ok","service":"grafista-ai-studio-api","version":"0.1.0",...}
+```
+**PASS.** Container boot ediyor, process ayakta, liveness sinyali temiz.
+Bağımsız olarak bu oturumda `curl` ile doğrulandı (kullanıcının
+raporuyla birebir aynı).
+
+**Yan bulgu — port binding artık DOĞRULANDI (§13'ün/§21'in açık
+"UNVERIFIED PORT" kalemi kapandı):** uygulama listen portunu `API_PORT`'tan
+okuyor, platform-konvansiyonel `PORT`'tan DEĞİL (`apps/api/src/config/env.ts`
++ `src/index.ts:19` `const PORT = env.API_PORT`; tüm `apps/api/src`'te
+`process.env.PORT`'a sıfır referans — kod-doğrulaması ile teyit edildi).
+`render-staging-blueprint.template.yaml` bunu öngörüp hem `PORT` hem
+`API_PORT`'u `4000`'e set etmişti ama "Render'ın port-algılaması env
+ismini mi okuyor yoksa TCP probe mu — UNVERIFIED" notu düşmüştü. Public
+Render URL'inden `/api/health`'in 200 dönmesi bu soruyu ÇÖZÜYOR: Render'ın
+routing'i uygulamanın bağlandığı porta gerçekten ulaşıyor — yani panelde
+`API_PORT` doğru set edilmiş ve Render'ın mekanizması bu config'le çalışıyor.
+Kod tarafında bir değişiklik GEREKMİYOR; bu yalnızca daha önce açık olan
+bir belirsizliğin canlı kanıtla kapanması.
+
+### 25c. Readiness gate — `/api/health/ready` (DB/storage/providers/queue)
+
+```
+GET .../api/health/ready → HTTP 200, overall status "degraded"
+```
+`degraded` HTTP 200'dür ve §8'e göre otomatik bir blocker DEĞİLDİR —
+her check ayrı yorumlanır:
+
+| Check | Durum | Yorum |
+|---|---|---|
+| `database` | **ok** — "database reachable" | **DB bağlantı gate'i (ilk seviye) PASS** — uygulama GERÇEK Render Postgres'e bağlandı. Kanıt: `apps/api/src/routes/health.ts:64` yalnızca `SELECT 1` çalıştırır — bu bir BAĞLANTI kontrolü, ŞEMA kontrolü DEĞİL (bkz. §25d) |
+| `storage` | ok — "s3 (config present, no live connectivity check)" | **Yanıltıcı olabilir:** yalnızca `STORAGE_PROVIDER=s3` + S3/R2 env'lerinin VAR olduğunu gösterir; gerçek bir R2 put/get roundtrip'i YAPILMADI (bkz. §25e). Bu "ok" bir CONFIG-presence sinyali, R2'nin çalıştığının kanıtı DEĞİL |
+| `providers` | **degraded** — openai:present, anthropic:present, **kie:missing** | Beklenen — `KIE_AI_API_KEY` staging'de bilinçli boş. `overall degraded`'ın ana kaynağı bu. Boot blocker DEĞİL, ama gerçek görsel üretimi (KIE) bu env girilmeden ÇALIŞMAZ |
+| `renderQueue` | ok — "queue disabled (RENDER_QUEUE_ENABLED=false)" | Canlı panel `false` (bkz. §25f drift notu) — render'lar senkron çalışır |
+| `workerHeartbeat` | ok — "not applicable (queue disabled)" | Queue kapalı olduğu için uygulanmıyor |
+| `playwright` | ok — "package resolvable (no browser launched)" | Canlı panel `RENDERER_PROVIDER=playwright` (blueprint `fake` öneriyordu, §25f) — Chromium image'da kurulu ve paket resolve oluyor, ama bu check GERÇEK bir browser başlatmıyor/render denemiyior |
+
+### 25d. DB migration / schema gate — AÇIK (kod-doğrulaması ile netleştirildi)
+
+**`database: ok "reachable"` MIGRATION'ların çalıştığı anlamına GELMEZ.**
+Bu adımda doğrudan kaynak-kod doğrulaması yapıldı:
+
+- **Uygulama boot'ta migration ÇALIŞTIRMIYOR** — `apps/api/src/index.ts`
+  yalnızca `app.listen(PORT)` (satır 21) + `startRenderWorkerLoop()`
+  (satır 31) çağırıyor; hiçbir migration çağrısı yok. Tüm repoda
+  `runMigrations`'ı çağıran YALNIZCA `src/test/global-setup.ts` (testler)
+  ve migration script'inin kendisi (`src/db/migrate.ts`). Yani
+  migration, boot'tan AYRI, elle tetiklenen bir adım (`db:migrate`,
+  `apps/api/package.json`).
+- **Readiness `database` check'i `SELECT 1`** (`health.ts:64`) — yalnız
+  bağlantı; şema/tablo varlığını KONTROL ETMEZ. Bu yüzden Render Postgres
+  şu an bağlanılabilir ama büyük olasılıkla ŞEMASIZ (migration'lar hiç
+  çalışmadı) — herhangi bir gerçek tablo sorgusu `relation does not exist`
+  ile başarısız olur.
+
+**Render Postgres'e migration nasıl çalıştırılır — üç yol, §6'nın
+"migration otomatik bir CI adımı değil, kontrollü/elle" ilkesiyle
+tutarlı sırada:**
+
+1. **Render Shell (ÖNERİLEN, staging ilk-koşu için):** Render dashboard
+   → `grafista-api-staging` → **Shell** sekmesi → container İÇİNDE
+   (kod + `DATABASE_URL` env zaten mevcut) şunu çalıştır:
+   ```
+   pnpm --filter @grafista/api run db:migrate
+   ```
+   En basit, en kontrollü yol; secret terminale/repoya girmez (env
+   Render tarafından zaten enjekte edilmiş). Migration additive-only
+   (§6, 25/25 migration'da doğrulandı) olduğundan tek-yönlü güvenli.
+   Ardından `db:seed` (roller/izinler) ve gerekiyorsa `db:seed-admin`
+   çalıştırılır (§5 adım 12-13 sırası).
+2. **Pre-Deploy Command (opt-in, OPSİYONEL — mecbur DEĞİL):** Render
+   servis ayarlarındaki "Pre-Deploy Command" alanına
+   `pnpm --filter @grafista/api run db:migrate` yazılabilir; her
+   deploy'da canlıya geçmeden önce çalışır. **Bu adımda BİLİNÇLİ olarak
+   BOŞ bırakıldı** — §6'nın "migration kör bir otomatik adım değil"
+   ilkesine ve görevin "mevcut pre-deploy command boş kalmalıysa koru"
+   kısıtına uygun. İleride istenirse açık bir tercih olarak eklenebilir.
+3. **GitHub Actions (en ağır, şimdilik gereksiz):** `DATABASE_URL`'i
+   GitHub Secrets'tan okuyup migrate çalıştırmak mümkün ama DB'nin
+   dışarıdan erişilebilir olmasını + secret'ın GH'a girilmesini
+   gerektirir — staging ilk-koşu için gerekmez.
+
+**Bu adımda migration ÇALIŞTIRILMADI** — gerçek `DATABASE_URL`'e
+bu oturumdan erişilmedi (görev kısıtı). Migration'ı çalıştırmak
+kullanıcının Render Shell'de yapması gereken bir SONRAKİ adım.
+
+### 25e. R2 / storage gate — AÇIK (config var, canlı doğrulama YOK)
+
+- `storage: ok` yalnızca `STORAGE_PROVIDER=s3` + S3/R2 env'lerinin
+  panelde MEVCUT olduğunu gösteriyor — uygulama BOOT edebiliyor ve
+  health gate geçiyor. Ama readiness check'i gerçek bir R2 bağlantısı/
+  put-get roundtrip'i YAPMIYOR ("no live connectivity check").
+- **Sonuç (görev item 9 ile birebir):** API boot + health PASS, ama
+  **upload / render-artifact gate GEÇMEDİ sayılır** — bir dosyanın
+  gerçekten R2'ye yazılıp okunabildiği HİÇ doğrulanmadı (bucket var mı,
+  credential geçerli mi, path-style doğru mu — hepsi açık). Bu bir
+  BLOKAJ olarak kalır: **R2 canlı doğrulanmadan production deploy'a
+  geçilmez.**
+- Somut doğrulama yolu (gelecek adım): Render Shell'de
+  `pnpm --filter @grafista/api run smoke:providers`'ın `storage`
+  bölümü (put/get/delete roundtrip) VEYA dashboard'dan gerçek bir
+  export indirip R2'de nesnenin oluştuğunu görmek.
+
+### 25f. Canlı panel ile blueprint template farkı (drift — kayıt amaçlı)
+
+`/api/health/ready` canlı env'i açığa çıkardı; iki değer
+`docs/render-staging-blueprint.template.yaml`'ın ÖNERDİĞİNDEN farklı
+(ikisi de geçerli operasyonel tercih, blocker DEĞİL, ama kayda geçiyor):
+
+| Env | Blueprint önerisi | Canlı panel (Step 16) | Etki |
+|---|---|---|---|
+| `RENDER_QUEUE_ENABLED` | `true` (staging deneme) | **`false`** | Render'lar senkron çalışır; worker heartbeat/stale-lock davranışı gerçek ortamda HÂLÂ gözlemlenmedi (§7'nin açık kalemi sürüyor) |
+| `RENDERER_PROVIDER` | `fake` (güvenli ilk bring-up) | **`playwright`** | Gerçek Chromium render yolu aktif; image Chromium içeriyor (Dockerfile), paket resolve oluyor, ama gerçek bir render bu adımda denenmedi |
+
+Bu drift `docs/render-staging-blueprint.template.yaml`'a kısa bir "canlı
+Step 16'da gözlenen değer" notu olarak da eklendi — template'in ÖNERİSİ
+değişmedi (öneriler hâlâ geçerli), yalnız canlı gerçek not düşüldü.
+
+### 25g. Kapatılmadı (bilinçli, dürüstçe restate)
+
+- Migration Render Postgres'te ÇALIŞTIRILMADI (§25d) — şema henüz yok.
+- R2 canlı bağlantı/upload-artifact roundtrip DOĞRULANMADI (§25e).
+- Dashboard (`grafista-dashboard-staging`) deploy EDİLMEDİ — bu adımın
+  kapsamı dışı, API health gate'i öncelikli.
+- Managed staging restore drill YAPILMADI (`docs/backup-restore-runbook.md`
+  §15c hâlâ boş).
+- Gerçek görsel üretimi (KIE) doğrulanmadı — `KIE_AI_API_KEY` bilinçli boş.
+- Hiçbir kod değişikliği, hiçbir production deploy, hiçbir yeni migration,
+  hiçbir runtime storage refactor yapılmadı.
+
+### 25h. Sıradaki somut adım
+
+1. Render Shell'de `pnpm --filter @grafista/api run db:migrate` + `db:seed`
+   çalıştır (§25d), ardından `/api/health/ready`'nin `database` check'i
+   hâlâ `ok` mı ve gerçek bir authenticated akış çalışıyor mu doğrula.
+2. R2 canlı doğrulaması (§25e) — `smoke:providers` storage roundtrip'i
+   veya gerçek bir export.
+3. İkisi de PASS olduğunda: dashboard deploy → managed restore drill →
+   (ancak ondan sonra) production deploy değerlendirmesi.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
