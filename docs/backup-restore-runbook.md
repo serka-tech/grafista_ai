@@ -1,17 +1,20 @@
-# Grafista AI Studio — Backup/Restore Runbook (Production Step 9)
+# Grafista AI Studio — Backup/Restore Runbook (Production Step 9, egzersiz edildi Production Step 10)
 
-> **Durum:** PROSEDÜR + KARAR DOKÜMANI. Bu adımda hiçbir production deploy
-> yapılmadı, hiçbir yeni ürün özelliği eklenmedi, hiçbir migration
-> eklenmedi. Aşağıdaki backup/restore prosedürü **staging'de bir dry-run
-> restore drill ile egzersiz edilmedi** — bugüne kadar hiçbir gerçek
-> production verisi/yedeği yok (`docs/production-readiness-review.md` §16:
-> "Gerçek production ortamına HİÇ deploy yapılmadı"), dolayısıyla
-> aşağıdaki adımların hiçbiri gerçek bir yedekten gerçek bir restore ile
-> doğrulanmadı. Bu doküman, `docs/production-readiness-review.md` §10 ve
-> `docs/deployment-runbook.md` §11'in ikisinin de tespit ettiği aynı boşluğu
-> ("backup/restore prosedürü hiçbir yerde yazılı değil") kapatmak için
-> yazıldı — **prosedür artık yazılı, ama henüz gerçek veriye karşı
-> egzersiz edilmiş değil.**
+> **Durum (GÜNCELLEME — Production Step 10):** bu doküman Production
+> Step 9'da PROSEDÜR + KARAR DOKÜMANI olarak yazıldı, ama henüz hiç
+> çalıştırılmamıştı. **Production Step 10'da §7'nin prosedürü,
+> `scripts/restore-drill-staging.sh` ile staging Docker ortamında
+> GERÇEKTEN çalıştırıldı ve PASS ile sonuçlandı** (tam sonuç: §12).
+> Bu, hâlâ gerçek production verisi/managed Postgres/S3 ile bir
+> egzersiz DEĞİL — tamamen sentetik staging verisiyle, restore
+> MEKANİĞİNİN çalıştığını (checksum'la kanıtlanmış) doğrulayan bir
+> drill. Hiçbir production deploy hâlâ yapılmadı, hiçbir yeni ürün
+> özelliği eklenmedi, hiçbir migration eklenmedi (Step 9'dan beri
+> değişmedi). Bu doküman, `docs/production-readiness-review.md` §10 ve
+> `docs/deployment-runbook.md` §11'in ikisinin de tespit ettiği aynı
+> boşluğu ("backup/restore prosedürü hiçbir yerde yazılı değil, hiç
+> egzersiz edilmedi") kapatmak için yazıldı — **prosedür artık hem
+> yazılı HEM DE staging'de en az bir kez gerçekten doğrulanmış.**
 
 ## Amaç
 
@@ -210,9 +213,18 @@ yönü netleştiriyor:
   instance'a restore edip doğrulayın, sonra trafiği yönlendirin (bkz. §6).
   Bu doğrudan repo koduna bir hüküm değildir, standart bir güvenli-restore
   disiplinidir.
-- `pg_dump`/`pg_restore` (PostgreSQL 16 client tools — repo `postgres:16-alpine`
-  kullanıyor, `docker-compose.staging.yml`) ve seçilen S3-uyumlu sağlayıcının
-  CLI'ı (`aws` CLI veya eşdeğeri) yerel makinede kurulu olmalı.
+- `pg_dump`/`pg_restore` (PostgreSQL 16 client tools) gerekli — ama
+  **bunların host makinede AYRICA kurulu olması ZORUNLU DEĞİL**
+  (Production Step 10'da doğrulandı): staging/local Docker ortamında,
+  bu araçlar zaten çalışan `postgres:16-alpine` container'ının içinde
+  mevcut — `docker compose exec -T postgres pg_dump/pg_restore ...` ile
+  host'ta hiçbir ek kurulum yapmadan kullanılabilir (bkz.
+  `scripts/restore-drill-staging.sh`'ın kendisi, tam olarak bu yolu
+  izliyor). Host-side kurulum yalnız container dışı bir Postgres'e
+  (ör. managed bir sağlayıcıya) doğrudan bağlanmak gerektiğinde
+  gerekir. Seçilen S3-uyumlu sağlayıcının CLI'ı (`aws` CLI veya
+  eşdeğeri) yine de yerel makinede kurulu olmalı (S3 tarafı bir
+  container içinde çalışmıyor).
 - Restore edilecek backup'ın hangi migration seviyesinde alındığı bilinmeli
   (`schema_migrations` tablosunun backup içindeki içeriği) — restore
   sonrası `database/migrations/`'daki dosyalarla karşılaştırılacak (§7).
@@ -339,20 +351,37 @@ egzersiz.
 
 ## 9. Verification checklist (her restore sonrası)
 
-- [ ] Postgres restore hatasız tamamlandı (exit code 0).
-- [ ] `schema_migrations` tablosu `database/migrations/`'daki tüm
-      dosyaları içeriyor (eksikse `db:migrate` ile tamamlandı).
-- [ ] `GET /api/health` → 200.
+> **GÜNCELLEME (Production Step 10):** bu checklist artık gerçek bir
+> staging restore drill'inde birebir uygulandı (bkz. §12) — teorik bir
+> liste olmaktan çıktı. `GET /api/health/ready`'nin `database`/`storage`
+> maddesi ok olsa da, drill sırasında `workerHeartbeat` check'inin
+> restore sonrası birkaç saniyeliğine `degraded` görünebildiği gözlemlendi
+> (§12'de detaylı) — bu maddeyi "ok" ile birebir eşleştirmek yerine
+> aşağıdaki gibi netleştirildi.
+
+- [x] Postgres restore hatasız tamamlandı (exit code 0). — §12'de
+      doğrulandı (`pg_restore --clean --if-exists`).
+- [x] `schema_migrations` tablosu `database/migrations/`'daki tüm
+      dosyaları içeriyor (eksikse `db:migrate` ile tamamlandı). — §12'de
+      doğrulandı (tam eşleşme).
+- [x] `GET /api/health` → 200. — §12'de doğrulandı.
 - [ ] `GET /api/health/ready` → `database` check `ok`, `storage` check
-      `ok` (veya en azından `degraded` değil).
-- [ ] Örnek bir kalıcı-tier objesi (`brand-assets/`, `design-references/`,
-      veya `generated-outputs/`) `getObjectBuffer()`/CLI ile geri okunup
-      checksum'ı doğrulandı.
+      `ok`. **Not:** `workerHeartbeat` check'i restore'dan hemen sonraki
+      ilk birkaç saniyede `degraded` görünebilir (§12) — bu bir blocker
+      DEĞİL (§8 doktrini ile tutarlı), ama `database`/`storage` check'i
+      spesifik olarak `ok` olmalı, genel `status` alanının `degraded`
+      olması TEK BAŞINA bir fail sinyali değildir.
+- [x] Örnek bir kalıcı-tier objesi (`brand-assets/`) checksum ile geri
+      okunup doğrulandı. — §12'de sha256 ile doğrulandı (local mode;
+      `design-references/`/`generated-outputs/` henüz ayrı test
+      edilmedi — aynı kod yolunu kullandıkları için düşük risk, ama
+      TEK TEK doğrulanmadı).
 - [ ] Rastgele seçilmiş birkaç Postgres satırının storage referansı
-      (`storage_provider`/`storage_bucket`/`storage_key`) gerçekten
-      erişilebilir bir objeye işaret ediyor (orphan referans yok).
-- [ ] `pnpm run ci:staging` (staging drill için) veya eşdeğer bir smoke
-      test PASS.
+      gerçekten erişilebilir bir objeye işaret ediyor (orphan referans
+      yok). — §12'nin drill'i yalnız TEK bir sentetik satır kullandı,
+      bu maddeyi "çoklu satır" ölçeğinde henüz egzersiz etmedi.
+- [x] `pnpm run ci:staging` (veya eşdeğer bir smoke test) PASS. — §12'de
+      `smoke:staging` 0 fail ile çalıştırıldı (1 pass/3 warn/1 skip).
 
 ## 10. Rollback checklist
 
@@ -364,6 +393,13 @@ tutarsızlığı ortaya çıkarsa:
 - [ ] Kullanılan backup dosyasının/snapshot'ın bütünlüğünü doğrulayın
       (bozuk bir dump dosyası mı, yoksa restore prosedüründeki bir adım
       mı hatalı — ayırt edin).
+- [ ] Postgres restore BAŞARILI ama artifact/object-storage restore
+      BAŞARISIZ olduysa (veya tersi): ikisini AYRI başarı/başarısızlık
+      olarak ele alın — restore edilmiş Postgres instance'ını, artifact
+      tarafı düzelene kadar SİLMEYİN/DÜŞÜRMEYİN (veri güvenliği,
+      kolaylıktan önce gelir). §12'nin drill'i bu iki tarafı bilinçli
+      olarak ayrı checksum'larla doğruladı, tam da bu senaryoyu
+      ayırt edebilmek için.
 - [ ] Bu runbook'un ilgili adımını (§5/§6/§7) güncelleyin, aynı hataya
       bir daha düşülmesin.
 
@@ -380,8 +416,120 @@ tutarsızlığı ortaya çıkarsa:
   dump ikinci savunma hattı olarak kullanılmalı — bu yüzden bu dump'ın
   sağlayıcıdan BAĞIMSIZ bir konumda tutulması (§3a) kritik.
 
+## 12. First Staging Restore Drill Result (Production Step 10)
+
+- **Tarih/saat:** 2026-07-07, ~13:33 (yerel), ikinci (başarılı) koşum.
+- **Branch:** `phase-2-checkpoint`.
+- **Commit:** Step 9'un `3f48bf4`'ü üzerine, bu Step 10'un kendi
+  `scripts/restore-drill-staging.sh`'ı (bu drill sırasında henüz commit
+  edilmemiş working-tree değişikliği) ile çalıştırıldı.
+- **Ortam:** yerel makine, Docker Desktop, `docker-compose.staging.yml`
+  stack'i (`postgres:16-alpine` + `apps/api` container) — gerçek bir CI
+  runner'da DEĞİL, gerçek production/managed altyapıda HİÇ DEĞİL.
+  Kullanılan tüm veri (client, `brand_assets` satırı, artifact bytes)
+  bu drill'in kendisi tarafından üretilen sentetik veri — gerçek müşteri
+  verisi veya gerçek secret KULLANILMADI.
+- **Kullanılan komut:** `bash scripts/restore-drill-staging.sh`.
+
+### Sonuç: PASS (ikinci denemede — birinci deneme gerçek bir script
+### bug'ı yakaladı, bu tam olarak bu adımın amacı)
+
+**İlk deneme BAŞARISIZ oldu — ve bu, drill'in kendisinin değerini
+kanıtladı:** `seed` aşamasında, sentetik client'ı oluşturan
+`INSERT ... RETURNING id;` komutunun çıktısı `psql -t -A` ile
+ayrıştırılırken, psql'in `-t`/`-A` bayraklarının bir `INSERT ... RETURNING`
+komutunun "INSERT 0 1" tamamlanma etiketini BASTIRMADIĞI ortaya çıktı —
+dönen UUID ile bu etiket birleşip geçersiz bir UUID string'i oluşturdu
+(`7dd77fea-...a0a9cINSERT01`), bir sonraki `brand_assets` INSERT'i bu
+yüzden `invalid input syntax for type uuid` hatasıyla düştü. **Script
+sadece yazılıp hiç çalıştırılmasaydı, bu bug hiç yakalanmazdı.**
+Düzeltme: `INSERT ... RETURNING id` bir `WITH ins AS (INSERT ... RETURNING
+id) SELECT id FROM ins;` CTE'sine sarıldı — dıştaki komut artık gerçek
+bir `SELECT`, ki bu, `-t`'nin doğru şekilde bastırdığı durum. Script'in
+`trap cleanup`'ı bu başarısız denemede de doğru çalıştı: container
+logları dump edildi, stack + volume tamamen indirildi, host-side scratch
+dizini silindi — hiçbir kalıntı kalmadı (`docker compose ps -a` ve
+`docker volume ls` ile doğrulandı).
+
+**İkinci deneme, düzeltme sonrası, TAM PASS:**
+
+| Aşama | Sonuç |
+|---|---|
+| setup (build, staging:up, healthcheck, migrate) | PASS — 2/2 servis healthy |
+| seed (sentetik client + `brand_assets` satırı + artifact bytes) | PASS |
+| backup (`pg_dump -Fc`, artifact host'a kopyalandı) | PASS — backup checksum orijinalle eşleşti |
+| reset (`docker compose down -v` + `staging:up`) | PASS — reset sonrası `public` şemada 0 tablo doğrulandı (gerçek veri kaybı simülasyonu) |
+| restore (`pg_restore --clean --if-exists`, artifact geri kopyalandı) | PASS |
+| verify — `schema_migrations` vs disk | PASS — tam eşleşme |
+| verify — restore edilmiş `brand_assets` satırı | PASS — 1 satır, `storage_key` eşleşiyor |
+| verify — artifact checksum (sha256, restore öncesi/sonrası) | **PASS — `6e045ca5...` birebir eşleşti** (asıl kanıt bu, "komut exit 0 döndü" değil) |
+| verify — `GET /api/health` | PASS — 200 |
+| verify — `GET /api/health/ready` | `database`/`storage`/`renderQueue`/`playwright` ok; `workerHeartbeat`/`providers` degraded (aşağıya bkz.) |
+| verify — `smoke:staging` | PASS (0 fail) — 1 pass, 3 warn, 1 skip |
+| cleanup | PASS — stack + volume + scratch dizin tamamen temizlendi |
+
+**Gerçek, dürüst bir gözlem — `workerHeartbeat` bazen `degraded`, ve bu
+İLK teoriden DAHA GENEL bir şey çıktı:** Bu drill'in restore-sonrası
+ayağa kalkışında `smoke:staging`, `workerHeartbeat` check'ini `degraded`
+("no worker heartbeat within the last 10000ms") olarak raporladı. İlk
+hipotez "restore edilen eski heartbeat satırı" idi — **ama bu Step
+10'un kendi FİNAL doğrulama koşumunda** (bu drill'le hiç ilgisi olmayan,
+sıradan bir `pnpm run ci:staging`, restore YOK, dümdüz bir `staging:up`)
+**AYNI `degraded` durumu YİNE gözlemlendi.** Bu, ilk teoriyi ÇÜRÜTÜYOR:
+sorun restore'a özgü değil. Bu oturumdaki 3 koşumun özeti — baseline
+(Step 10'un ilk doğrulaması, restore yok): `ok`; bu drill (restore
+sonrası): `degraded`; final doğrulama (restore yok, dümdüz `ci:staging`):
+`degraded` — 3'te 2'si `degraded`, ikisi de restore'suz. **Dürüst sonuç:
+bu muhtemelen `smoke:staging`'in, worker'ın ilk heartbeat tick'ini
+yazmasıyla yarışan genel bir zamanlama duyarlılığı** (makine
+yüküne/zamanlamaya bağlı, `docs/ci-stable-profile.md`'nin kendi
+ephemeral-port flake'inin "yük hassasiyeti" karakterine benzer bir
+desen) — restore'a ÖZGÜ bir regresyon değil, ama kesin kök neden de
+BAĞIMSIZ OLARAK DOĞRULANMADI (3 örneklem küçük bir sayı). **Bu bir
+blocker DEĞİL** — `docker-compose.staging.yml`'in kendi healthcheck'i
+zaten `/api/health` (liveness) kullanıyor, `/api/health/ready` değil
+(§8 doktrini), ve `smoke:staging` bunu doğru şekilde WARN (FAIL değil)
+olarak sınıflandırdı. Restore prosedürüne yeni bir adım
+GEREKTİRMİYOR — ama gerek restore sonrası gerekse sıradan bir
+`staging:up` sonrası ilk ~10-15 saniyede `workerHeartbeat`'in geçici
+olarak `degraded` görünebileceği, "her şey yeşil" beklentisine karşı
+dokümante edilmesi gereken bir bulgu.
+
+**Simülasyon/placeholder olarak kalan kısımlar (dürüstçe restate):**
+
+- **Object storage restore'u** gerçek bir otomatik backup mekanizmasıyla
+  DEĞİL, bu drill'in kendisinin aldığı MANUEL bir host-side kopya ile
+  egzersiz edildi (`docker compose exec ... cat <path> > host-file`,
+  sonra restore'da tersi) — bu, §1d/§2'nin zaten belirttiği "local modda
+  otomatik backup yok" gerçeğini DEĞİŞTİRMEDİ, yalnızca RESTORE
+  MEKANİĞİNİN (bir backup koyulursa geri yüklenebildiğinin) çalıştığını
+  kanıtladı. `STORAGE_PROVIDER=s3` modu bu skeleton'da hiç kurulu değil
+  (§2), o yüzden gerçek bir S3/MinIO restore'u bu drill'in kapsamı
+  dışında kaldı.
+- **Tek bir sentetik `brand_assets` satırı** kullanıldı —
+  `design-references`/`generated-outputs` ayrı test edilmedi (aynı
+  `storage/file-service.ts` kod yolunu paylaştıkları için düşük risk,
+  ama doğrulanmamış varsayım).
+- **Gerçek production verisi/managed Postgres/S3 hiç kullanılmadı** —
+  bu, senkron/staging'de sentetik veriyle bir egzersizdi, gerçek bir
+  felaket kurtarma testi değil.
+- **`docker compose exec` yaklaşımı, §4'ün önceki halinin öngördüğü
+  host-side `pg_dump`/`pg_restore` kurulumu gereksinimini FİİLEN
+  gevşetiyor** — bu drill hiçbir host-side Postgres client tool'u
+  kurmadan, tüm `pg_dump`/`pg_restore`'u zaten çalışan `postgres`
+  container'ının İÇİNDE çalıştırarak yaptı. §4 bu gözlemle güncellendi
+  (küçük bir doküman düzeltmesi, restore mekaniğini değiştirmiyor).
+- **Idempotent/tekrar-çalıştırılabilirlik doğrulandı:** script iki kez
+  art arda (biri başarısız, biri başarılı) çalıştı, ikisi de temiz
+  başladı/bitti — ikinci koşum birincinin bıraktığı hiçbir kalıntıdan
+  etkilenmedi.
+
 ## İlgili dokümanlar
 
+- `scripts/restore-drill-staging.sh` — §12'nin tam otomasyonu, §7'nin
+  kod hali. Güvenlik guard'ları (NODE_ENV/DATABASE_URL kontrolü),
+  aşama-aşama loglama (setup/seed/backup/reset/restore/verify/cleanup),
+  re-runnable tasarım.
 - [`docs/production-readiness-review.md`](./production-readiness-review.md)
   §10, §16 — bu dokümanın doğrudan kaynağı olan backup/restore boşluğu
   tespiti.

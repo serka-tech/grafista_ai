@@ -825,11 +825,86 @@ prosedürün staging'de en az bir kez GERÇEKTEN çalıştırılıp doğrulanmas
 (`docs/backup-restore-runbook.md` §7) — bu, bir sonraki implementation
 adayı için doğal bir aday, ama bu belge bunu yeniden önceliklendirmiyor.
 
+## 18. Implementation status update (Staging Restore Drill Executed — Production Step 10)
+
+**§17'nin bıraktığı "prosedür yazıldı ama egzersiz edilmedi" boşluğu
+artık KAPANDI — staging'de, sentetik veriyle, gerçekten çalıştırıldı ve
+PASS ile sonuçlandı.** Tam sonuç, aşama-aşama tablo ve gerçek bir bug
+bulgusu [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md)
+§12'de — burada yalnızca bu belgenin production-gate sınıflandırmasına
+düşen özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- Yeni `scripts/restore-drill-staging.sh` — §17'nin "otomasyon yok,
+  tamamen manuel" notunu kısmen kapattı: prosedür artık TEK bir
+  script'le tekrarlanabilir, güvenlik guard'lı (NODE_ENV/DATABASE_URL
+  kontrolü, yalnız disposable staging compose'a karşı çalışır),
+  aşama-aşama loglu (setup/seed/backup/reset/restore/verify/cleanup).
+  **Bu bir CRON/zamanlanmış otomasyon DEĞİL** — hâlâ elle tetiklenmesi
+  gerekiyor, ama "sıfırdan icat etmek" gerekmiyor artık.
+- Drill, Postgres restore'unu (`pg_dump`/`pg_restore`, checksum'lı
+  `schema_migrations` doğrulaması) VE object-storage restore'unu
+  (manuel host-side kopya + sha256 checksum eşleşmesi) AYRI AYRI
+  kanıtladı — "komut exit 0 döndü" değil, gerçek bir bayt-seviyesi
+  karşılaştırmayla.
+- **Gerçek bir bug bulundu ve düzeltildi bu adımda:** script'in ilk
+  denemesi, `psql -t -A`'nın bir `INSERT ... RETURNING id` komutunun
+  tamamlanma etiketini bastırmadığını ortaya çıkardı (dönen UUID ile
+  birleşip geçersiz veri üretti) — `WITH ... SELECT` CTE'sine sarılarak
+  düzeltildi. Bu tam olarak bu adımın amacı: yazılı bir prosedürün
+  yalnızca "mantıklı görünmesi" ile "gerçekten çalışması" arasındaki
+  farkı somut olarak kanıtladı.
+- **Yeni, dürüst bir gözlem (ve kendi kendini düzelten bir bulgu):**
+  `workerHeartbeat` check'i bazen geçici `degraded` görünüyor. İlk
+  hipotez ("restore edilen eski heartbeat satırı") bu adımın kendi
+  FİNAL doğrulama koşumunda (restore İÇERMEYEN, sıradan bir
+  `ci:staging`) AYNI durumun tekrar gözlenmesiyle ÇÜRÜTÜLDÜ — muhtemelen
+  restore'a özgü değil, `smoke:staging`'in worker'ın ilk heartbeat
+  tick'iyle yarıştığı genel bir zamanlama duyarlılığı (tam kök neden
+  bağımsız doğrulanmadı, bkz. `docs/backup-restore-runbook.md` §12'nin
+  tam yazımı). Blocker değil (§8 doktrini), ama restore sonrası VEYA
+  sıradan bir bring-up sonrası "anında her şey yeşil" beklentisine karşı
+  dokümante edildi (`docs/backup-restore-runbook.md` §12).
+
+**Kapatılmadı (bilinçli, dürüstçe restate):**
+
+- **Gerçek production verisi/managed Postgres/S3 hâlâ hiç kullanılmadı**
+  — bu drill tamamen sentetik staging verisiyle, local Docker'da
+  çalıştı. Managed bir sağlayıcıya karşı bir restore hâlâ hiç
+  denenmedi.
+- **Otomasyon hâlâ elle tetikleniyor** — bir cron/zamanlanmış görev
+  DEĞİL, tek seferlik bir script.
+- **Tek bir sentetik satır/obje test edildi** — ölçek (yüzlerce/binlerce
+  satır) altında restore süresi/davranışı hâlâ bilinmiyor.
+- §16'nın listelediği diğer açık kalemler (çoklu-worker yatay ölçek
+  koordinasyonu, managed Postgres/S3 seçimi) bu adımın kapsamı DIŞI,
+  değişmedi.
+- Hiçbir production deploy yapılmadı.
+
+**Bu adımın kendi doğrulaması:** `pnpm run typecheck`/`lint`/`build`/
+`ci:stable`/`ci:staging` bu adımda (script + dokümantasyon değişikliği
+sonrası) tekrar çalıştırıldı, hepsi PASS. `bash -n
+scripts/restore-drill-staging.sh` temiz. Script'in kendisi de GERÇEKTEN
+çalıştırıldı (yalnız sözdizimi kontrolü değil) — ilk deneme başarısız
+oldu (yukarıdaki bug), düzeltme sonrası ikinci deneme tam PASS.
+
+**Production gate — yeniden sınıflandırıldı, dürüstçe:** Backup/restore
+prosedürü artık hem YAZILI hem de staging'de EGZERSİZ EDİLMİŞ durumda.
+**Ama bu, projenin production'a HAZIR olduğu anlamına GELMEZ** — managed
+Postgres/S3 kararı hâlâ verilmedi, gerçek production verisiyle hiç
+denenmedi, ve otomasyon hâlâ elle tetikleniyor. Production deploy'a
+geçmeden önceki somut gate listesi netleştirildi:
+[`docs/deployment-runbook.md`](./deployment-runbook.md)'ün yeni
+"Production öncesi zorunlu gate'ler" bölümüne bkz.
+
 ## İlgili dokümanlar
 
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) — §17'nin
   tam teslimatı: persistence envanteri, managed Postgres/S3 karar
-  kriterleri, backup policy, restore/restore-drill prosedürü.
+  kriterleri, backup policy, restore/restore-drill prosedürü; §12 —
+  §18'in kaynağı olan gerçek drill sonucu.
+- `scripts/restore-drill-staging.sh` — §18'in tam otomasyonu.
 - [`docs/ci-stable-profile.md`](./ci-stable-profile.md) — §16'nın doğrudan
   kaynağı: Production Step 8'in tam çalıştırma tablosu, 3 bulunan bug'ın
   kanıtlı kök-neden yazımı, ve Remote Runner Validation Protocol'ün gerçek
