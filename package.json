@@ -17,7 +17,7 @@
     "check:release": "pnpm run typecheck && pnpm run lint && pnpm run test:stable && pnpm run build",
     "staging:up": "docker compose -f docker-compose.staging.yml up -d --build",
     "staging:down": "docker compose -f docker-compose.staging.yml down",
-    "ci:stable": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test:ci",
+    "ci:stable": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:ci",
     "ci:staging": "bash scripts/ci-staging.sh",
     "ci:all": "pnpm run ci:stable && pnpm run ci:staging"
   },
