@@ -1,0 +1,150 @@
+# Grafista AI Studio — Staging Deploy Workflow TEMPLATE (Production Step 12)
+#
+# ═══════════════════════════════════════════════════════════════════════
+# THIS IS A PASSIVE TEMPLATE, NOT AN ACTIVE WORKFLOW.
+# ═══════════════════════════════════════════════════════════════════════
+#
+# It lives in docs/, not .github/workflows/, on purpose — GitHub Actions
+# only ever discovers workflow files under .github/workflows/, so this
+# file is inert by location alone, the same reasoning
+# docs/ci-stable-profile.md's "Production Step 7" used for stable-ci.yml
+# before a remote existed (see that doc's "Why no GitHub Actions file
+# yet" section, superseded there but the reasoning about inertness still
+# applies here). The difference this time: stable-ci.yml only needed a
+# GitHub remote to become live. THIS file additionally needs a real
+# managed Postgres/S3/hosting provider to be selected and provisioned
+# (see docs/managed-infrastructure-plan.md §8 — Option A short-list,
+# nothing chosen yet) before its placeholder deploy/CLI commands can be
+# filled in with real ones. Copying this into .github/workflows/ before
+# that happens would either no-op or fail on every run.
+#
+# Every ${{ secrets.* }} reference below matches a REAL variable name
+# from docs/deployment-runbook.md §18c's staging env/secrets matrix — but
+# this file contains ZERO secret values, and this workflow does not
+# create, request, or imply any real provider account or credential.
+#
+# Mirrors docs/deployment-runbook.md §18d's provider-agnostic 6-step
+# staging deploy flow (build → deploy → migrate → health check → smoke →
+# restore drill). Steps 2 (deploy) and 6 (restore drill) are left as
+# TODO placeholders — they are provider-specific / require a real
+# managed-infrastructure restore drill procedure (see
+# docs/backup-restore-runbook.md §13/§14) that does not exist yet.
+
+name: "TEMPLATE — Staging Deploy (inactive, not in .github/workflows/)"
+
+# workflow_dispatch only, deliberately — this template does not assume a
+# push-triggers-deploy model, since that decision depends on the §18a
+# branch choice (also not yet decided) and the selected platform's own
+# deploy trigger conventions (some platforms deploy on push themselves,
+# making a GitHub Actions push trigger redundant).
+on:
+  workflow_dispatch: {}
+
+jobs:
+  staging-deploy:
+    name: Build, deploy, migrate, verify (staging)
+    runs-on: ubuntu-latest
+    # No `environment:` block yet — GitHub Environments (with their own
+    # secret scoping / required reviewers) are a reasonable Option A
+    # pairing once a provider is chosen; not configured here.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.1.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Step 1: Build ────────────────────────────────────────────────
+      # Matches docs/deployment-runbook.md §18d step 1. If the selected
+      # platform builds the Docker image itself (most Option A
+      # candidates do), this step may become redundant with the
+      # platform's own build — kept here for platforms that expect a
+      # pre-built artifact instead.
+      - name: Build all workspace packages
+        run: pnpm run build
+
+      # ── Step 2: Deploy ───────────────────────────────────────────────
+      # TODO (decision required): provider-specific deploy command.
+      # Examples of what this step would look like once a provider is
+      # selected (docs/managed-infrastructure-plan.md §8c) — NONE of
+      # these are wired up, all require a provider-specific CLI/action
+      # and a real API token secret that does not exist yet:
+      #   - Railway:  `railway up --service api` (needs RAILWAY_TOKEN)
+      #   - Render:   deploy hook URL curl, or Render's GitHub Action
+      #   - Fly.io:   `flyctl deploy` via superfly/flyctl-actions
+      #     (needs FLY_API_TOKEN)
+      - name: "TODO: deploy to staging (provider not yet selected)"
+        run: |
+          echo "No provider selected yet — see docs/managed-infrastructure-plan.md §8."
+          echo "This step is a placeholder until Option A's concrete provider is chosen."
+          exit 1
+
+      # ── Step 3: Migrate ──────────────────────────────────────────────
+      # Matches docs/deployment-runbook.md §18d step 3 / §6's "migration
+      # sonrası health/ready kontrolü zorunlu" principle — runs against
+      # the staging DATABASE_URL, after deploy, before the health check
+      # below is treated as final.
+      - name: Run database migrations (staging)
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: pnpm --filter @grafista/api run db:migrate
+
+      # ── Step 4: Health check ─────────────────────────────────────────
+      - name: Verify /api/health and /api/health/ready
+        env:
+          STAGING_APP_URL: ${{ secrets.STAGING_PUBLIC_APP_URL }}
+        run: |
+          curl -sf "${STAGING_APP_URL}/api/health"
+          curl -s "${STAGING_APP_URL}/api/health/ready" | tee /tmp/ready.json
+          # Per docs/deployment-runbook.md §8: overall "status": "degraded"
+          # alone is NOT an automatic failure — only a genuine "error" on
+          # database/storage should fail this step. This template does not
+          # implement that judgement call in shell; a real implementation
+          # should parse /tmp/ready.json's individual checks, not just the
+          # top-level status field.
+
+      # ── Step 5: Smoke ────────────────────────────────────────────────
+      - name: Run staging smoke checks
+        env:
+          STAGING_APP_URL: ${{ secrets.STAGING_PUBLIC_APP_URL }}
+        run: pnpm --filter @grafista/api run smoke:staging
+
+      # ── Step 6: Restore drill ────────────────────────────────────────
+      # TODO (decision required): docs/backup-restore-runbook.md §13/§14's
+      # managed-staging restore drill does not exist as an automatable
+      # script yet — scripts/restore-drill-staging.sh only targets the
+      # local/staging Docker Compose stack (its own safety guards refuse
+      # to run against anything else). A managed-infrastructure
+      # equivalent is a prerequisite for production deploy per that
+      # doc's gate, but is out of scope for this template.
+      - name: "TODO: managed-staging restore drill (not yet implemented)"
+        run: |
+          echo "See docs/backup-restore-runbook.md §13/§14 — managed-staging"
+          echo "restore drill has not been built or run yet."
+
+# ── Secrets this template references (names only — see
+# docs/deployment-runbook.md §18c for the full staging env/secrets
+# matrix; no values live in this repo) ──────────────────────────────────
+#   STAGING_DATABASE_URL
+#   STAGING_AUTH_SECRET
+#   STAGING_S3_BUCKET / STAGING_S3_REGION / STAGING_S3_ENDPOINT
+#   STAGING_S3_ACCESS_KEY_ID / STAGING_S3_SECRET_ACCESS_KEY
+#   STAGING_OPENAI_API_KEY / STAGING_ANTHROPIC_API_KEY — required
+#     (presence-only) for the deployed API process to boot at all
+#     (apps/api/src/config/env.ts:11-12, fail-fast even when
+#     AI_DEFAULT_PROVIDER=fake) — set directly as platform runtime
+#     env/secrets in Step 2 (deploy), not consumed by any step in
+#     THIS workflow file itself, listed here for inventory
+#     completeness against §18c
+#   STAGING_PUBLIC_APP_URL
+# Provider-specific deploy credentials (e.g. RAILWAY_TOKEN,
+# FLY_API_TOKEN) are NOT listed above because no provider is selected —
+# they would be added alongside the real Step 2 deploy command.

@@ -984,11 +984,115 @@ BLOKEDE** — `docs/deployment-runbook.md` §17'nin checklist'inin TAMAMI
 işaretlenmeden, ve managed altyapıya karşı bir restore drill PASS
 almadan (`docs/backup-restore-runbook.md` §13) bu blokaj kalkmaz.
 
+## 20. Implementation status update (Option A Selection & Staging Deployment Preparation — Production Step 12)
+
+**§19'un bıraktığı "hangi ops yönü" sorusu artık CEVAPLANDI — somut
+sağlayıcı hâlâ SEÇİLMEDİ.** Tam içerik
+[`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md)
+§7/§8'de ve [`docs/deployment-runbook.md`](./deployment-runbook.md) §18'de
+— burada yalnızca bu belgenin production-gate sınıflandırmasına düşen
+özet var.
+
+**Bu adımın gerçekten kapattığı şey:**
+
+- **Option A (düşük operasyon / hızlı MVP) SEÇİLEN YÖN olarak
+  işaretlendi** — `docs/managed-infrastructure-plan.md` §7'nin
+  güncellenmiş banner'ı ve prensipler listesi (managed Postgres, S3-uyumlu
+  storage, managed app/runtime hosting, managed logs/monitoring, local
+  disk production'da YOK, staging-önce + managed restore drill ZORUNLU).
+  **Bu bir sağlayıcı seçimi DEĞİL** — "provider selection pending" durumu
+  aynen devam ediyor, dürüstçe böyle işaretlendi.
+- **Provider short-list hazırlandı** (`docs/managed-infrastructure-plan.md`
+  §8) — 5 kategoride (managed Postgres, S3-uyumlu storage, app/runtime
+  hosting, background worker hosting [ayrı kategori DEĞİL, §3d'nin
+  tekrarı], monitoring/logging) her biri için birden fazla ÖRNEK aday,
+  görev tanımının istediği sekiz eksende (kolay kurulum, GitHub Actions
+  entegrasyonu, env/secrets yönetimi, backup/PITR, object storage
+  versioning, Docker/Node runtime desteği, worker process desteği,
+  Türkiye'den erişim/latency). **Hiçbir güncel fiyat iddiası yok, hiçbir
+  sağlayıcı SEÇİLMEDİ.**
+- **Staging Deployment Gate — Option A hazırlandı**
+  (`docs/deployment-runbook.md` §18) — 13 maddelik checklist (GitHub
+  branch seçiminden GitHub Actions deploy workflow doğrulamasına kadar),
+  staging'e özgü env/secrets matrisi (required/optional/debug-only
+  ayrımlı, `NODE_ENV`/`DATABASE_URL`/`AUTH_SECRET`/`STORAGE_PROVIDER`/
+  `S3_*`/`NEXT_PUBLIC_API_URL`/`API_CORS_ORIGIN`/`LOG_LEVEL`/
+  `CI_DEBUG_ROUTES*` dahil), ve provider-agnostic 6-adımlı staging deploy
+  akışı (build → deploy → migrate → health check → smoke → restore
+  drill). **Checklist'in HİÇBİR maddesi işaretlenmedi.**
+- **Pasif bir GitHub Actions template'i eklendi**
+  (`docs/staging-deploy-workflow-template.yml`) — `.github/workflows/`
+  İÇİNDE DEĞİL, bu yüzden GitHub Actions tarafından hiçbir zaman
+  keşfedilmez/çalıştırılmaz; deploy (Adım 2) ve managed-staging restore
+  drill (Adım 6) adımları bilinçli olarak TODO placeholder — provider
+  seçilmeden gerçek komutlar yazılamaz.
+- **Runtime readiness doğrulandı, YENİ bir belirsizlik BULUNMADI:**
+  worker'ın API ile aynı process'te çalıştığı (ayrı bir servis/instance
+  OLMADIĞI) daha önceki adımların (§2, §7) zaten doğruladığı gibi bugün
+  de NET — bu adım bunu YENİDEN doğruladı, belirsiz bir komut/karar
+  bulunmadı. `apps/api`/`apps/dashboard`'ın ikisinin de `build`/`start`
+  script'leri (`tsc`+`node dist/index.js`, `next build`+`next start`)
+  zaten var ve eksiksiz. **Gerçek, dokümante edilen bir gap:**
+  `apps/dashboard` için hiçbir `Dockerfile` yok — yalnızca
+  `apps/api/Dockerfile` var (`docker-compose.staging.yml`'in yalnız
+  `postgres`+`api` servisleri olması bunun doğal sonucu). Bu, Option A'nın
+  §8c adaylarının ÇOĞU (Railway/Render/Fly gibi Next.js'i Dockerfile'sız,
+  doğrudan buildpack/`next build`+`next start` ile çalıştırabilen
+  platformlar) için BLOKER DEĞİL — ama Docker-zorunlu bir platform
+  seçilirse (ör. çıplak bir VM/Compose yaklaşımı) `apps/dashboard` için
+  yeni bir Dockerfile YAZILMASI gerekecek, ki bu bu adımın "büyük refactor
+  yapma" sınırının dışında bırakıldı — yalnızca burada RİSK olarak
+  kaydedildi.
+
+**Kapatılmadı (bilinçli, dürüstçe restate — bu adımın kendi başarı
+kriteri budur, gerçek deploy yapmak DEĞİL):**
+
+- Hiçbir gerçek provider hesabı/projesi açılmadı.
+- Hiçbir gerçek servis (staging Postgres/S3/hosting) provizyonlanmadı.
+- Hiçbir staging deploy'u yapılmadı.
+- Hiçbir gerçek secret değeri yazılmadı.
+- Managed staging altyapıya karşı bir restore drill hâlâ hiç yapılmadı
+  (`docs/backup-restore-runbook.md` §13c hâlâ boş, §14'ün yeni gate'i de
+  hâlâ karşılanmadı).
+- `apps/dashboard` için Dockerfile YAZILMADI (yukarıdaki risk notu —
+  bilinçli, kapsam dışı).
+- §16'nın listelediği diğer açık kalem (çoklu-worker yatay ölçek
+  koordinasyonu) bu adımın kapsamı DIŞI, değişmedi.
+- Hiçbir production deploy yapılmadı, hiçbir yeni ürün özelliği
+  eklenmedi, hiçbir migration eklenmedi.
+
+**Bu adımın kendi doğrulaması:** `pnpm run ci:stable` PASS — `build`/
+`typecheck`/`lint` temiz, `test:ci` **433/433 temiz (26/26 dosya)**.
+`pnpm run ci:staging` PASS — `smoke:staging` 2 pass, 2 warn (`providers`
+degraded, `KIE_AI_API_KEY` staging'de bilinçli boş — beklenen), 1 skip, 0
+fail. `bash -n scripts/restore-drill-staging.sh` temiz (script'e
+dokunulmadı). Yeni `docs/staging-deploy-workflow-template.yml` YAML
+sözdizimi `python3 -c "import yaml; yaml.safe_load(...)"` ile doğrulandı
+— temiz parse (repo'daki mevcut `.github/workflows/stable-ci.yml` ile
+aynı, zararsız YAML 1.1 `on:`→bool quirk'i dışında sürpriz yok).
+
+**Production gate — DEVAM EDEN durum, dürüstçe:** Option A artık SEÇİLİ
+YÖN, provider short-list ve staging deployment checklist'i HAZIR. **Ama
+bu, projenin staging'e veya production'a HAZIR olduğu anlamına GELMEZ** —
+somut sağlayıcı seçimi hâlâ yapılmadı, hiçbir gerçek provizyonlama
+olmadı. **Production deploy hâlâ BLOKEDE, DEĞİŞMEDİ** (§19'un koyduğu
+gate aynen geçerli). **Bir sonraki somut adım: sağlayıcı seçimi +
+staging provisioning** — `docs/managed-infrastructure-plan.md` §8'in
+short-list'inden somut bir Postgres/S3/hosting sağlayıcısı seçilip
+`docs/deployment-runbook.md` §18b'nin checklist'i gerçekten
+işaretlenmeye başlanmalı.
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
   §19'un tam teslimatı: infrastructure envanteri, provider karar matrisi,
-  env/secrets matrisi, ops decision (Option A/B/C).
+  env/secrets matrisi, ops decision (Option A/B/C). §7/§8 — §20'nin
+  kaynağı: Option A'nın "SEÇİLEN YÖN" işareti ve provider short-list'i.
+- [`docs/deployment-runbook.md`](./deployment-runbook.md) §18 — §20'nin
+  doğrudan teslimatı: Staging Deployment Gate checklist'i, staging
+  env/secrets matrisi, provider-agnostic deploy akışı.
+- [`docs/staging-deploy-workflow-template.yml`](./staging-deploy-workflow-template.yml) —
+  §20'nin pasif GitHub Actions taslağı.
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) — §17'nin
   tam teslimatı: persistence envanteri, managed Postgres/S3 karar
   kriterleri, backup policy, restore/restore-drill prosedürü; §12 —

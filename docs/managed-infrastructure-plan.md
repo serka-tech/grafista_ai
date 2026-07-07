@@ -1,8 +1,16 @@
-# Grafista AI Studio — Managed Infrastructure Plan (Production Step 11)
+# Grafista AI Studio — Managed Infrastructure Plan (Production Step 11, Option A seçildi Production Step 12)
 
 > **Status: KARAR PAKETİ + PROVIZYONLAMA CHECKLIST'İ — bu adımda hiçbir
 > gerçek provider hesabı açılmadı, hiçbir gerçek servis provizyonlanmadı,
 > hiçbir production deploy yapılmadı.** Bu belge
+>
+> **GÜNCELLEME (Production Step 12):** kullanıcı §7'deki üç ops
+> seçeneğinden **Option A'yı (düşük operasyon / hızlı MVP) SEÇTİ** — bkz.
+> §7'nin güncellenmiş "SEÇİLEN YÖN" işareti ve yeni §8 "Option A Provider
+> Short-List". **Bu hâlâ somut bir sağlayıcı seçimi DEĞİL** — "provider
+> selection pending" durumu aynen devam ediyor; Option A yalnızca YÖNÜ
+> (düşük-operasyon managed servisler) belirledi, HANGİ sağlayıcı olduğunu
+> değil. Hiçbir hesap açılmadı, hiçbir servis provizyonlanmadı bu adımda da.
 > [`docs/production-readiness-review.md`](./production-readiness-review.md)
 > §11'in sıralamasının ("B+A → C → D → E") ve
 > [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) §2'nin
@@ -220,11 +228,34 @@ Bu belge somut bir sağlayıcı seçmiyor; ama üç genel YÖN arasında bir se�
 gerekiyor. Antigravity içinde gerçek bir hesap açılmadı, hiçbiri
 provizyonlanmadı — aşağıdaki üçü yalnızca karar çerçevesi.
 
-### Option A — Düşük operasyon / hızlı MVP
+### Option A — Düşük operasyon / hızlı MVP — **SEÇİLEN YÖN (Production Step 12)**
+
+> **Kullanıcı kararı (Production Step 12):** Option A seçildi. **Bu bir
+> sağlayıcı seçimi DEĞİL** — "provider selection pending" durumu geçerli,
+> §8'e bkz. Bu seçim yalnızca YÖNÜ (düşük-operasyon managed servisler,
+> local disk production'da yasak, staging-önce zorunlu) belirledi.
 
 Tek bir uzun-ömürlü-process PaaS (§3c) + o platformun kendi managed
 Postgres + managed object storage eklentileri; ayrı bir secrets-manager/log
 SaaS'ı yok, platformun kendi native araçları kullanılır.
+
+**Option A'nın prensipleri (Production Step 12'de netleştirildi):**
+
+1. Düşük operasyon yükü — tek platform, tek fatura/hesap, ayrı bir
+   secrets-manager/log SaaS'ı yok.
+2. Managed Postgres — self-host YOK (§3a'nın kriterleri geçerli).
+3. S3-uyumlu object storage — self-host YOK (§3b'nin kriterleri geçerli).
+4. Managed app/runtime hosting — uzun-ömürlü process destekleyen bir PaaS
+   (§3c'nin kriterleri geçerli, K8s/çıplak serverless DEĞİL).
+5. Managed logs/monitoring — platformun kendi native aracı yeterli, ayrı
+   bir SaaS ZORUNLU değil (§3e'nin kriterleri geçerli).
+6. **Local disk production persistence YOK** — `STORAGE_PROVIDER=local`
+   production'da hiçbir koşulda kullanılmaz (§3b/§2'nin zaten koyduğu
+   ilke, Option A ile DEĞİŞMEDİ, PEKİŞTİRİLDİ).
+7. **Production'dan önce staging deploy VE managed restore drill
+   ZORUNLU** — bkz. `docs/deployment-runbook.md`'nin yeni "Staging
+   Deployment Gate – Option A" bölümü ve `docs/backup-restore-runbook.md`
+   §13/§14'ün managed drill gate'i.
 
 - **Artı:** en hızlı kurulum, en az operasyonel yük, küçük ekip için doğru
   ölçek, `STORAGE_PROVIDER=s3`/`DATABASE_URL` abstraction'ları zaten sıfır
@@ -263,10 +294,84 @@ yapısal olarak yakın (yalnız bir `minio` servis bloğu eklenmesi gerekir,
   gerilimli — self-host bile olsa disk backup'ı OTOMATİKLEŞTİRİLMELİ, aksi
   halde bu ilke ihlal edilir.
 
-**Bu belgenin yönü (öneri, karar değil):** küçük ekip/MVP ölçeğinde Option
-A, `docs/production-readiness-review.md` §4'ün zaten verdiği "en az
-operasyon yükü" gerekçesiyle tutarlı — ama son karar kullanıcıya ait,
-**decision required**.
+**Bu belgenin önerisi (Production Step 11'de yazıldı) ve kullanıcının
+kararı (Production Step 12'de verildi) ÖRTÜŞÜYOR:** küçük ekip/MVP
+ölçeğinde Option A, `docs/production-readiness-review.md` §4'ün zaten
+verdiği "en az operasyon yükü" gerekçesiyle tutarlı. **Option A artık
+SEÇİLİ YÖN — ama somut sağlayıcı seçimi hâlâ decision required (bkz.
+§8).**
+
+## 8. Option A Provider Short-List (Production Step 12)
+
+> **Status: KRİTER LİSTESİ — hiçbir sağlayıcı SEÇİLMEDİ, hiçbir hesap
+> açılmadı, hiçbir güncel fiyat iddiası yok.** Bu bölüm §3'ün karar
+> matrisini Option A'nın (tek platform, düşük operasyon) yönüyle
+> daraltıyor — her kategoride birden fazla ADAY isim, YALNIZCA örnek
+> olarak geçiyor; hiçbiri "seçildi" değil. Karar kriterleri, görev
+> tanımının kendi istediği sekiz eksende: kolay kurulum, GitHub Actions
+> entegrasyonu, env/secrets yönetimi, backup/PITR desteği, object storage
+> versioning, Docker veya Node runtime desteği, worker process desteği,
+> Türkiye'den erişim/latency notu.
+
+### 8a. Managed Postgres adayları
+
+| Aday (örnek, seçilmedi) | Kolay kurulum | GitHub Actions entegrasyonu | Env/secrets yönetimi | Backup/PITR | Türkiye'den erişim/latency notu |
+|---|---|---|---|---|---|
+| Railway Postgres | Tek tıkla ekleme, `DATABASE_URL` otomatik enjekte edilir | Native GitHub push-to-deploy entegrasyonu var | Platform-native secret store | Otomatik snapshot var; PITR granülerliği §3a'nın belirttiği gibi doğrulanmadı | Bölge seçimi sınırlı olabilir — provizyonlama öncesi doğrulanmalı |
+| Render Postgres | Tek tıkla ekleme, connection string otomatik | GitHub entegrasyonu var (otomatik deploy) | Platform-native secret store | Otomatik günlük backup; PITR üst planlarda | Bölge seçimi sınırlı olabilir — provizyonlama öncesi doğrulanmalı |
+| Neon | Serverless Postgres, hızlı kurulum, branch-per-PR özelliği | GitHub entegrasyonu var (preview branch'ler) | Platform-native secret store | Dakika-seviyesi PITR (§3a'nın "Neon/RDS daha granüler" notuyla tutarlı) | Bölge seçimi var, en yakın bölge test edilmeli |
+| AWS RDS | Kurulum diğerlerine göre daha fazla adım (VPC/security group) | GitHub Actions ile entegrasyon mümkün ama elle IAM/secret kurulumu gerektirir | AWS Secrets Manager ile birleşebilir (ayrı bir servis, Option A'nın "tek platform" ilkesiyle kısmen gerilimli) | En granüler PITR (§3a'nın kendi notu) | AWS bölgeleri geniş, Türkiye'ye yakın bölge (`eu-central-1` vb.) seçilebilir |
+
+**Not:** `pgvector` desteği — Production Step 11'in düzelttiği bulgu
+geçerli: bu repo'nun migration'ı extension yoksa OTOMATİK atlıyor
+(`apps/api/src/db/migrate.ts`'in `isMissingExtensionError()`'ı), yani
+`pgvector` desteklemeyen bir sağlayıcı da teknik olarak ÇALIŞIR (DesignDNA
+benzerlik sorguları o zaman devre dışı kalır) — ama tercih edilen kriter
+hâlâ `pgvector` desteği (§3a).
+
+### 8b. S3-uyumlu object storage adayları
+
+| Aday (örnek, seçilmedi) | Kolay kurulum | GitHub Actions entegrasyonu | Object storage versioning | Docker/Node runtime desteği | Türkiye'den erişim/latency notu |
+|---|---|---|---|---|---|
+| Cloudflare R2 | S3 API uyumlu, `S3_ENDPOINT` override ile sıfır kod değişikliği (§2'nin zaten doğruladığı abstraction) | CLI/API üzerinden script'lenebilir, native bir GitHub Action YOK ama S3-uyumlu CLI'larla otomatikleştirilebilir | Bucket versioning destekleniyor | Herhangi bir Node runtime'dan `aws-sdk`/S3-uyumlu client ile erişilebilir | Egress ücretsiz iddiası var (bu belge güncel fiyat iddiası YAPMIYOR, yalnız bir değerlendirme ekseni olarak not) — CDN/edge ağı geniş |
+| AWS S3 | S3 API'nin kendisi, referans implementasyon | `aws-actions/configure-aws-credentials` gibi resmi GitHub Action'lar var | Bucket versioning native destekleniyor | Standart `S3StorageProvider` (`apps/api/src/storage/s3-provider.ts`) doğrudan uyumlu | AWS bölgeleri geniş, Türkiye'ye yakın bölge seçilebilir |
+| Backblaze B2 | S3-uyumlu API, basit kurulum | Native bir GitHub Action YOK, S3-uyumlu CLI ile script'lenebilir | Bucket versioning destekleniyor | S3-uyumlu client ile erişilebilir | Bölge seçenekleri AWS/R2'ye göre daha sınırlı — latency provizyonlama öncesi test edilmeli |
+| Platformun kendi object storage'ı (ör. Railway'in kendi eklentisi, mevcutsa) | Tek platform içinde ek hesap gerektirmez (Option A'nın "tek platform" ilkesiyle en uyumlu seçenek) | Platformun kendi deploy akışına dahil | Sağlayıcıya göre değişir — provizyonlama öncesi AYRICA doğrulanmalı (§3b'nin ZORUNLU kabul kriteri) | S3-uyumlu ise `S3_ENDPOINT` override ile sıfır kod değişikliği | Platformun kendi bölge/latency profiline bağlı |
+
+### 8c. App/runtime hosting adayları
+
+| Aday (örnek, seçilmedi) | Kolay kurulum | GitHub Actions entegrasyonu | Docker runtime desteği | Worker process desteği | Türkiye'den erişim/latency notu |
+|---|---|---|---|---|---|
+| Railway | GitHub repo bağlanır, otomatik build/deploy | Native GitHub entegrasyonu (push-to-deploy), ayrıca `railway up` CLI ile Actions'tan tetiklenebilir | `apps/api/Dockerfile`'ı doğrudan kullanabilir | Tek servis = API+worker aynı process (§3d'nin zaten koyduğu ilke) — ek bir "worker servisi" AÇILMAMALI | Bölge seçimi sınırlı — kullanıcıya en yakın bölge provizyonlama öncesi doğrulanmalı |
+| Render | GitHub repo bağlanır, otomatik build/deploy | Native GitHub entegrasyonu (auto-deploy on push) | Dockerfile veya native Node buildpack desteği | Aynı ilke — tek "Web Service", ayrı bir "Background Worker" servisi AÇILMAMALI | Bölge seçimi sınırlı — provizyonlama öncesi doğrulanmalı |
+| Fly.io | `fly launch` ile Dockerfile'dan otomatik algılama | `flyctl` CLI ile GitHub Actions'tan tetiklenebilir (resmi `superfly/flyctl-actions`) | `apps/api/Dockerfile`'ı doğrudan kullanabilir | Aynı ilke — tek `fly.toml` process grubu, ayrı bir worker process TANIMLANMAMALI | Bölge seçimi geniş (Frankfurt/Amsterdam gibi Avrupa bölgeleri Türkiye'ye nispeten yakın) |
+
+**Kritik not (§3d'nin tekrarı):** hangi aday seçilirse seçilsin, worker
+İÇİN AYRI BİR SERVİS/INSTANCE PROVİZYONLANMAMALI — bu repo'nun render
+worker'ı `apps/api`'nin kendi process'i içinde çalışıyor
+(`RENDER_QUEUE_ENABLED` bayrağı). Bkz.
+`docs/production-readiness-review.md` §20'nin "Runtime readiness
+doğrulandı" bulgusu.
+
+### 8d. Background worker hosting adayları
+
+**Ayrı bir kategori DEĞİL** — §3d'nin ve yukarıdaki §8c notunun tekrarı:
+worker, App/runtime hosting (§8c) ile AYNI servis/instance. Bu satır
+yalnızca görev tanımının istediği envanteri eksiksiz tutmak için var; ayrı
+bir aday listesi YOK.
+
+### 8e. Monitoring/logging adayları
+
+| Aday (örnek, seçilmedi) | Kolay kurulum | GitHub Actions entegrasyonu | Env/secrets yönetimi | Türkiye'den erişim/latency notu |
+|---|---|---|---|---|
+| Platformun kendi native log/metrics paneli (Railway/Render/Fly'ın hepsinde var) | Ek kurulum gerektirmez — Option A'nın "tek platform" ilkesiyle en uyumlu | Deploy loglarını otomatik gösterir, ayrı bir entegrasyon gerekmez | Ek bir secret/API key GEREKMEZ | Platformun kendi altyapısına bağlı, ayrı bir ağ sıçraması yok |
+| Ayrı bir log/monitoring SaaS'ı (ör. bir üçüncü parti) | Ek hesap/entegrasyon gerektirir — Option A'nın "tek platform" ilkesiyle KISMEN gerilimli | Genelde bir API key/webhook ile entegre edilir | Ek bir secret (log-forwarding API key) gerekir | Sağlayıcıya bağlı, ayrı bir latency ekseni |
+
+**Option A'nın kendi yönü gereği:** platformun kendi native log/monitoring
+aracı, ilk staging/production için YETERLİ kabul edilir (§3e'nin
+"minimum gereksinim" kriteriyle tutarlı) — ayrı bir SaaS yalnızca
+platformun native aracı `GET /api/health/ready`'nin `error` durumuna
+alarm bağlayamıyorsa gerekli hale gelir (§3e'nin kabul kriteri).
 
 ## İlgili dokümanlar
 

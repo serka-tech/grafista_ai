@@ -1026,11 +1026,151 @@ listedir.
 
 ---
 
+## 18. Staging Deployment Gate — Option A (Production Step 12)
+
+> **Status: CHECKLIST + PROVIDER-AGNOSTİK AKIŞ — bu bölümdeki hiçbir
+> madde bu adımda İŞARETLENMEDİ, hiçbir gerçek provider hesabı açılmadı,
+> hiçbir staging deploy'u yapılmadı.** Kullanıcı
+> `docs/managed-infrastructure-plan.md` §7'nin Option A/B/C
+> seçeneklerinden **Option A'yı seçti** (bkz.
+> `docs/managed-infrastructure-plan.md` §7'nin güncellenmiş işareti ve
+> yeni §8 "Option A Provider Short-List"). Bu bölüm o kararın STAGING
+> tarafındaki somut, sıralı checklist'i — §17'nin PRODUCTION provisioning
+> checklist'inin YERİNE geçmiyor, ondan ÖNCE gelen bir ara adım (staging
+> önce, production sonra — Option A'nın 7. prensibi,
+> `docs/managed-infrastructure-plan.md` §7).
+
+### 18a. GitHub branch seçimi
+
+Staging deploy'un hangi branch'ten tetikleneceği — bu adımda bir karar
+VERİLMEDİ, yalnızca seçenek netleştiriliyor: bugünkü çalışma branch'i
+`phase-2-checkpoint`'tir (`git status -sb` ile bu adımın başında
+doğrulandı). Çoğu Option A adayı (Railway/Render/Fly, bkz.
+`docs/managed-infrastructure-plan.md` §8c) bir branch'i doğrudan staging
+ortamına bağlayabiliyor — **hangi branch'in (`phase-2-checkpoint` mi,
+yoksa ayrı bir `staging` branch'i mi) kullanılacağı bir "decision
+required"** (provider seçimiyle birlikte netleşecek, bu adımın kapsamı
+dışı).
+
+### 18b. Checklist
+
+Her madde bir öncekine bağımlı olabilir (ör. env/secrets girmeden önce
+runtime'ın var olması gerekir) — **hiçbiri bu adımda işaretlenmedi,
+gerçek provizyonlama gerektiriyor:**
+
+- [ ] GitHub branch seçimi netleşti (§18a — bugün henüz decision required).
+- [ ] Staging app runtime (dashboard, Next.js) oluşturuldu.
+- [ ] Staging API runtime oluşturuldu.
+- [ ] Staging worker runtime oluşturuldu VEYA worker strategy belirlendi —
+      **Option A'da bu ayrı bir provizyonlama ADIMI DEĞİL**, §9'un
+      doğruladığı gibi worker API runtime'ıyla AYNI instance; bu madde
+      yalnızca "yanlışlıkla ayrı bir worker servisi açılmadı" doğrulaması.
+- [ ] Managed staging Postgres oluşturuldu.
+- [ ] Staging S3 bucket oluşturuldu.
+- [ ] Env/secrets eklendi (§18c'nin tam listesi).
+- [ ] Migration çalıştırıldı (`pnpm --filter @grafista/api run db:migrate`,
+      staging Postgres'e karşı).
+- [ ] API health PASS (`GET /api/health` → 200; `GET /api/health/ready`
+      okunup `database`/`storage` check'lerinin `ok` olduğu doğrulandı —
+      `docs/deployment-runbook.md` §8 doktrini: genel `status`un
+      `degraded` olması tek başına blocker değil).
+- [ ] Frontend/API bağlantısı doğrulandı (`NEXT_PUBLIC_API_URL` staging
+      API'ye işaret ediyor, dashboard'dan bir istek gerçekten API'ye
+      ulaşıyor).
+- [ ] Upload/render artifact smoke test PASS (`pnpm --filter @grafista/api
+      run smoke:staging`'in `queue`/`providers` bölümleri VEYA elle bir
+      upload+render+download döngüsü).
+- [ ] Restore drill managed staging altyapıya karşı tekrarlandı —
+      `docs/backup-restore-runbook.md` §13/§14'ün gate'i, bu adımda
+      YAPILMADI.
+- [ ] GitHub Actions deploy workflow doğrulandı — bugün AKTİF bir deploy
+      workflow'u YOK (bkz. §18d), yalnızca pasif bir template var
+      (`docs/staging-deploy-workflow-template.yml`).
+
+### 18c. Staging env/secrets matrisi
+
+**Değer YOK — yalnızca isim, amaç, required/optional/debug-only.** Bu
+tablo `docs/managed-infrastructure-plan.md` §4'ün genel env/secrets
+matrisini STAGING PROFİLİNE daraltıyor — o matrisin YERİNE geçmiyor,
+`.env.staging.example`'ın (bkz. `docs/staging-compose.md`) staging'e özgü
+varsayılanlarıyla çapraz okunmalı.
+
+| Değişken | Amaç | Durum (staging) | Not |
+|---|---|---|---|
+| `NODE_ENV` | Çalışma ortamı | **Optional/konvansiyonel** | `docs/managed-infrastructure-plan.md` §4'ün doğruladığı gibi kod bunu okumuyor — staging'de `production` veya `staging` değeri set edilebilir, davranışı DEĞİŞTİRMEZ |
+| `DATABASE_URL` | Managed staging Postgres connection string | **Required** — boot'ta Zod fail-fast | `apps/api/src/config/env.ts:21-26` |
+| `AUTH_SECRET` | Session imzalama anahtarı | **Required** — boot'ta Zod fail-fast | Staging için AYRI, production'dan FARKLI bir değer üretilmeli (`openssl rand -hex 32`) — `docs/ci-stable-profile.md` Production Step 8'in CI'da zaten yaptığı gibi |
+| `OPENAI_API_KEY` | OpenAI API anahtarı | **Required (presence-only)** — boot'ta Zod fail-fast, `AI_DEFAULT_PROVIDER=fake` iken bile dummy bir string zorunlu | `apps/api/src/config/env.ts:11` — **düzeltme, bu adımda eklendi:** bu satır Step 12'nin ilk taslağında eksikti, adversarial doc-review workflow'u bulup doğruladı |
+| `ANTHROPIC_API_KEY` | Anthropic API anahtarı | **Required (presence-only)** — boot'ta Zod fail-fast, `AI_DEFAULT_PROVIDER=fake` iken bile dummy bir string zorunlu | `apps/api/src/config/env.ts:12` — aynı düzeltme |
+| `STORAGE_PROVIDER` | `local` \| `s3` | **Required, staging'de `s3` önerilir** | Option A'nın 6. prensibi (local disk YOK) staging için de geçerli — bugünkü `docker-compose.staging.yml` skeleton'ı `local` kullanıyor (`docs/backup-restore-runbook.md` §1d'nin bilinçli basit-başlangıç kararı), managed staging'e geçişte `s3`'e çevrilmeli |
+| `S3_BUCKET` | Staging bucket adı | **Required, `STORAGE_PROVIDER=s3` iken** | Production bucket'ından AYRI olmalı — ortamlar arası veri karışmasını önler |
+| `S3_REGION` | Bucket bölgesi | **Required, `STORAGE_PROVIDER=s3` iken** | |
+| `S3_ENDPOINT` | AWS-dışı sağlayıcılar için custom endpoint | **Optional** | |
+| `S3_ACCESS_KEY_ID` | Bucket erişim kimliği | **Required (secret), `STORAGE_PROVIDER=s3` iken** | Staging'e özgü, least-privilege, production'dan AYRI bir key |
+| `S3_SECRET_ACCESS_KEY` | Bucket erişim sırrı | **Required (secret), `STORAGE_PROVIDER=s3` iken** | Aynı — asla commit edilmez |
+| `NEXT_PUBLIC_API_URL` ("PUBLIC_APP_URL"/"API_BASE_URL"'in bu repo'daki karşılığı) | Dashboard'ın API'ye erişim URL'i | **Required, dashboard runtime'ı için** | `docs/managed-infrastructure-plan.md` §4'ün zaten netleştirdiği gibi ayrı bir "genel app URL" kavramı bugün kodda YOK |
+| `API_CORS_ORIGIN` ("API_BASE_URL" kavramının API tarafındaki karşılığı) | API'nin izin verdiği origin | **Required, staging domain'iyle** | Staging dashboard URL'i neyse ona eşit olmalı |
+| `LOG_LEVEL` | Log ayrıntı seviyesi | **Optional, kod tarafından okunmuyor** | `docs/managed-infrastructure-plan.md` §4'ün doğruladığı gibi — yalnızca gelecekteki bir implementasyon için ayrılmış isim |
+| `CI_DEBUG_ROUTES` | Teşhis middleware'i | **Debug-only, staging'de AÇILABİLİR (production'da ASLA)** | `apps/api/src/middleware/debug-routes.ts` — staging bir CI/test ortamı sayıldığı için gerçek bir spurious-failure teşhisinde geçici olarak açılması güvenli, kalıcı açık BIRAKILMAMALI |
+| `CI_DEBUG_ROUTES_LOG_FILE` | Teşhis logunun dosya çıktısı | **Debug-only, optional** | Yalnız `CI_DEBUG_ROUTES=1` ile birlikte anlamlı |
+| `RENDERER_PROVIDER` | `playwright` \| `fake` | **Staging'de `fake` ÖNERİLİR (ilk bring-up)** | `docker-compose.staging.yml`'in bugünkü varsayılanı (Chromium riski sıfırlanır); gerçek render doğrulaması istenirse `playwright`'a çevrilebilir, rebuild GEREKMEZ (`docs/staging-compose.md`'nin "pure env flip" notu) |
+| `AI_DEFAULT_PROVIDER` | AI provider routing | **Staging'de `fake` ÖNERİLİR** | `docs/deployment-runbook.md` §3'ün zaten koyduğu staging profili — gerçek anahtarlarla sınırlı/kontrollü bir `smoke:providers` koşusu AYRI, isteğe bağlı bir adım |
+| `RENDER_QUEUE_ENABLED` | Queue/worker modu | **Staging'de `true` ÖNERİLİR (deneme amaçlı)** | `docs/deployment-runbook.md` §3'ün zaten koyduğu ilke — production'a geçmeden önce worker heartbeat/stale-lock davranışının gerçek (laptop-dışı) bir ortamda ilk kez gözlemlendiği yer |
+| `COOKIE_SECURE` | HTTPS-only cookie | **Staging'de `true` önerilir (HTTPS varsa)** — **düzeltme (Step 11'de doğrulandı):** kodun kendi default'u `false`, fail-fast DEĞİL | Staging domain'i HTTPS sunuyorsa `true` set edilmeli, aksi halde varsayılan `false` sessizce kalır |
+
+### 18d. Provider-agnostic staging deploy akışı
+
+**Henüz gerçek bir provider seçilmediği için burada AKTİF bir deploy
+workflow'u YOK** — `.github/workflows/` bugün yalnız `stable-ci.yml`
+içeriyor (kod-doğruluğu gate'i, Production Step 7/8), bir deploy adımı
+EKLENMEDİ. Aşağıdaki akış, HANGİ Option A adayı seçilirse seçilsin
+geçerli olan, sağlayıcıdan bağımsız adım sırasıdır — somut komutlar
+sağlayıcı seçildikten sonra netleşir:
+
+1. **Build** — `pnpm install --frozen-lockfile && pnpm run build` (tüm
+   workspace paketleri; `apps/api`/`apps/dashboard` dahil, §2C/Step 8'in
+   zaten belgelediği host-build-first gereksinimiyle tutarlı, eğer seçilen
+   platform kendi Docker build'ini yapıyorsa bu adım platformun kendi CI
+   image'ına taşınır).
+2. **Deploy** — seçilen platformun kendi deploy mekanizması (`git push`
+   ile otomatik, veya `railway up`/`flyctl deploy`/eşdeğeri — sağlayıcıya
+   özel, bu adımda seçilmedi).
+3. **Migrate** — `pnpm --filter @grafista/api run db:migrate`, staging
+   `DATABASE_URL`'ine karşı, deploy SONRASI ama trafiğin tam
+   yönlendirilmesinden ÖNCE (`docs/deployment-runbook.md` §6'nın
+   "migration sonrası health/ready kontrolü zorunlu" ilkesiyle tutarlı).
+4. **Health check** — `curl -sf <STAGING_URL>/api/health` (liveness) ve
+   `GET /api/health/ready` (dependency readiness, §8 doktrini).
+5. **Smoke** — `pnpm --filter @grafista/api run smoke:staging` (host'tan,
+   staging URL'ine karşı — bugünkü `scripts/ci-staging.sh`'ın YAPTIĞI
+   şeyin managed-staging karşılığı, local Docker yerine gerçek bir
+   deploy'a karşı).
+6. **Restore drill** — `docs/backup-restore-runbook.md` §13/§14'ün
+   managed-staging drill'i, PASS almadan production'a geçilmez.
+
+Bu altı adımın GitHub Actions'a nasıl bağlanacağının PASİF bir taslağı
+[`docs/staging-deploy-workflow-template.yml`](./staging-deploy-workflow-template.yml)'de
+— **bu dosya `.github/workflows/` İÇİNDE DEĞİL, aktif bir workflow
+DEĞİL**, yalnızca sağlayıcı seçildiğinde uyarlanacak bir başlangıç
+noktası. Gerçek secret isimleriyle (§18c) uyumlu ama hiçbir secret DEĞERİ
+içermiyor.
+
+**Bu bölümün HİÇBİR maddesi bu Step 12'de tamamlanmadı** — hepsi gerçek
+bir provider hesabı/provizyonlama/deploy gerektiriyor, ki bu adımın
+kapsamı dışı (bkz. `docs/managed-infrastructure-plan.md` §1 ve bu
+belgenin görev tanımının kendi sınırı).
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
   Production Step 11: §17'nin checklist'inin dayandığı karar
   kriterleri/matrisi, env/secrets matrisi, ops decision (Option A/B/C).
+  Production Step 12: §7'nin güncellenmiş Option A işareti, §8'in provider
+  short-list'i — §18'in doğrudan girdisi.
+- [`docs/staging-deploy-workflow-template.yml`](./staging-deploy-workflow-template.yml) —
+  §18d'nin pasif GitHub Actions taslağı — AKTİF bir workflow DEĞİL.
 - [`docs/backup-restore-runbook.md`](./backup-restore-runbook.md) —
   Production Step 9'un tam teslimatı: persistence envanteri, managed
   Postgres/S3 karar kriterleri, backup policy, restore/restore-drill

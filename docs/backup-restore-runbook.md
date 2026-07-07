@@ -25,6 +25,14 @@
 > local/staging Docker'a karşı. §13, managed altyapıya karşı yapılacak
 > EK bir drill'in ne gerektirdiğini tarif ediyor — kendisi o drill
 > DEĞİL.
+>
+> **GÜNCELLEME (Production Step 12):** kullanıcı Option A'yı (düşük
+> operasyon / hızlı MVP) seçti ve provider short-list'i hazırlandı
+> (`docs/managed-infrastructure-plan.md` §7/§8) — **somut sağlayıcı hâlâ
+> SEÇİLMEDİ**, bu yüzden §13'ün managed-altyapı drill'i hâlâ
+> çalıştırılamaz durumda. Yeni §14, bu gate'i açıkça netleştiriyor: local/
+> staging drill (§12) PASS + managed staging drill (§13, henüz yapılmadı)
+> PASS, İKİSİ BİRDEN olmadan production deploy yok.
 
 ## Amaç
 
@@ -595,11 +603,46 @@ tablosu) doldurulacak — bugün için boş, ve bu doğrudan
 
 ---
 
+## 14. Managed Staging Restore Drill — Net Gate (Production Step 12)
+
+> **Status: GATE NETLEŞTİRMESİ — bu adımda hiçbir drill çalıştırılmadı,
+> §13c hâlâ boş.** Kullanıcı Option A'yı (düşük operasyon / hızlı MVP)
+> seçti (`docs/managed-infrastructure-plan.md` §7) ve provider
+> short-list'i hazırlandı (aynı belge §8) — ama somut bir sağlayıcı hâlâ
+> SEÇİLMEDİ, bu yüzden §13b'nin taslak adımları hâlâ placeholder'lı, hâlâ
+> yürütülemez durumda.
+
+**Net gate, Production Step 13 veya 14'e ertelendi — burada AÇIKÇA
+yazılı:**
+
+- **§7'nin local/staging drill'i (Production Step 10) PASS aldı** — bu
+  hâlâ geçerli, restore MEKANİĞİNİN doğru olduğunu kanıtlıyor.
+- **Managed staging drill'i (§13'ün tarif ettiği) HENÜZ YAPILMADI** — bu,
+  bir sonraki somut altyapı adımının (sağlayıcı seçimi + staging
+  provisioning, muhtemelen Production Step 13) parçası olarak
+  planlanıyor; gerçekten çalıştırılıp PASS alması Production Step 13 VEYA
+  14'te beklenıyor — hangisi olacağı, sağlayıcı seçiminin ne kadar
+  sürdüğüne bağlı, bu belge bunu ÖNCEDEN İDDİA ETMİYOR.
+- **Local/staging drill PASS olması, managed staging drill'in YERİNE
+  GEÇMEZ** — ikisi ayrı ayrı gate'ler (§13a'nın tablosu zaten bu farkı
+  netleştiriyor: farklı Postgres/storage, farklı backup mekanizması).
+- **Bu iki gate'in İKİSİ DE karşılanmadan production deploy YOK** —
+  §13a'nın zaten koyduğu ilke burada TEKRAR, daha açık şekilde altı
+  çiziliyor: local/staging drill PASS + managed staging drill PASS,
+  ikisi birlikte, tek biri yeterli DEĞİL.
+
+---
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —
   Production Step 11: managed Postgres/S3/hosting/secrets/monitoring/backup
-  karar matrisi, env/secrets matrisi, §13'ün doğrudan kaynağı.
+  karar matrisi, env/secrets matrisi, §13'ün doğrudan kaynağı. Production
+  Step 12: §7/§8 — Option A seçimi ve provider short-list'i, §14'ün
+  doğrudan girdisi.
+- [`docs/deployment-runbook.md`](./deployment-runbook.md) §18 — Production
+  Step 12: Staging Deployment Gate checklist'i, §14'ün "managed staging
+  drill" adımının restore-drill maddesiyle eşleştiği yer.
 - `scripts/restore-drill-staging.sh` — §12'nin tam otomasyonu, §7'nin
   kod hali. Güvenlik guard'ları (NODE_ENV/DATABASE_URL kontrolü),
   aşama-aşama loglama (setup/seed/backup/reset/restore/verify/cleanup),
