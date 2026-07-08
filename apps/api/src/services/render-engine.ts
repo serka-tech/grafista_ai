@@ -124,6 +124,23 @@ async function loadSelectedVisual(
       storageBucket: storage?.bucket ?? '',
       storageKey: key,
     });
+    // A 0-byte object (e.g. an interrupted/truncated storage write) is not a
+    // usable visual: embedding it would produce an empty-payload data URI that
+    // the renderer rejects downstream. Treat it as unreadable here so the
+    // pipeline takes the documented placeholder/safe-fallback path instead.
+    if (buffer.length === 0) {
+      return {
+        visual: null,
+        warnings: [
+          {
+            code: 'selected_visual_storage_missing',
+            message: 'Selected visual read back as 0 bytes from storage — image slots keep their placeholders',
+            severity: 'warning',
+            details: { selectedVisualId: section.id ?? null, storageKey: key },
+          },
+        ],
+      };
+    }
     const mimeType = section.mimeType && section.mimeType.startsWith('image/') ? section.mimeType : 'image/png';
     return {
       visual: {
@@ -336,17 +353,35 @@ export async function runRenderPipeline(
   const { visual, warnings: visualLoadWarnings } = await loadSelectedVisual(manifestSnapshot);
   const compositionPlan = visual
     ? planVisualComposition({ layers, visual })
-    : { imageSources: {} as Record<string, string>, warnings: [] as RenderWarning[] };
+    : {
+        imageSources: {} as Record<string, string>,
+        fullCanvasVisual: undefined as string | undefined,
+        warnings: [] as RenderWarning[],
+      };
   const imageSources = compositionPlan.imageSources;
+  // Option A (Phase 2 render fix) — when the layout has no image slot, the
+  // planner returns the loaded visual here to be drawn full-bleed as the whole
+  // creative (see visual-composition.ts / html-renderer.ts).
+  const fullCanvasVisual = compositionPlan.fullCanvasVisual;
 
-  const { html, warnings: htmlWarnings } = buildRenderHtml({ canvas, layers, imageSources });
+  const { html, warnings: htmlWarnings, usedFullCanvas } = buildRenderHtml({ canvas, layers, imageSources, fullCanvasVisual });
   // Step 9B — pre-render heuristic QA pass (see render-quality.ts's module
   // header: heuristics surfacing risk, not typographic ground truth).
   // Composition warnings come first (they explain what the renderer was
   // given), then the renderer's warnings (produced in layer order), then
   // the quality pass. Warnings NEVER fail a render — only a real adapter/
   // storage error does, via the caller's catch block.
-  const qualityWarnings = assessRenderQuality({ canvas, layers, safeZones, imageSources });
+  //
+  // Option A — in full-canvas mode the template's own layers are NOT rendered
+  // (the visual replaces them), so the layer-level heuristics (text overflow,
+  // safe-area, missing-image-source on suppressed slots) don't apply and would
+  // only surface misleading warnings about layers that never made it into the
+  // output. Gate the skip on the renderer's ACTUAL outcome (`usedFullCanvas`),
+  // NOT on the planner's `fullCanvasVisual` intent: if that source were somehow
+  // invalid, buildRenderHtml falls back to rendering the template layers, and
+  // those layers must still get their QA warnings surfaced (never silently
+  // wrong).
+  const qualityWarnings = usedFullCanvas ? [] : assessRenderQuality({ canvas, layers, safeZones, imageSources });
   const warnings = [...visualLoadWarnings, ...compositionPlan.warnings, ...htmlWarnings, ...qualityWarnings];
 
   const adapter = getRendererAdapter();

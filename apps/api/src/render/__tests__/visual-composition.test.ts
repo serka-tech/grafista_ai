@@ -61,20 +61,64 @@ describe('planVisualComposition', () => {
     expect(warnings.find((w) => w.code === 'image_slot_unmapped')).toBeUndefined();
   });
 
-  it('emits image_slot_missing (info) and injects nothing when the layout has no image slots', () => {
+  // Option A (Phase 2 render fix) — when the layout has NO usable image slot,
+  // the loaded visual is no longer discarded: it becomes the full-canvas
+  // creative (`fullCanvasVisual`) and image_slot_missing is replaced by
+  // full_canvas_visual_fallback (warning).
+  it('returns fullCanvasVisual + full_canvas_visual_fallback (warning) when the layout has no image slots', () => {
     const textLayer = imageSlot({ id: 'text-1', type: 'text', imageProperties: undefined });
-    const { imageSources, warnings } = planVisualComposition({ layers: [textLayer], visual });
+    const { imageSources, fullCanvasVisual, warnings } = planVisualComposition({ layers: [textLayer], visual });
 
     expect(imageSources).toEqual({});
-    expect(warnings).toContainEqual(expect.objectContaining({ code: 'image_slot_missing', severity: 'info' }));
+    expect(fullCanvasVisual).toBe(visual.dataUri);
+    expect(warnings).toContainEqual(
+      expect.objectContaining({
+        code: 'full_canvas_visual_fallback',
+        severity: 'warning',
+        details: expect.objectContaining({ sizeBytes: visual.sizeBytes, mimeType: visual.mimeType }),
+      })
+    );
+    // The old info-only "did nothing" signal is gone — the visual IS used now.
+    expect(warnings.find((w) => w.code === 'image_slot_missing')).toBeUndefined();
   });
 
-  it('never injects into logo layers', () => {
+  it('never injects into logo layers, but still falls back to a full-canvas visual', () => {
     const logo = imageSlot({ id: 'logo-1', type: 'logo' });
-    const { imageSources, warnings } = planVisualComposition({ layers: [logo], visual });
+    const { imageSources, fullCanvasVisual, warnings } = planVisualComposition({ layers: [logo], visual });
 
+    // A logo is not an image slot, so nothing is injected into it...
     expect(imageSources).toEqual({});
-    expect(warnings).toContainEqual(expect.objectContaining({ code: 'image_slot_missing', severity: 'info' }));
+    // ...and with no image slot at all, the visual is rendered full-bleed.
+    expect(fullCanvasVisual).toBe(visual.dataUri);
+    expect(warnings).toContainEqual(
+      expect.objectContaining({ code: 'full_canvas_visual_fallback', severity: 'warning' })
+    );
+  });
+
+  it('does NOT set fullCanvasVisual when a usable image slot exists (normal per-slot compositing preserved)', () => {
+    // A real image slot -> the visual is composited into it, NOT full-canvas.
+    const withSlot = planVisualComposition({ layers: [imageSlot()], visual });
+    expect(withSlot.fullCanvasVisual).toBeUndefined();
+    expect(withSlot.imageSources).toEqual({ 'image-1': visual.dataUri });
+
+    // Even when the only image slot already carries its own http(s) source
+    // (image_slot_unmapped) a valid image slot DOES exist, so the full-canvas
+    // fallback must NOT fire — existing behavior is unchanged.
+    const sourced = imageSlot({
+      id: 'sourced',
+      imageProperties: {
+        sourceType: 'uploaded',
+        sourceUrl: 'https://example.com/own.png',
+        fit: 'cover',
+        opacity: 1,
+        borderRadius: 0,
+      },
+    });
+    const allSourced = planVisualComposition({ layers: [sourced], visual });
+    expect(allSourced.fullCanvasVisual).toBeUndefined();
+    expect(allSourced.imageSources).toEqual({});
+    expect(allSourced.warnings).toContainEqual(expect.objectContaining({ code: 'image_slot_unmapped' }));
+    expect(allSourced.warnings.find((w) => w.code === 'full_canvas_visual_fallback')).toBeUndefined();
   });
 
   it('deterministically picks the primary slot: ai_generated beats placeholder, larger area beats smaller', () => {
@@ -169,11 +213,14 @@ describe('planVisualComposition', () => {
     expect(imageSources).toEqual({ bare: visual.dataUri });
   });
 
-  it('skips invisible image slots entirely', () => {
+  it('skips invisible image slots entirely (no injection), falling back to a full-canvas visual', () => {
     const hidden = imageSlot({ id: 'hidden', visible: false });
-    const { imageSources, warnings } = planVisualComposition({ layers: [hidden], visual });
+    const { imageSources, fullCanvasVisual, warnings } = planVisualComposition({ layers: [hidden], visual });
     expect(imageSources).toEqual({});
-    expect(warnings).toContainEqual(expect.objectContaining({ code: 'image_slot_missing', severity: 'info' }));
+    expect(fullCanvasVisual).toBe(visual.dataUri);
+    expect(warnings).toContainEqual(
+      expect.objectContaining({ code: 'full_canvas_visual_fallback', severity: 'warning' })
+    );
   });
 
   it('finds image slots nested inside group children', () => {

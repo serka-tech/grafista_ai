@@ -89,8 +89,13 @@ const RENDER_WARNING_CODE_LABELS: Record<string, string> = {
   selected_visual_missing: 'Seçili görsel bulunamadı',
   selected_visual_storage_missing: 'Görsel depodan okunamadı',
   selected_visual_aspect_mismatch: 'Görsel/slot oran farkı',
+  // image_slot_missing is no longer emitted (replaced by full_canvas_visual_fallback
+  // below) but kept so historical render_jobs rows still show a Turkish label.
   image_slot_missing: 'Görsel alanı bulunamadı',
   image_slot_unmapped: 'Bazı görsel alanları eşleşmedi',
+  // Phase 2 render fix (Option A) — full-canvas visual fallback.
+  full_canvas_visual_fallback: 'Görsel tam ekran yerleştirildi',
+  full_canvas_visual_invalid: 'Tam ekran görsel geçersiz',
   // Reserved for a future backend warning code — kept mapped defensively so a
   // Turkish label is ready the day it starts being emitted (harmless unused
   // key otherwise, no backend contract implied).

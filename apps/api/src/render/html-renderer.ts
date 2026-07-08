@@ -54,6 +54,17 @@ export interface RenderableCanvas {
 export interface HtmlRenderResult {
   html: string;
   warnings: RenderWarning[];
+  /**
+   * Phase 2 render fix (Option A) — true iff this document was built as a
+   * single full-bleed generated visual with the template layers suppressed
+   * (buildRenderHtml's `fullCanvasVisual` branch). The render engine gates its
+   * QA-pass skip on THIS actual outcome rather than re-deriving it from the
+   * composition plan, so an invalid/degraded full-canvas source (which falls
+   * through to normal layer rendering here) can never silently skip the QA
+   * heuristics for the layers it actually rendered. Absent/false on the normal
+   * path.
+   */
+  usedFullCanvas?: boolean;
 }
 
 /** Valid CSS `mix-blend-mode` keywords — anything else falls back to 'normal' with a warning. */
@@ -350,6 +361,40 @@ function buildLayerHtml(
 }
 
 /**
+ * Option A (Phase 2 render fix) full-canvas render: one self-contained document
+ * whose only content is the generated visual, drawn full-bleed
+ * (`object-fit:cover`) at the exact target canvas size. No fonts, no template
+ * layers, no placeholder boxes — see buildRenderHtml's `fullCanvasVisual`
+ * branch for when this path is taken and why the template layers are dropped.
+ *
+ * An OPAQUE base coat (`canvas.backgroundColor` if given, else white) is placed
+ * behind the image so the export never depends on the browser's incidental
+ * default background: if the generated visual carries any transparency (a PNG
+ * can), those pixels composite over a defined color rather than leaking through
+ * to bare white.
+ */
+function buildFullCanvasHtml(canvas: RenderableCanvas, dataUri: string): HtmlRenderResult {
+  const background = safeColor(canvas.backgroundColor, '#ffffff').color;
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+.canvas { position: relative; width: ${canvas.width}px; height: ${canvas.height}px; overflow: hidden; background-color: ${background}; }
+.canvas > img.full-canvas-visual { position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <img class="full-canvas-visual" src="${escapeHtml(dataUri)}" alt="">
+  </div>
+</body>
+</html>`;
+  return { html, warnings: [], usedFullCanvas: true };
+}
+
+/**
  * Builds one self-contained HTML document for the given canvas + layer tree.
  * Nested `children` are flattened first; hidden layers (`visible === false`)
  * are skipped entirely (no DOM node, no warning); the remaining layers are
@@ -359,14 +404,41 @@ function buildLayerHtml(
  *
  * `imageSources` (Phase 3 Step 1, optional/additive): layerId -> injected
  * image source for image/logo layers — see the module header.
+ *
+ * `fullCanvasVisual` (Phase 2 render fix, Option A, optional/additive): when
+ * set to a valid base64 image data URI, the composition planner determined the
+ * layout has no usable image slot to receive the generated visual, so that
+ * visual IS the finished creative and is rendered full-bleed as the entire
+ * canvas — every template layer is suppressed to avoid duplicating the
+ * headline/logo already baked into the AI visual (and to avoid the F8 bug: a
+ * white-on-white headline over a gray placeholder box on a blank canvas). An
+ * invalid value degrades to normal layer rendering with a warning rather than
+ * emitting a broken <img>.
  */
 export function buildRenderHtml(input: {
   canvas: RenderableCanvas;
   layers: Layer[];
   imageSources?: Record<string, string>;
+  fullCanvasVisual?: string;
 }): HtmlRenderResult {
-  const { canvas, layers, imageSources } = input;
+  const { canvas, layers, imageSources, fullCanvasVisual } = input;
   const warnings: RenderWarning[] = [];
+
+  if (fullCanvasVisual !== undefined) {
+    const trimmed = fullCanvasVisual.trim();
+    if (IMAGE_DATA_URI_RE.test(trimmed)) {
+      return buildFullCanvasHtml(canvas, trimmed);
+    }
+    // Never silently wrong: an invalid full-canvas source (should be
+    // impossible — render-engine.ts builds it from real bytes) degrades to the
+    // normal layer render below with a warning, instead of an empty/broken img.
+    warnings.push({
+      code: 'full_canvas_visual_invalid',
+      message:
+        'Full-canvas visual source was not a valid base64 image data URI — falling back to normal template layer rendering',
+      severity: 'warning',
+    });
+  }
 
   const visibleLayers = flattenLayers(layers)
     .filter((layer) => layer.visible !== false)
@@ -400,5 +472,5 @@ ${buildGoogleFontsLinkTag()}
 </body>
 </html>`;
 
-  return { html, warnings };
+  return { html, warnings, usedFullCanvas: false };
 }

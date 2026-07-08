@@ -24,10 +24,18 @@
  *    'ai_generated' slots outrank 'placeholder'/bare slots, which outrank
  *    'uploaded'/'stock' ones, then larger area, then lower zIndex, then
  *    lexicographically smaller layer id.
- *  * This module NEVER fails a render — every degenerate case (no image
- *    slots, no injectable slots, extra unmapped slots, aspect mismatch)
- *    degrades to a documented RenderWarning, same contract as
- *    html-renderer.ts / render-quality.ts.
+ *  * This module NEVER fails a render — every degenerate case (no injectable
+ *    slots, extra unmapped slots, aspect mismatch) degrades to a documented
+ *    RenderWarning, same contract as html-renderer.ts / render-quality.ts.
+ *
+ * Phase 2 render fix (Option A, ADDITIVE): the one degenerate case that USED to
+ * silently discard a perfectly good visual — a layout with NO image slot at all
+ * (`imageSlots.length === 0`, the pipeline default's background/headline/logo
+ * layout) — now returns `fullCanvasVisual` instead. The renderer draws that
+ * visual full-bleed as the whole creative and suppresses the template's own
+ * layers, fixing the empty-white / gray-placeholder / white-on-white output
+ * (friction F8). A layout WITH a usable image slot is unaffected: it still goes
+ * through normal per-slot compositing via `imageSources`.
  */
 
 import type { Layer, RenderWarning } from '@grafista/schemas';
@@ -63,6 +71,16 @@ export interface LoadedVisual {
 export interface VisualCompositionPlan {
   /** layerId -> image source to inject (currently at most one entry: the primary slot). */
   imageSources: Record<string, string>;
+  /**
+   * Phase 2 render fix (Option A) — set to the loaded visual's data URI when
+   * the layout has NO usable image slot to receive it. In that case the
+   * generated visual IS the finished creative (an MVP layout like the pipeline
+   * default carries only background + headline + logo, no image layer), so the
+   * renderer must draw it full-bleed as the entire canvas and suppress the
+   * template's own layers (see html-renderer.ts). Never set when a real image
+   * slot exists — normal per-slot compositing (`imageSources`) is used then.
+   */
+  fullCanvasVisual?: string;
   warnings: RenderWarning[];
 }
 
@@ -139,13 +157,22 @@ export function planVisualComposition(input: { layers: Layer[]; visual: LoadedVi
   const imageSlots = flattenLayers(layers).filter((layer) => layer.visible !== false && layer.type === 'image');
 
   if (imageSlots.length === 0) {
+    // Option A (Phase 2 render fix) — no image slot exists to receive the
+    // generated visual, so it cannot be composited into a template slot. But a
+    // real visual DID load, and for MVP layouts that carry no image layer at
+    // all (the pipeline default: background + headline + logo) that visual is
+    // itself the finished creative. Signal the renderer to draw it full-bleed
+    // as the entire canvas — rather than discarding it and leaving the
+    // template's own layers to render as a broken white-on-white headline over
+    // a gray placeholder box on an otherwise empty white canvas (friction F8).
     warnings.push({
-      code: 'image_slot_missing',
+      code: 'full_canvas_visual_fallback',
       message:
-        'Layout plan has no visible image slot — the generated visual was loaded but not composited; render continues unchanged',
-      severity: 'info',
+        'Layout plan has no image slot — the generated visual is rendered full-bleed as the final creative; template overlays are suppressed to avoid duplication',
+      severity: 'warning',
+      details: { sizeBytes: visual.sizeBytes, mimeType: visual.mimeType },
     });
-    return { imageSources, warnings };
+    return { imageSources, fullCanvasVisual: visual.dataUri, warnings };
   }
 
   const injectable = imageSlots.filter(isInjectable).sort(comparePrimaryCandidates);

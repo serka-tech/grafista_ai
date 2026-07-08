@@ -304,13 +304,20 @@ describe('MVP demo flow — happy path on the keyless configuration (real fake A
 
       const warnings = renderJob.renderWarnings as Array<Record<string, unknown>>;
       expect(Array.isArray(warnings)).toBe(true);
-      // The canned layout_generation payload defines `safeZones: []` (see
-      // fake.ts), and render-quality.ts emits exactly one
-      // 'safe_area_unavailable' INFO warning when safeZones is empty or
-      // missing — so that warning MUST be present on this render.
-      const safeArea = warnings.find((w) => w.code === 'safe_area_unavailable');
-      expect(safeArea).toBeDefined();
-      expect(safeArea?.severity).toBe('info');
+      // The canned fake layout carries background + headline + logo layers and
+      // NO image slot (see fake.ts), and the pipeline produced a real generated
+      // visual — so Option A (Phase 2 render fix) draws that visual full-bleed
+      // as the whole creative and surfaces 'full_canvas_visual_fallback'.
+      const fallback = warnings.find((w) => w.code === 'full_canvas_visual_fallback');
+      expect(fallback).toBeDefined();
+      expect(fallback?.severity).toBe('warning');
+      expect((fallback?.details as Record<string, unknown>).sizeBytes).toBeGreaterThan(0);
+
+      // In full-canvas mode the template layers are suppressed, so the
+      // layer-level QA pass is skipped: neither the old 'image_slot_missing'
+      // info signal nor the 'safe_area_unavailable' heuristic fires anymore.
+      expect(warnings.find((w) => w.code === 'image_slot_missing')).toBeUndefined();
+      expect(warnings.find((w) => w.code === 'safe_area_unavailable')).toBeUndefined();
     },
     30_000
   );

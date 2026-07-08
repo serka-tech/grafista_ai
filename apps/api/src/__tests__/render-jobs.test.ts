@@ -1266,24 +1266,45 @@ describe('10. Generated-visual compositing (Phase 3 Step 1 — F8)', () => {
   );
 
   it(
-    'a layout with no image slot at all renders fine and reports image_slot_missing (info) — the pipeline default layout (background/text/logo only) is exactly this case',
+    'Option A — a layout with no image slot renders the generated visual full-bleed: full_canvas_visual_fallback (warning) fires, image_slot_missing does NOT, and the visual bytes reach the export',
     async () => {
       const { productionJob } = await createPackageReadyProductionJob('Compositing No Image Slot Client');
       const owner = await loginAs(TEST_USERS.OWNER);
 
       // No crafted snapshot: the mocked pipeline's layout has background +
-      // text + logo layers and NO 'image' layer.
-      const { renderJob } = await renderAndGetChecksum(owner, productionJob.id as string);
+      // text + logo layers and NO 'image' layer — the exact F8 bug shape.
+      const { renderJob, checksum } = await renderAndGetChecksum(owner, productionJob.id as string);
       const warnings = renderJob.renderWarnings as Array<Record<string, any>>;
-
-      const slotMissing = warnings.find((w) => w.code === 'image_slot_missing');
-      expect(slotMissing).toBeDefined();
-      expect(slotMissing?.severity).toBe('info');
-      // selected_visual_loaded means "composited into a slot" — with no slot
-      // to receive it, it must NOT fire (and the render must not fail).
-      expect(warnings.find((w) => w.code === 'selected_visual_loaded')).toBeUndefined();
       expect(renderJob.status).toBe('rendered');
+
+      // The visual is drawn full-bleed as the whole creative.
+      const fallback = warnings.find((w) => w.code === 'full_canvas_visual_fallback');
+      expect(fallback).toBeDefined();
+      expect(fallback?.severity).toBe('warning');
+      expect((fallback?.details as Record<string, any>).sizeBytes).toBeGreaterThan(0);
+
+      // The old info-only "did nothing" signal is gone; selected_visual_loaded
+      // means "composited into a slot" (there is none); and with every template
+      // layer suppressed, the layer-level QA warnings must not fire either.
+      expect(warnings.find((w) => w.code === 'image_slot_missing')).toBeUndefined();
+      expect(warnings.find((w) => w.code === 'selected_visual_loaded')).toBeUndefined();
+      expect(warnings.find((w) => w.code === 'missing_image_source')).toBeUndefined();
+
+      // Prove the visual's bytes really are part of the rendered document: the
+      // SAME default layout on a job whose selected visual is UNREADABLE
+      // produces a DIFFERENT export. That gutted job also demonstrates the
+      // "visual missing + no image slot => safe fallback" path: no full-canvas
+      // fallback fires and the render still succeeds (bare template).
+      const { productionJob: guttedJob } = await createPackageReadyProductionJob('Compositing No Slot Gutted Client');
+      await nullOutSelectedVisualStorage(guttedJob.id as string);
+      const gutted = await renderAndGetChecksum(owner, guttedJob.id as string);
+      const guttedWarnings = gutted.renderJob.renderWarnings as Array<Record<string, any>>;
+
+      expect(gutted.renderJob.status).toBe('rendered');
+      expect(guttedWarnings.find((w) => w.code === 'full_canvas_visual_fallback')).toBeUndefined();
+      expect(guttedWarnings.find((w) => w.code === 'selected_visual_storage_missing')).toBeDefined();
+      expect(gutted.checksum).not.toBe(checksum);
     },
-    30_000
+    60_000
   );
 });

@@ -266,3 +266,97 @@ describe('buildRenderHtml — injected image sources (Phase 3 Step 1)', () => {
     expect(html).toContain('object-fit:contain');
   });
 });
+
+// Phase 2 render fix (Option A) — full-canvas visual fallback: when the layout
+// has no usable image slot, the generated visual is drawn full-bleed as the
+// entire creative and the template's own layers are suppressed.
+describe('buildRenderHtml — full-canvas visual fallback (Option A)', () => {
+  const FULL_CANVAS_URI = `data:image/png;base64,${Buffer.from('full-canvas-ai-creative-bytes').toString('base64')}`;
+
+  it('renders the visual full-bleed and suppresses all template layers (no headline, no gray placeholder box)', () => {
+    // The exact broken-render inputs: a headline text layer, a sourceless logo
+    // (would render as a gray box), and a background — plus a real visual.
+    const backgroundLayer = shapeLayer({ id: 'bg-1', type: 'background', zIndex: 0 });
+    const logoLayer = imageLayer({
+      id: 'logo-1',
+      type: 'logo',
+      imageProperties: { sourceType: 'uploaded', fit: 'contain', opacity: 1, borderRadius: 0 },
+    });
+
+    const { html, warnings, usedFullCanvas } = buildRenderHtml({
+      canvas,
+      layers: [backgroundLayer, textLayer(), logoLayer],
+      fullCanvasVisual: FULL_CANVAS_URI,
+    });
+
+    // The AI visual is present, full-bleed (object-fit:cover, 100% x 100%).
+    expect(html).toContain(`<img class="full-canvas-visual" src="${FULL_CANVAS_URI}"`);
+    expect(html).toContain('object-fit:cover');
+    expect(html).toContain('width:100%; height:100%');
+    expect(usedFullCanvas).toBe(true);
+
+    // An opaque base coat sits behind the image so transparency never leaks to
+    // the browser's incidental default (here: white, the default fallback).
+    expect(html).toContain('.canvas { position: relative; width: 1080px; height: 1080px; overflow: hidden; background-color: #ffffff;');
+
+    // Template overlays are suppressed — no duplicated headline, no gray box.
+    expect(html).not.toContain('Hello &lt;World&gt;');
+    expect(html).not.toContain('background-color:#e5e7eb');
+    expect(warnings).toEqual([]);
+  });
+
+  it('honors an explicit canvas.backgroundColor as the full-canvas base coat', () => {
+    const { html } = buildRenderHtml({
+      canvas: { width: 1080, height: 1080, backgroundColor: '#000000' },
+      layers: [textLayer()],
+      fullCanvasVisual: FULL_CANVAS_URI,
+    });
+    expect(html).toContain('background-color: #000000;');
+  });
+
+  it('preserves the requested canvas size for each format', () => {
+    for (const [w, h] of [
+      [1080, 1080],
+      [1080, 1920],
+      [1920, 1080],
+      [1200, 628],
+    ] as const) {
+      const { html } = buildRenderHtml({
+        canvas: { width: w, height: h },
+        layers: [textLayer()],
+        fullCanvasVisual: FULL_CANVAS_URI,
+      });
+      expect(html).toContain(`width: ${w}px; height: ${h}px`);
+      expect(html).toContain('<img class="full-canvas-visual"');
+    }
+  });
+
+  it.each([
+    ['javascript:alert(1)', 'a non-data-URI string'],
+    ['data:image/png;base64,', 'an empty-payload data URI (e.g. a 0-byte visual)'],
+  ])('an invalid full-canvas source (%s) degrades to normal layer rendering with a full_canvas_visual_invalid warning and usedFullCanvas=false', (badSource) => {
+    const { html, warnings, usedFullCanvas } = buildRenderHtml({
+      canvas,
+      layers: [textLayer(), imageLayer({ imageProperties: { sourceType: 'uploaded', fit: 'cover', opacity: 1, borderRadius: 0 } })],
+      fullCanvasVisual: badSource,
+    });
+
+    // No broken <img>, and the template layers ARE rendered (safe fallback).
+    expect(html).not.toContain('class="full-canvas-visual"');
+    expect(html).toContain('Hello &lt;World&gt;');
+    // usedFullCanvas must reflect the ACTUAL outcome so the render engine keeps
+    // running the QA pass over the layers it really rendered.
+    expect(usedFullCanvas).toBe(false);
+    expect(warnings).toContainEqual(
+      expect.objectContaining({ code: 'full_canvas_visual_invalid', severity: 'warning' })
+    );
+  });
+
+  it('without fullCanvasVisual, template layers render normally (visual-missing safe fallback)', () => {
+    const { html, warnings, usedFullCanvas } = buildRenderHtml({ canvas, layers: [textLayer()] });
+    expect(html).toContain('Hello &lt;World&gt;');
+    expect(html).not.toContain('class="full-canvas-visual"');
+    expect(usedFullCanvas).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+});
