@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, resolveApiFileUrl } from '@/lib/api';
+import { AssetIntakeNotice } from '@/components/asset-intake-notice';
 
 export default function ReferencesPage({ params }: { params: { id: string } }) {
   const [refs, setRefs] = useState<any[]>([]);
@@ -62,6 +63,8 @@ export default function ReferencesPage({ params }: { params: { id: string } }) {
           </div>
         </div>
       </div>
+
+      <AssetIntakeNotice variant="reference" />
 
       {showForm && (
         <form onSubmit={handleUpload} className="card" style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '480px' }}>

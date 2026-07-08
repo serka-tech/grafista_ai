@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { AnalyticsSummaryPanel } from '@/components/analytics-summary-panel';
 import { RevisionHistoryPanel } from '@/components/revision-history-panel';
+import { DemoFlowGuide } from '@/components/demo-flow-guide';
 
 export default function ClientProfilePage({ params }: { params: { id: string } }) {
   const [client, setClient] = useState<any>(null);
@@ -54,6 +55,8 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
           </a>
         ))}
       </div>
+
+      <DemoFlowGuide clientId={params.id} />
 
       <AnalyticsSummaryPanel clientId={params.id} />
       <RevisionHistoryPanel clientId={params.id} />
