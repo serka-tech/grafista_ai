@@ -14,6 +14,7 @@
     "db:seed": "tsx src/scripts/db-seed.ts",
     "db:seed-admin": "tsx src/scripts/db-seed-admin.ts",
     "db:seed-demo": "tsx src/scripts/db-seed-demo.ts",
+    "db:seed-demo-all": "tsx src/scripts/db-seed-demo-all.ts",
     "db:setup": "pnpm run db:migrate && pnpm run db:seed",
     "smoke:providers": "tsx src/scripts/smoke-real-providers.ts",
     "smoke:staging": "tsx src/scripts/smoke-staging.ts",

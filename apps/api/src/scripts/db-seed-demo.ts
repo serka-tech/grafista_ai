@@ -16,8 +16,13 @@
  * fixed names below). If a reference row exists but its file is missing from
  * storage (e.g. apps/api/uploads/ was deleted), the bytes are re-written to
  * the row's recorded storage key.
+ *
+ * The reference-seeding loop is also exported as `seedDemoReferences()` so
+ * db-seed-demo-all.ts (the one-command demo bootstrap) can reuse this exact,
+ * already-tested step instead of duplicating it.
  */
 
+import { pathToFileURL } from 'node:url';
 import { v4 as uuid } from 'uuid';
 import { pool, closePool } from '../db/pool.js';
 import { designReferencesRepo } from '../db/repositories/design-references.js';
@@ -114,6 +119,21 @@ async function ensureDemoReference(spec: DemoReferenceSpec): Promise<'created' |
   return 'created';
 }
 
+/**
+ * Runs the DEMO_REFERENCES loop only — assumes the "Flavora Organic" sample
+ * client already exists (callers that can't guarantee that, e.g. the CLI
+ * `main()` below, must check first). Extracted so db-seed-demo-all.ts can
+ * compose this exact, already-tested step without duplicating it; does NOT
+ * call process.exit or closePool — safe to call from a longer-lived process.
+ */
+export async function seedDemoReferences(): Promise<string[]> {
+  const results: string[] = [];
+  for (const spec of DEMO_REFERENCES) {
+    results.push(`${spec.name}: ${await ensureDemoReference(spec)}`);
+  }
+  return results;
+}
+
 async function main() {
   const { rows } = await pool.query('SELECT id, name FROM clients WHERE id = $1', [SAMPLE_CLIENT_ID]);
   if (rows.length === 0) {
@@ -124,10 +144,7 @@ async function main() {
     process.exit(1);
   }
 
-  const results: string[] = [];
-  for (const spec of DEMO_REFERENCES) {
-    results.push(`${spec.name}: ${await ensureDemoReference(spec)}`);
-  }
+  const results = await seedDemoReferences();
 
   console.log('\n[seed-demo] done.');
   for (const line of results) console.log(`  - ${line}`);
@@ -144,8 +161,14 @@ async function main() {
   await closePool();
 }
 
-main().catch(async (err) => {
-  console.error('[seed-demo] FAILED', err);
-  await pool.end().catch(() => undefined);
-  process.exit(1);
-});
+// Only auto-run when this file is executed directly (`tsx db-seed-demo.ts`,
+// i.e. `pnpm run db:seed-demo`) — not when imported for `seedDemoReferences`
+// (e.g. by db-seed-demo-all.ts or its test), which must not trigger the CLI
+// side effects (process.exit / closePool) as an import side effect.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(async (err) => {
+    console.error('[seed-demo] FAILED', err);
+    await pool.end().catch(() => undefined);
+    process.exit(1);
+  });
+}
