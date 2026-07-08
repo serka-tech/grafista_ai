@@ -17,7 +17,8 @@
     "db:setup": "pnpm run db:migrate && pnpm run db:seed",
     "smoke:providers": "tsx src/scripts/smoke-real-providers.ts",
     "smoke:staging": "tsx src/scripts/smoke-staging.ts",
-    "e2e:full-canvas-render": "tsx src/scripts/e2e-full-canvas-render.ts"
+    "e2e:full-canvas-render": "tsx src/scripts/e2e-full-canvas-render.ts",
+    "check:chromium": "tsx src/scripts/check-chromium.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1078.0",

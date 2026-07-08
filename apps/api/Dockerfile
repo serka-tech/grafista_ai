@@ -84,6 +84,17 @@ WORKDIR /repo
 
 ENV NODE_ENV=production
 
+# Fixed, user-agnostic Playwright browser cache. `playwright install` below runs
+# as root (build time) and the app later launches Chromium as the non-root
+# `grafista` user (runtime) — pinning PLAYWRIGHT_BROWSERS_PATH makes BOTH use the
+# same location. Without it, install would populate /root/.cache/ms-playwright
+# while the runtime user resolves /home/grafista/.cache/ms-playwright, leaving
+# the browser "missing" on every fresh deploy ("Executable doesn't exist … run
+# npx playwright install"). The chown below grants `grafista` read+exec on it.
+# Set here (runtime stage) so it is baked into the final image's env and honored
+# at launch, not just during the install RUN. See docs/deployment-runbook.md.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
 
 # Copies the ENTIRE built workspace (node_modules included) from the build
@@ -93,19 +104,22 @@ RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
 # image — tracked as a known gap in docs/staging-compose.md, not solved here.
 COPY --from=build /repo /repo
 
-# Chromium + its OS-level dependencies for RENDERER_PROVIDER=playwright.
-# Installed unconditionally so the SAME image supports both renderer modes —
-# docker-compose.staging.yml's default env (.env.staging.example) sets
-# RENDERER_PROVIDER=fake for a safe first validation loop (zero Chromium risk
-# on first bring-up), with real Playwright rendering available as a pure env
-# flip (RENDER_PROVIDER=playwright), no rebuild required.
+# Chromium ONLY (not firefox/webkit) + its OS-level dependencies for
+# RENDERER_PROVIDER=playwright. Installs into PLAYWRIGHT_BROWSERS_PATH (set
+# above) rather than root's home cache. Installed unconditionally so the SAME
+# image supports both renderer modes — docker-compose.staging.yml's default env
+# (.env.staging.example) sets RENDERER_PROVIDER=fake for a safe first validation
+# loop (zero Chromium risk on first bring-up), with real Playwright rendering
+# available as a pure env flip (RENDER_PROVIDER=playwright), no rebuild required.
 RUN pnpm --filter @grafista/api exec playwright install --with-deps chromium
 
 # Non-root user — cheap, sane default; not a full security-hardening pass
-# (explicitly out of scope for this first skeleton).
+# (explicitly out of scope for this first skeleton). Ownership of both the repo
+# AND the shared browser cache is handed to `grafista` so the runtime user can
+# read/execute the Chromium binaries installed above.
 RUN groupadd --system grafista \
   && useradd --system --gid grafista --create-home --home-dir /home/grafista grafista \
-  && chown -R grafista:grafista /repo
+  && chown -R grafista:grafista /repo /ms-playwright
 USER grafista
 
 WORKDIR /repo/apps/api
