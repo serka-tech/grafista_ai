@@ -52,6 +52,12 @@ app.use(express.urlencoded({ extended: true }));
 // health.ts for file organization); GET /api/health/ready is new (Production
 // Readiness Step — see health.ts's own doc comment).
 app.use('/api', healthRouter);
+// Root aliases: GET /health and GET /health/ready, byte-identical public probes
+// at the root path. Some deployment platforms probe /health rather than
+// /api/health; mounting the same router at root (in addition to /api above)
+// serves both without duplicating the handler. No auth. Non-health paths just
+// fall through this mount (the router only matches /health and /health/ready).
+app.use(healthRouter);
 
 // Routes
 app.use('/api', authRouter);

@@ -322,6 +322,27 @@ describe('GET /api/health — unchanged regression guard', () => {
   });
 });
 
+describe('GET /health — root alias (deployment probe, no auth)', () => {
+  it('returns the exact same static shape as /api/health', async () => {
+    const res = await request(testServer.server).get('/health');
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(['service', 'status', 'timestamp', 'version'].sort());
+    expect(res.body.status).toBe('ok');
+    expect(res.body.service).toBe('grafista-ai-studio-api');
+    expect(res.body.version).toBe('0.1.0');
+    expect(typeof res.body.timestamp).toBe('string');
+  });
+});
+
+describe('GET /health/ready — root alias (deployment probe, no auth)', () => {
+  it('returns the readiness shape at the root path, no auth required', async () => {
+    const res = await request(testServer.server).get('/health/ready');
+    expect([200, 503]).toContain(res.status);
+    expect(['ok', 'degraded', 'error']).toContain(res.body.status);
+    expect(res.body.checks).toHaveProperty('database');
+  });
+});
+
 describe('GET /api/health/ready — basic shape and no-auth access', () => {
   it('returns 200 with an overall ok/degraded status and all check keys present, no auth required', async () => {
     const res = await request(testServer.server).get('/api/health/ready');
