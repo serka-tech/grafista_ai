@@ -1,15 +1,22 @@
-// Empty (same-origin/relative) by default — the browser calls the dashboard's
-// OWN origin at `/api/...`, and Next.js rewrites those to the real API
-// (next.config.js, destination driven by API_PROXY_TARGET). This is the
-// backend-for-frontend proxy pattern, chosen in Production Step 19 so the
-// split-origin auth trap is avoided: with the browser talking only to the
-// dashboard origin, the grafista_session cookie is a first-party cookie on
-// the dashboard host, SameSite=lax works, the dashboard middleware can read
-// it, and the API needs no CORS/cookie changes. Do NOT set NEXT_PUBLIC_API_URL
-// on the deployed dashboard — leaving it unset keeps calls same-origin; it
-// exists only as an escape hatch for a direct (non-proxied) same-site setup
-// like local dev on the same host. See docs/deployment-runbook.md §28.
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+// Client-side API base is ALWAYS same-origin ('') — the browser calls the
+// dashboard's OWN origin at `/api/...`, and Next.js proxies those to the real
+// API (next.config.js, destination driven by the SERVER-side API_PROXY_TARGET).
+// This backend-for-frontend proxy pattern (Production Step 19) avoids the
+// split-origin trap: the browser talks only to the dashboard origin, so
+// grafista_session is a first-party cookie there, SameSite=lax works, the
+// dashboard middleware can read it, and the API needs no CORS/cookie changes.
+//
+// We deliberately DO NOT read NEXT_PUBLIC_API_URL here. Baking an absolute API
+// origin into the browser bundle makes the client call the API cross-origin —
+// which the split-origin CORS setup (the API allows only its own configured
+// origin, not the dashboard's) rejects at the browser as "Failed to fetch".
+// That was the real staging login bug: NEXT_PUBLIC_API_URL was set on the
+// deployed dashboard, so the browser POSTed to the API origin directly and the
+// preflight/credentialed request was blocked. Hardcoding '' makes it impossible
+// for the browser to ever call the API cross-origin, regardless of deploy env.
+// A genuinely direct (non-proxied) setup should point API_PROXY_TARGET at the
+// API, not bake an origin into this client base. See docs/deployment-runbook.md §28.
+const API_BASE = '';
 
 // Carries the HTTP status code alongside the message so callers can branch on
 // specific statuses (e.g. 409 conflict vs 502 provider failure) without
@@ -63,9 +70,10 @@ export function friendlyAiErrorMessage(
 }
 
 /**
- * Resolves an API-relative protected file path (e.g. `/api/visual-outputs/:id/file`)
- * to an absolute URL on the API origin, so <img src> / download links work when the
- * dashboard and API run on different origins. Absolute URLs pass through unchanged.
+ * Normalizes an API-relative protected file path (e.g. `/api/visual-outputs/:id/file`)
+ * for use in <img src> / download links. With the same-origin proxy (API_BASE=''),
+ * relative paths stay same-origin and Next.js proxies them to the API; already-absolute
+ * URLs pass through unchanged.
  */
 export function resolveApiFileUrl(path: string): string {
   return path.startsWith('/') ? `${API_BASE}${path}` : path;
