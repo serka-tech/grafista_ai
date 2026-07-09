@@ -31,7 +31,10 @@ export default function LoginPage() {
       >
         <div>
           <h2 style={{ marginBottom: '4px' }}>Grafista AI Studio</h2>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>Devam etmek için giriş yapın</p>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginBottom: '6px' }}>
+            Marka DNA&apos;sından yayına hazır görsele, tek akışta.
+          </p>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem' }}>Devam etmek için giriş yapın</p>
         </div>
         <label>
           E-posta
