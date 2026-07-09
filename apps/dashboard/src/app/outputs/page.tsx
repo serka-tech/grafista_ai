@@ -206,7 +206,7 @@ export default function OutputsPage() {
     <div className="animate-fade-in">
       <div className="page-header">
         <h2>📦 Çıktı Geçmişi</h2>
-        <p>Müşterilerin render edilmiş görsel çıktılarının salt-okunur galerisi</p>
+        <p>Tamamlanmış render çıktılarını görüntüleyin ve indirin. Onay/red işlemleri brief sayfasında yapılır.</p>
       </div>
 
       {filterClientId && matchedGroup && (

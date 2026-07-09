@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { DemoPipelineOverview } from '@/components/demo-pipeline-overview';
 
 interface ClientSummary {
   id: string;
@@ -70,6 +71,8 @@ export default function ClientsPage() {
           </button>
         </div>
       </div>
+
+      <DemoPipelineOverview />
 
       {showForm && (
         <form onSubmit={handleCreateClient} className="card" style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '480px' }}>

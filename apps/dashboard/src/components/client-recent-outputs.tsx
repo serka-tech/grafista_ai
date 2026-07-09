@@ -11,12 +11,14 @@
  * /outputs gallery card) so the two surfaces look identical, and a "Tümü →"
  * link points at the gallery filtered to this client (/outputs?client=<id>).
  *
- * Renders NOTHING (return null) until loaded, and nothing if the client has no
- * render jobs yet — so a never-rendered client's hub isn't cluttered with an
- * empty section. Each fan-out level has its own try/catch that skips on failure
- * (mirrors outputs/page.tsx's "one transient failure must not break the UI"
- * idiom). Purely read-only; the client id comes from the route the viewer is
- * already authorized for, so no isolation boundary is crossed here.
+ * Renders NOTHING (return null) until loaded. Once loaded it ALWAYS shows the
+ * "Son Çıktılar" section: the recent render cards + a "Tümü →" link when they
+ * exist, or a short placeholder line when the client hasn't rendered anything
+ * yet (so the section's purpose stays visible during a live demo instead of
+ * being a silent gap). Each fan-out level has its own try/catch that skips on
+ * failure (mirrors outputs/page.tsx's "one transient failure must not break the
+ * UI" idiom). Purely read-only; the client id comes from the route the viewer
+ * is already authorized for, so no isolation boundary is crossed here.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -106,29 +108,40 @@ export function ClientRecentOutputs({ clientId, clientName }: { clientId: string
       .finally(() => setLoading(false));
   }, [load]);
 
-  // Show nothing while loading and nothing when this client has no renders yet —
-  // the strip just pops in once real rendered work exists.
-  if (loading || entries.length === 0) return null;
+  // Nothing while loading — the section settles in after the fetch. Once
+  // loaded it always renders, so a demo of a not-yet-rendered client still
+  // shows what this area is for (placeholder below) instead of a silent gap.
+  if (loading) return null;
 
   return (
     <div style={{ marginTop: '24px' }}>
       <div className="card-header" style={{ marginBottom: '12px' }}>
         <div className="card-title">🖼 Son Çıktılar</div>
-        <a href={`/outputs?client=${clientId}`} className="btn btn-secondary btn-sm">
-          Tümü →
-        </a>
+        {entries.length > 0 && (
+          <a href={`/outputs?client=${clientId}`} className="btn btn-secondary btn-sm">
+            Tümü →
+          </a>
+        )}
       </div>
-      <div className="card-grid">
-        {entries.map((entry) => (
-          <GalleryOutputCard
-            key={entry.renderJob.id}
-            renderJob={entry.renderJob}
-            output={entry.output}
-            clientName={clientName}
-            briefTitle={entry.briefTitle ?? undefined}
-          />
-        ))}
-      </div>
+      {entries.length > 0 ? (
+        <div className="card-grid">
+          {entries.map((entry) => (
+            <GalleryOutputCard
+              key={entry.renderJob.id}
+              renderJob={entry.renderJob}
+              output={entry.output}
+              clientName={clientName}
+              briefTitle={entry.briefTitle ?? undefined}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="card">
+          <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', margin: 0 }}>
+            Bu müşteri için render alındığında, üretilen görseller burada görünür ve buradan indirilir.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

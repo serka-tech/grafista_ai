@@ -21,6 +21,15 @@
  *   5. demo brief  — ensures ONE 'approved' design_brief exists on the
  *                     seeded approved content idea, ready for
  *                     POST /api/design-briefs/:id/layout-plans.
+ *   6. demo render — ensures ONE full render-output chain exists below the
+ *                     demo brief (approved layout_plan -> generated visual
+ *                     output -> package_ready production_job -> a render_job
+ *                     already in status 'rendered', with a real stored PNG
+ *                     export artifact) so the dashboard's /outputs Product
+ *                     Gallery shows at least one real card + working
+ *                     Download button on a freshly bootstrapped database.
+ *                     Hand-authored placeholder content, NOT run through the
+ *                     real AI/render pipeline — see ensureDemoRenderOutput().
  *
  * Run:   pnpm run db:seed-demo-all
  * Env:   ADMIN_EMAIL    (optional — default demo-owner@grafista.local)
@@ -30,7 +39,7 @@
  *                         password is never changed)
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { v4 as uuid } from 'uuid';
 import { pool, closePool } from '../db/pool.js';
@@ -40,7 +49,15 @@ import { seedDemoReferences } from './db-seed-demo.js';
 import { usersRepo } from '../db/repositories/users.js';
 import { hashPassword } from '../auth/password.js';
 import { contentIdeasRepo } from '../db/repositories/content-ideas.js';
-import { designBriefsRepo } from '../db/repositories/design-briefs.js';
+import { designBriefsRepo, type DesignBrief } from '../db/repositories/design-briefs.js';
+import { layoutPlansRepo } from '../db/repositories/layout-plans.js';
+import { generatedOutputsRepo } from '../db/repositories/generated-outputs.js';
+import { productionJobsRepo } from '../db/repositories/production-jobs.js';
+import { renderJobsRepo } from '../db/repositories/render-jobs.js';
+import { exportArtifactsRepo } from '../db/repositories/export-artifacts.js';
+import { getStorageProvider, getStorageProviderByName } from '../storage/factory.js';
+import type { StorageProviderName } from '../storage/types.js';
+import type { LayoutPlan, LayoutPlanContent, RenderJob } from '@grafista/schemas';
 
 /** Fixed id of the "Flavora Organic" sample client — see src/db/seed.ts / database/seed/sample-data.sql. */
 const SAMPLE_CLIENT_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
@@ -54,6 +71,54 @@ const DEFAULT_OWNER_EMAIL = 'demo-owner@grafista.local';
  * cannot collide with the sample client/content-idea/approval ids above.
  */
 const DEMO_BRIEF_ID = 'd0000000-0000-4000-8000-000000000001';
+
+/**
+ * Fixed ids for the single demo render-output chain this script maintains,
+ * seeded BELOW the demo brief so the dashboard's /outputs Product Gallery has
+ * at least one real card on a freshly bootstrapped database. Same v4-shaped
+ * UUID literal convention as DEMO_BRIEF_ID above, each distinct so none of the
+ * check-before-insert lookups below can ever collide with one another or
+ * with DEMO_BRIEF_ID.
+ */
+const DEMO_LAYOUT_PLAN_ID = 'd0000000-0000-4000-8000-000000000002';
+const DEMO_VISUAL_OUTPUT_ID = 'd0000000-0000-4000-8000-000000000003';
+const DEMO_PRODUCTION_JOB_ID = 'd0000000-0000-4000-8000-000000000004';
+const DEMO_RENDER_JOB_ID = 'd0000000-0000-4000-8000-000000000005';
+const DEMO_RENDER_ARTIFACT_ID = 'd0000000-0000-4000-8000-000000000006';
+
+/**
+ * Fixed pixel size for the demo render chain — deliberately independent of
+ * DIMENSION_MAP/the design brief's own `dimensions` (which happens to also be
+ * 1080x1080 for the seeded Flavora "Summer Harvest" brief today, but is not
+ * guaranteed to stay that way): this constant is the single source of truth
+ * for BOTH the recorded width/height columns below AND the actual pixel
+ * dimensions baked into DEMO_RENDER_PNG_BASE64, so the two can never drift
+ * apart — no metadata is ever recorded that doesn't match the real bytes.
+ */
+const RENDER_WIDTH = 1080;
+const RENDER_HEIGHT = 1080;
+
+/**
+ * Real 1080x1080 solid-color PNG (~5KB), base64-encoded — generated ONCE with
+ * Node's zlib (deterministic: a fixed-size solid-color bitmap deflated with a
+ * fixed compression level, no randomness, no external files/tools/network)
+ * and embedded as a constant here, exactly like db-seed-demo.ts's
+ * FOREST_GREEN_PNG_BASE64 (same Flavora "Forest Green" #2D5016 brand tone).
+ * This is an HONEST placeholder: a hand-authored 1080x1080 Instagram-post
+ * bitmap, not something the real AI/render pipeline ever produced — every
+ * row below that references it makes that explicit (provider 'demo-seed',
+ * rendererName 'demo-seed', designerNotes, package manifest note).
+ */
+const DEMO_RENDER_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAABDgAAAQ4CAIAAABjcvvYAAATOklEQVR42u3XMQ0AAAgEsVeBC7zgXw0uCEOTKrjt0lMAAACvRAIAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUVAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoqAAAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARkUCAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqKgAAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEZFAgAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFRUAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKioAAAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACjAgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAYFQAAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAACMCgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAgFEBAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAAAwKgAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAAEYFAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGRQIAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUAAACjAgAAGBUVAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoAAAAGBUAAMCoqAAAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAowIAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAGBUAAAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAjAoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAIBRAQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAMCoAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAABGBQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAwKgAAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAAAYFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAADAqAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARgUAAMCoAAAARkUCAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAADAqAAAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVAAAAowIAABgVFQAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAKMCAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAABgVAAAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAAIwKAACAUQEAADAqAACAUQEAADAqAACAUQEAADAqAACAUQEAALizvO3iCTA+yq0AAAAASUVORK5CYII=';
+
+/**
+ * Precomputed once at module load from the fixed base64 above — never
+ * recomputed from arbitrary/random input, so this stays fully deterministic
+ * across every run and every process.
+ */
+const DEMO_RENDER_PNG_BUFFER = Buffer.from(DEMO_RENDER_PNG_BASE64, 'base64');
+const DEMO_RENDER_PNG_CHECKSUM = createHash('sha256').update(DEMO_RENDER_PNG_BUFFER).digest('hex');
 
 /**
  * Platform -> pixel dimensions. Copied from
@@ -85,6 +150,9 @@ export interface SeedDemoAllSummary {
   referenceResults: string[];
   owner: { email: string; created: boolean; generatedPassword?: string };
   brief: { id: string; created: boolean } | { skipped: true; reason: string };
+  renderOutput:
+    | { layoutPlanId: string; renderJobId: string; results: string[] }
+    | { skipped: true; reason: string };
 }
 
 async function ensureDemoOwner(
@@ -189,6 +257,309 @@ async function ensureDemoBrief(): Promise<SeedDemoAllSummary['brief']> {
   return { id: DEMO_BRIEF_ID, created: true };
 }
 
+// ─── Demo render-output chain (Demo-Day polish) ────────────
+//
+// Everything below composes ONE fixed-id chain — layout_plan -> generated
+// visual output -> production_job -> render_job -> export artifact — directly
+// via the same repos the real routes/services use, WITHOUT going through
+// runLayoutGeneration/runVisualGeneration/production-package-builder.ts/
+// render-engine.ts (no AI call, no Playwright, no queue/worker). Every row is
+// check-before-insert by its own FIXED id (mirrors ensureDemoBrief/
+// ensureDemoReference above), so re-running never duplicates anything, and
+// every stored-file row self-heals its object-storage bytes if the row
+// exists but the underlying object was wiped (mirrors ensureDemoReference()
+// in db-seed-demo.ts exactly).
+
+/** Ensures the single demo layout_plan exists and is 'approved'. */
+async function ensureDemoLayoutPlan(ownerId: string, brief: DesignBrief): Promise<{ layoutPlan: LayoutPlan; created: boolean }> {
+  const existing = await layoutPlansRepo.getById(DEMO_LAYOUT_PLAN_ID);
+  if (existing) {
+    return { layoutPlan: existing, created: false };
+  }
+
+  // Hand-authored LayoutPlanContent — every field the real
+  // LayoutPlanContentSchema requires (including zod-defaulted ones, since
+  // this is a plain object literal, never parsed through .parse()) is set
+  // explicitly rather than relying on a default that would never actually
+  // run. canvas is fixed at RENDER_WIDTH x RENDER_HEIGHT (see that
+  // constant's own comment) so it always matches the real PNG bytes below.
+  const content: LayoutPlanContent = {
+    format: brief.platform,
+    canvas: { width: RENDER_WIDTH, height: RENDER_HEIGHT, backgroundColor: '#FFFFFF', dpi: 72 },
+    layers: [
+      {
+        id: 'background',
+        name: 'Background',
+        type: 'background',
+        position: { x: 0, y: 0, width: RENDER_WIDTH, height: RENDER_HEIGHT, rotation: 0, anchor: 'top-left' },
+        zIndex: 0,
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+      },
+      {
+        id: 'headline',
+        name: 'Headline',
+        type: 'text',
+        position: { x: 80, y: 80, width: RENDER_WIDTH - 160, height: 240, rotation: 0, anchor: 'top-left' },
+        zIndex: 1,
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+        textProperties: {
+          content: brief.title,
+          fontFamily: 'Outfit',
+          fontSize: 64,
+          fontWeight: 'bold',
+          color: '#FFFFFF',
+          alignment: 'left',
+        },
+      },
+    ],
+    safeZones: [],
+    headlinePlacement: {
+      layerId: 'headline',
+      position: { x: 80, y: 80, width: RENDER_WIDTH - 160, height: 240, rotation: 0, anchor: 'top-left' },
+    },
+    exportSettings: { formats: ['png'], quality: 90, scaleFactor: 1 },
+    referenceDesignIds: [],
+    designDnaRulesUsed: [],
+    designerNotes: 'Seeded demo layout for the /outputs gallery — hand-authored, never run through runLayoutGeneration/the AI pipeline.',
+  };
+
+  await layoutPlansRepo.create({
+    id: DEMO_LAYOUT_PLAN_ID,
+    clientId: brief.clientId,
+    designBriefId: brief.id,
+    contentIdeaId: brief.contentIdeaId,
+    alternativeIndex: 1,
+    status: 'generated',
+    content,
+    provider: 'demo-seed',
+    model: 'demo-seed-v1',
+    createdBy: ownerId,
+  });
+
+  // create() always inserts status 'generated' — approve() (which sets
+  // approved_by/approved_at too) is a second step, same two-step idiom
+  // ensureDemoBrief already uses for design_briefs' draft -> approved bump.
+  const approved = await layoutPlansRepo.approve(DEMO_LAYOUT_PLAN_ID, ownerId);
+  return { layoutPlan: approved!, created: true };
+}
+
+/** Ensures the single demo generated_outputs ("visual output") row exists with real PNG bytes in storage. */
+async function ensureDemoVisualOutput(
+  ownerId: string,
+  brief: DesignBrief,
+  layoutPlanId: string
+): Promise<{ outputId: string; status: 'created' | 'exists' | 'healed' }> {
+  const existing = await generatedOutputsRepo.getById(DEMO_VISUAL_OUTPUT_ID);
+
+  if (existing) {
+    if (!existing.storageProvider || !existing.storageKey || !existing.storageBucket) {
+      console.warn(
+        `[seed-demo-all] demo visual output ${DEMO_VISUAL_OUTPUT_ID} exists but has no storage columns — ` +
+          'cannot repair in place. Delete that generated_outputs row and re-run to recreate it with file bytes.'
+      );
+      return { outputId: existing.id, status: 'exists' };
+    }
+    const provider = getStorageProviderByName(existing.storageProvider as StorageProviderName);
+    try {
+      await provider.getObjectBuffer({ key: existing.storageKey });
+      return { outputId: existing.id, status: 'exists' };
+    } catch {
+      await provider.putObject({ key: existing.storageKey, body: DEMO_RENDER_PNG_BUFFER, contentType: 'image/png' });
+      return { outputId: existing.id, status: 'healed' };
+    }
+  }
+
+  // New row: storage write FIRST, row second — same never-persist-metadata-
+  // on-storage-failure ordering as ensureDemoReference()/visual-generation.ts.
+  const key = `generated-outputs/${brief.clientId}/${DEMO_VISUAL_OUTPUT_ID}.png`;
+  const stored = await getStorageProvider().putObject({ key, body: DEMO_RENDER_PNG_BUFFER, contentType: 'image/png' });
+
+  await generatedOutputsRepo.create({
+    id: DEMO_VISUAL_OUTPUT_ID,
+    clientId: brief.clientId,
+    designBriefId: brief.id,
+    layoutPlanId,
+    type: 'preview_image',
+    name: 'Demo Render Output',
+    alternativeIndex: 1,
+    status: 'generated',
+    // Same protected-fileUrl pattern as visual-generation.ts — the authenticated
+    // file route, never a raw storage location.
+    fileUrl: `/api/visual-outputs/${DEMO_VISUAL_OUTPUT_ID}/file`,
+    mimeType: 'image/png',
+    fileSizeBytes: DEMO_RENDER_PNG_BUFFER.length,
+    storageProvider: stored.provider,
+    storageBucket: stored.bucket,
+    storageKey: stored.key,
+    dimensions: { width: RENDER_WIDTH, height: RENDER_HEIGHT },
+    generationMethod: 'manual',
+    provider: 'demo-seed',
+    createdBy: ownerId,
+  });
+
+  return { outputId: DEMO_VISUAL_OUTPUT_ID, status: 'created' };
+}
+
+/** Ensures the single demo production_jobs row exists and has reached 'package_ready'. */
+async function ensureDemoProductionJob(
+  ownerId: string,
+  brief: DesignBrief,
+  layoutPlanId: string,
+  generatedOutputId: string
+): Promise<{ productionJobId: string; created: boolean }> {
+  const existing = await productionJobsRepo.getById(DEMO_PRODUCTION_JOB_ID);
+  if (existing) {
+    return { productionJobId: existing.id, created: false };
+  }
+
+  await productionJobsRepo.create({
+    id: DEMO_PRODUCTION_JOB_ID,
+    clientId: brief.clientId,
+    generatedOutputId,
+    layoutPlanId,
+    status: 'pending',
+    generationMethod: 'manual_package_builder',
+    requestedBy: ownerId,
+  });
+
+  // Same create('pending') -> updateStatus(...) two-step as every other
+  // guarded state machine in this file — NOT production-package-builder.ts
+  // (no real package bytes are built; packageManifestSnapshot is a small,
+  // honestly-labeled placeholder object, not a fabricated real manifest).
+  await productionJobsRepo.updateStatus(DEMO_PRODUCTION_JOB_ID, 'package_ready', {
+    packageManifestSnapshot: {
+      note: 'Seeded demo production package — not built by the real production-package-builder pipeline.',
+      generatedOutputId,
+      layoutPlanId,
+    },
+  });
+
+  return { productionJobId: DEMO_PRODUCTION_JOB_ID, created: true };
+}
+
+/** Ensures the single demo render_job (status 'rendered') and its export artifact (real PNG bytes) exist. */
+async function ensureDemoRenderJobWithArtifact(
+  ownerId: string,
+  brief: DesignBrief,
+  productionJobId: string
+): Promise<{ renderJob: RenderJob; renderJobCreated: boolean; artifactStatus: 'created' | 'exists' | 'healed' }> {
+  let renderJob = await renderJobsRepo.getById(DEMO_RENDER_JOB_ID);
+  let renderJobCreated = false;
+
+  if (!renderJob) {
+    await renderJobsRepo.create({
+      id: DEMO_RENDER_JOB_ID,
+      clientId: brief.clientId,
+      productionJobId,
+      requestedFormat: { preset: 'instagram_post', exportFormat: 'png', width: RENDER_WIDTH, height: RENDER_HEIGHT },
+      requestedBy: ownerId,
+    });
+    // create() (opts.queued left at its default false) always inserts status
+    // 'pending' — there is no repo method that inserts a row already
+    // 'rendered' in one step (same limitation ensureDemoBrief's design_briefs
+    // two-step already works around). Moving straight to 'rendered' via
+    // plain updateStatus() — NOT claimNext()/markRendered(), which are the
+    // queue/worker's own methods — means queued_at/started_at/locked_by/
+    // locked_at/attempt_count/next_run_at are never touched by this seed
+    // step: the row goes 'pending' -> 'rendered' directly, never 'queued' or
+    // 'rendering', so it can never be mistaken for something the queue/
+    // worker claimed. RENDER_QUEUE_ENABLED is never read or set here.
+    renderJob = (await renderJobsRepo.updateStatus(DEMO_RENDER_JOB_ID, 'rendered', {
+      rendererName: 'demo-seed',
+      rendererVersion: 'demo-seed-v1',
+    }))!;
+    renderJobCreated = true;
+  }
+
+  const existingArtifact = await exportArtifactsRepo.getById(DEMO_RENDER_ARTIFACT_ID);
+  if (existingArtifact) {
+    const provider = getStorageProviderByName(existingArtifact.storageProvider as StorageProviderName);
+    try {
+      await provider.getObjectBuffer({ key: existingArtifact.storageKey });
+      return { renderJob, renderJobCreated, artifactStatus: 'exists' };
+    } catch {
+      await provider.putObject({
+        key: existingArtifact.storageKey,
+        body: DEMO_RENDER_PNG_BUFFER,
+        contentType: 'image/png',
+      });
+      return { renderJob, renderJobCreated, artifactStatus: 'healed' };
+    }
+  }
+
+  const key = `export-artifacts/${brief.clientId}/${DEMO_RENDER_ARTIFACT_ID}.png`;
+  const stored = await getStorageProvider().putObject({ key, body: DEMO_RENDER_PNG_BUFFER, contentType: 'image/png' });
+
+  // format/width/height/mimeType/sizeBytes/checksum below all describe
+  // DEMO_RENDER_PNG_BUFFER's REAL bytes (see that constant's own comment) —
+  // never a fabricated label.
+  await exportArtifactsRepo.create({
+    id: DEMO_RENDER_ARTIFACT_ID,
+    renderJobId: DEMO_RENDER_JOB_ID,
+    clientId: brief.clientId,
+    format: 'png',
+    width: RENDER_WIDTH,
+    height: RENDER_HEIGHT,
+    mimeType: 'image/png',
+    storageProvider: stored.provider,
+    storageBucket: stored.bucket,
+    storageKey: stored.key,
+    sizeBytes: DEMO_RENDER_PNG_BUFFER.length,
+    checksum: DEMO_RENDER_PNG_CHECKSUM,
+  });
+
+  return { renderJob, renderJobCreated, artifactStatus: 'created' };
+}
+
+/**
+ * Composes the four steps above into the one chain the /outputs Product
+ * Gallery needs: approved layout_plan -> generated visual output ->
+ * package_ready production_job -> rendered render_job + its export artifact.
+ * Only proceeds if the demo brief exists (mirrors ensureDemoBrief's own
+ * explicit-skip contract) — every row below has a hard FK dependency on
+ * DEMO_BRIEF_ID (directly or transitively), so there is nothing safe to do
+ * without it.
+ */
+async function ensureDemoRenderOutput(ownerId: string): Promise<SeedDemoAllSummary['renderOutput']> {
+  const brief = await designBriefsRepo.getById(DEMO_BRIEF_ID);
+  if (!brief) {
+    const reason = `the demo design brief (${DEMO_BRIEF_ID}) does not exist yet — ensureDemoBrief must succeed first.`;
+    console.warn(`[seed-demo-all] skipping demo render output — ${reason}`);
+    return { skipped: true, reason };
+  }
+
+  const { layoutPlan, created: layoutPlanCreated } = await ensureDemoLayoutPlan(ownerId, brief);
+  const { outputId, status: outputStatus } = await ensureDemoVisualOutput(ownerId, brief, layoutPlan.id);
+  const { productionJobId, created: productionJobCreated } = await ensureDemoProductionJob(
+    ownerId,
+    brief,
+    layoutPlan.id,
+    outputId
+  );
+  const {
+    renderJob,
+    renderJobCreated,
+    artifactStatus,
+  } = await ensureDemoRenderJobWithArtifact(ownerId, brief, productionJobId);
+
+  const results = [
+    `layout plan ${DEMO_LAYOUT_PLAN_ID}: ${layoutPlanCreated ? 'created' : 'already existed'} (status: approved)`,
+    `visual output ${DEMO_VISUAL_OUTPUT_ID}: ${outputStatus}`,
+    `production job ${DEMO_PRODUCTION_JOB_ID}: ${productionJobCreated ? 'created' : 'already existed'} (status: package_ready)`,
+    `render job ${DEMO_RENDER_JOB_ID}: ${renderJobCreated ? 'created' : 'already existed'} (status: ${renderJob.status})`,
+    `render artifact ${DEMO_RENDER_ARTIFACT_ID}: ${artifactStatus}`,
+  ];
+  for (const line of results) console.log(`[seed-demo-all] ${line}`);
+
+  return { layoutPlanId: layoutPlan.id, renderJobId: renderJob.id, results };
+}
+
 export async function seedDemoAll(opts: SeedDemoAllOptions = {}): Promise<SeedDemoAllSummary> {
   await runMigrations(pool);
   await runSeed(pool);
@@ -196,7 +567,25 @@ export async function seedDemoAll(opts: SeedDemoAllOptions = {}): Promise<SeedDe
   const owner = await ensureDemoOwner(opts);
   const brief = await ensureDemoBrief();
 
-  return { referenceResults, owner, brief };
+  let renderOutput: SeedDemoAllSummary['renderOutput'];
+  if ('skipped' in brief) {
+    renderOutput = { skipped: true, reason: 'demo design brief was skipped — see the brief result for why.' };
+  } else {
+    // ensureDemoOwner() only returns {email, created, generatedPassword} —
+    // look the row up by that same email to get the id createdBy/requestedBy
+    // below actually need (a plain read, mutates nothing).
+    const ownerUser = await usersRepo.findByEmail(owner.email);
+    if (!ownerUser) {
+      renderOutput = {
+        skipped: true,
+        reason: `owner user ${owner.email} could not be found right after ensureDemoOwner() — should be unreachable.`,
+      };
+    } else {
+      renderOutput = await ensureDemoRenderOutput(ownerUser.id);
+    }
+  }
+
+  return { referenceResults, owner, brief, renderOutput };
 }
 
 async function main() {
@@ -210,6 +599,14 @@ async function main() {
     console.log(`  demo design brief: SKIPPED — ${summary.brief.reason}`);
   } else {
     console.log(`  demo design brief: ${summary.brief.id} (${summary.brief.created ? 'created' : 'already existed'})`);
+  }
+  if ('skipped' in summary.renderOutput) {
+    console.log(`  demo render output: SKIPPED — ${summary.renderOutput.reason}`);
+  } else {
+    console.log('  demo render output (for the /outputs Product Gallery):');
+    for (const line of summary.renderOutput.results) console.log(`    - ${line}`);
+    console.log(`    layoutPlanId: ${summary.renderOutput.layoutPlanId}`);
+    console.log(`    renderJobId:  ${summary.renderOutput.renderJobId}`);
   }
   console.log(
     '\nNext steps: set AI_DEFAULT_PROVIDER=fake in .env (see .env.example DEMO MODE), start the API + ' +

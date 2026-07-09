@@ -39,11 +39,17 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
         <p>{client.industry} • {client.contactName} • {client.contactEmail}</p>
       </div>
 
+      <DemoFlowGuide clientId={params.id} />
+
       <div className="stats-grid">
         <div className="stat-card"><div className="stat-value">{ideas.length}</div><div className="stat-label">İçerik Fikirleri</div></div>
         <div className="stat-card"><div className="stat-value">{ideas.filter(i => i.status === 'approved').length}</div><div className="stat-label">Onaylanan</div></div>
         <div className="stat-card"><div className="stat-value">{ideas.filter(i => i.status === 'pending_approval').length}</div><div className="stat-label">Bekleyen</div></div>
       </div>
+
+      <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '12px' }}>
+        Bu kartlar hızlı erişim içindir. Demoyu adım adım göstermek için yukarıdaki 🎬 MVP Demo Akışı rehberini izleyin.
+      </p>
 
       <div className="card-grid">
         {subPages.map((page) => (
@@ -58,8 +64,6 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
       </div>
 
       <ClientRecentOutputs clientId={params.id} clientName={client.name} />
-
-      <DemoFlowGuide clientId={params.id} />
 
       <AnalyticsSummaryPanel clientId={params.id} />
       <RevisionHistoryPanel clientId={params.id} />

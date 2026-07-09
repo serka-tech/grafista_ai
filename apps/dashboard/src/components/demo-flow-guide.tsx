@@ -80,22 +80,22 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
       label: 'Brief oluştur + onayla',
       desc: 'Onaylı fikirden "Tasarım Brifi Oluştur" ile brief üret, aç ve onayla.',
       href: `/clients/${clientId}/content`,
-      hrefLabel: 'İçerik Üretici',
-      note: 'Onaylı fikrin altından brief oluşturulur.',
+      hrefLabel: 'İçerik Üretici (aynı sayfa)',
+      note: 'Onaylı fikrin altından brief oluşturulur (5. adımla aynı sayfa).',
     },
     {
       n: 7,
       icon: '🖼️',
       label: 'Layout + Kalite Kontrol',
-      desc: 'Brief sayfasında layout planı üret, Creative QA çalıştır ve onayla.',
-      note: 'Brief -> Layout Planları sayfasında.',
+      desc: 'Brief sayfasında layout planı üret, kalite kontrolünü çalıştır ve onayla.',
+      note: 'Bu adıma gitmek için onaylı brief kartını açın, ardından "Layout Planları" sayfasına girin.',
     },
     {
       n: 8,
       icon: '✨',
       label: 'Görsel üret + üretime gönder',
-      desc: 'Layout Planları sayfasındaki çıktı kartında görsel üret (KIE), onayla, "Üretime Gönder", paket onayla.',
-      note: 'Layout Planları sayfasındaki çıktı kartında.',
+      desc: 'Layout Planları sayfasındaki çıktı kartında yapay zeka ile görsel üret, onayla, "Üretime Gönder" ve paketi onayla.',
+      note: 'Bu adım Layout Planları sayfasındaki çıktı kartında yapılır.',
       paid: true,
     },
     {
@@ -105,7 +105,7 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
       desc: 'Aynı çıktı kartında Instagram Post (1080×1080) ve Story (1080×1920) render al, PNG/JPG indir.',
       href: `/outputs?client=${clientId}`,
       hrefLabel: 'Çıktı Galerisi',
-      note: 'Render ücretsizdir (Playwright). Tüm render çıktıları Çıktı Galerisi sayfasında toplanır ve oradan indirilir.',
+      note: 'Render ücretsizdir. Tüm render çıktıları Çıktı Galerisi sayfasında toplanır ve oradan indirilir.',
     },
   ];
 
@@ -154,7 +154,7 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
                 <span style={{ fontWeight: 600 }}>
                   {s.icon} {s.label}
                 </span>
-                {s.paid && <span className="badge badge-warning">Ücretli adım (KIE)</span>}
+                {s.paid && <span className="badge badge-warning">Ücretli adım (AI görsel)</span>}
               </div>
               <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.83rem', marginTop: '4px' }}>{s.desc}</p>
               {s.note && (
@@ -178,10 +178,10 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
         }}
       >
         <p style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-          <strong>Dürüst notlar:</strong> Gönderiye basılan ana görsel bu MVP&apos;de yapay zeka (KIE) ile
+          <strong>Dürüst notlar:</strong> Gönderiye basılan ana görsel bu MVP&apos;de yapay zeka ile
           üretilir; yüklediğiniz varlıklar stil/DNA ve logo için kullanılır. Yüklenen bir fotoğrafı
-          doğrudan gönderiye basma özelliği henüz yoktur (sonraki adım). Görsel üretim (KIE) ücretli,
-          render/export (Playwright) ücretsizdir.
+          doğrudan gönderiye basma özelliği henüz yoktur (sonraki adım). Görsel üretim ücretli,
+          render/dışa aktarma ücretsizdir.
         </p>
       </div>
     </div>
