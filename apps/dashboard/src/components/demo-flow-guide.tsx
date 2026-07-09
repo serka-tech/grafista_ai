@@ -11,10 +11,13 @@
  *   idea -> brief -> layout + Creative QA -> visual (KIE) -> production ->
  *   render/export (Instagram Post + Story) -> download.
  *
- * Steps 1-5 link to real per-client pages. Steps 6-9 happen INSIDE the
- * content -> brief -> layout-plans flow (the visual/production/render output
- * card lives on the layout-plans page), so they link to the /content entry
- * point and say so, rather than fabricating routes that don't exist.
+ * Steps 1-6 link to real per-client pages (step 6 enters the content -> brief
+ * flow). Steps 7-8 happen on the brief's layout-plans page, reached via a
+ * dynamic brief id — there is no stable per-client route for them, so they keep
+ * a note naming the screen rather than fabricating a route. Step 9's finished
+ * render/export output now has a real home — the Product Gallery — so it links
+ * to /outputs?client=<id> (this client's rendered outputs + download), closing
+ * the "müşteri -> çıktı -> indirme" loop at a glance.
  *
  * Honesty notes are first-class here (see the footer): the rendered hero image
  * is AI-generated in this MVP, and visual generation (KIE) is a paid step.
@@ -76,7 +79,9 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
       icon: '📋',
       label: 'Brief oluştur + onayla',
       desc: 'Onaylı fikirden "Tasarım Brifi Oluştur" ile brief üret, aç ve onayla.',
-      note: 'İçerik Üretici sayfasından ilerler.',
+      href: `/clients/${clientId}/content`,
+      hrefLabel: 'İçerik Üretici',
+      note: 'Onaylı fikrin altından brief oluşturulur.',
     },
     {
       n: 7,
@@ -98,7 +103,9 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
       icon: '⬇️',
       label: 'Render / Export + indir',
       desc: 'Aynı çıktı kartında Instagram Post (1080×1080) ve Story (1080×1920) render al, PNG/JPG indir.',
-      note: 'Render adımı ücretsizdir (Playwright).',
+      href: `/outputs?client=${clientId}`,
+      hrefLabel: 'Çıktı Galerisi',
+      note: 'Render ücretsizdir (Playwright). Tüm render çıktıları Çıktı Galerisi sayfasında toplanır ve oradan indirilir.',
     },
   ];
 
