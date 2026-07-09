@@ -68,6 +68,16 @@ export default function OutputsPage() {
   const [groups, setGroups] = useState<ClientGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Optional `?client=<id>` filter (Slice 2 — client hub "Tümü →" link).
+  // Read from window.location.search inside an effect rather than Next's
+  // useSearchParams(): this page is 'use client' and otherwise statically
+  // prerenderable, and useSearchParams() would force build-time errors
+  // unless wrapped in <Suspense>. Reading window.location post-mount avoids
+  // that entirely and keeps the page's existing static-friendly shape. SSR/
+  // first client render both start from null (window is undefined during any
+  // static render), so there is no hydration mismatch — the filter simply
+  // applies a tick after mount, same as this page's existing "loading" flash.
+  const [filterClientId, setFilterClientId] = useState<string | null>(null);
 
   const loadGallery = useCallback(async () => {
     // Brief lookup (id -> brief) — used only for display labels. A failure
@@ -165,7 +175,21 @@ export default function OutputsPage() {
       .finally(() => setLoading(false));
   }, [loadGallery]);
 
-  const allEntries = groups.flatMap((group) => group.entries);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    setFilterClientId(params.get('client'));
+  }, []);
+
+  // When a client filter is active, narrow to that one client's group (or an
+  // empty array if the id matches no client this viewer can see — same
+  // client-isolation boundary as the unfiltered gallery, since `groups` only
+  // ever contains clients that came out of the scoped getClients() call).
+  // When absent, this is exactly `groups` — unfiltered behavior is unchanged.
+  const matchedGroup = filterClientId ? groups.find((group) => group.client.id === filterClientId) ?? null : null;
+  const displayGroups = filterClientId ? (matchedGroup ? [matchedGroup] : []) : groups;
+
+  const allEntries = displayGroups.flatMap((group) => group.entries);
   const renderedCount = allEntries.filter((entry) => entry.renderJob.status === 'rendered').length;
   const pendingCount = allEntries.filter((entry) =>
     ['queued', 'rendering', 'pending'].includes(entry.renderJob.status)
@@ -176,7 +200,7 @@ export default function OutputsPage() {
   // any brief either — i.e. genuinely nothing to show, as opposed to clients
   // existing but simply not having started a pipeline yet (that case is
   // still handled per-client below, not folded into this overall empty state).
-  const hasAnyContent = allEntries.length > 0 || groups.some((group) => group.briefs.length > 0);
+  const hasAnyContent = allEntries.length > 0 || displayGroups.some((group) => group.briefs.length > 0);
 
   return (
     <div className="animate-fade-in">
@@ -184,6 +208,26 @@ export default function OutputsPage() {
         <h2>📦 Çıktı Geçmişi</h2>
         <p>Müşterilerin render edilmiş görsel çıktılarının salt-okunur galerisi</p>
       </div>
+
+      {filterClientId && matchedGroup && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            marginBottom: '20px',
+          }}
+        >
+          <h3 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', margin: 0 }}>
+            🔎 Filtre: {matchedGroup.client.name}
+          </h3>
+          <a href="/outputs" className="btn btn-secondary btn-sm">
+            ← Tüm müşteriler
+          </a>
+        </div>
+      )}
 
       {loading ? (
         <div className="empty-state" style={{ animation: 'pulse 1.5s infinite' }}>
@@ -194,6 +238,14 @@ export default function OutputsPage() {
         <div className="empty-state">
           <div className="icon">⚠️</div>
           <p>{loadError}</p>
+        </div>
+      ) : filterClientId && !matchedGroup ? (
+        <div className="empty-state">
+          <div className="icon">🔍</div>
+          <p>Bu müşteri bulunamadı</p>
+          <a href="/outputs" className="btn btn-primary" style={{ marginTop: '16px' }}>
+            ← Tüm müşteriler
+          </a>
         </div>
       ) : !hasAnyContent ? (
         <div className="empty-state">
@@ -224,7 +276,7 @@ export default function OutputsPage() {
             </div>
           </div>
 
-          {groups.map((group) => {
+          {displayGroups.map((group) => {
             // Nothing at all for this client (no renders, no briefs) — skip
             // quietly rather than printing an empty heading for every
             // never-touched demo client.

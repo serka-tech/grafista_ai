@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { AnalyticsSummaryPanel } from '@/components/analytics-summary-panel';
 import { RevisionHistoryPanel } from '@/components/revision-history-panel';
 import { DemoFlowGuide } from '@/components/demo-flow-guide';
+import { ClientRecentOutputs } from '@/components/client-recent-outputs';
 
 export default function ClientProfilePage({ params }: { params: { id: string } }) {
   const [client, setClient] = useState<any>(null);
@@ -55,6 +56,8 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
           </a>
         ))}
       </div>
+
+      <ClientRecentOutputs clientId={params.id} clientName={client.name} />
 
       <DemoFlowGuide clientId={params.id} />
 
