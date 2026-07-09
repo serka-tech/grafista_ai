@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 # Grafista AI Studio — Staging Restore Drill (Production Step 10)
 #
+# ── Usage ──────────────────────────────────────────────────────────────────
+#   Purpose: exercise the restore MECHANICS (pg_dump/pg_restore + a manual
+#   artifact copy/restore) end-to-end against the DISPOSABLE LOCAL staging
+#   Docker Compose stack (docker-compose.staging.yml) — never a real
+#   Render/production target (see the "Safety model" section below for why
+#   that's true even if this shell's environment looks otherwise).
+#
+#   Env vars (both optional — safe defaults apply):
+#     DRY_RUN                Default: 1 (safe/default). Prints the target
+#                             + the ordered list of steps that WOULD run,
+#                             then exits 0 without touching anything. Set
+#                             DRY_RUN=0 to allow a real, destructive run.
+#     RESTORE_DRILL_CONFIRM  Default: unset. Ignored in dry-run mode. When
+#                             DRY_RUN=0, must be exactly "yes" or the script
+#                             refuses and exits 1 — this is the explicit
+#                             "I understand this is destructive" gate.
+#
+#   Example invocations:
+#     bash scripts/restore-drill-staging.sh
+#         -> dry run (default): prints the target banner + plan, exits 0.
+#     DRY_RUN=0 bash scripts/restore-drill-staging.sh
+#         -> refuses (RESTORE_DRILL_CONFIRM missing), exits 1.
+#     DRY_RUN=0 RESTORE_DRILL_CONFIRM=yes bash scripts/restore-drill-staging.sh
+#         -> LIVE run: actually resets + restores the disposable stack.
+#
 # Exercises the procedure documented in docs/backup-restore-runbook.md §7
 # end-to-end against the DISPOSABLE staging Docker Compose stack
 # (docker-compose.staging.yml) — never against production. This does NOT
@@ -50,7 +75,7 @@
 # pattern. Every run uses a fresh timestamp-suffixed client slug, so two
 # runs never collide even if a previous run's cleanup somehow failed.
 
-set -uo pipefail
+set -euo pipefail
 
 COMPOSE_FILE="docker-compose.staging.yml"
 
@@ -75,6 +100,53 @@ if ! grep -q "grafista_staging_local_only" "$COMPOSE_FILE"; then
   echo "[restore-drill] REFUSING to run: $COMPOSE_FILE does not contain the expected disposable staging marker credential. Refusing to run a destructive drill against a compose file that doesn't look like the known staging skeleton." >&2
   exit 1
 fi
+
+# ── DRY_RUN / confirmation gate (must resolve BEFORE any action) ──────────
+# Safe-by-default: DRY_RUN=1 unless the operator explicitly overrides it.
+DRY_RUN="${DRY_RUN:-1}"
+RESTORE_DRILL_CONFIRM="${RESTORE_DRILL_CONFIRM:-}"
+
+# Best-effort, non-fatal extraction of the (non-secret, disposable) target
+# info from the compose file, purely so the operator can see exactly what
+# is about to be touched. `|| true` on each keeps a missing/renamed field
+# from aborting the script under `set -e` — this is informational only,
+# never required for the drill itself to run.
+PG_USER_DISPLAY=$(grep -m1 'POSTGRES_USER:' "$COMPOSE_FILE" | sed 's/.*POSTGRES_USER:[[:space:]]*//' | tr -d '[:space:]' || true)
+PG_DB_DISPLAY=$(grep -m1 'POSTGRES_DB:' "$COMPOSE_FILE" | sed 's/.*POSTGRES_DB:[[:space:]]*//' | tr -d '[:space:]' || true)
+PG_PASS_RAW=$(grep -m1 'POSTGRES_PASSWORD:' "$COMPOSE_FILE" | sed 's/.*POSTGRES_PASSWORD:[[:space:]]*//' | tr -d '[:space:]' || true)
+if [ -n "$PG_PASS_RAW" ]; then
+  PG_PASS_DISPLAY="${PG_PASS_RAW:0:3}***(masked, ${#PG_PASS_RAW} chars)"
+else
+  PG_PASS_DISPLAY="(not found in $COMPOSE_FILE)"
+fi
+
+echo "[restore-drill] ── TARGET (review before continuing) ──────────────────────" >&2
+echo "[restore-drill]   compose file : ${COMPOSE_FILE} (disposable LOCAL stack only — never real Render/production)" >&2
+echo "[restore-drill]   postgres     : compose service 'postgres' — user=${PG_USER_DISPLAY:-<unknown>} db=${PG_DB_DISPLAY:-<unknown>} password=${PG_PASS_DISPLAY}" >&2
+echo "[restore-drill]   api base url : http://localhost:4000 (GET /api/health, /api/health/ready)" >&2
+echo "[restore-drill]   mode         : DRY_RUN=${DRY_RUN} RESTORE_DRILL_CONFIRM=${RESTORE_DRILL_CONFIRM:-<unset>}" >&2
+echo "[restore-drill] ──────────────────────────────────────────────────────────────" >&2
+
+if [ "$DRY_RUN" != "0" ]; then
+  echo "[restore-drill] DRY-RUN (default, DRY_RUN=${DRY_RUN}) — no destructive action will be taken. Steps that WOULD run, in order:" >&2
+  echo "[restore-drill]   1. defensive 'docker compose down -v' of any leftover stack from a previous run" >&2
+  echo "[restore-drill]   2. pnpm run build (host) + pnpm run staging:up (fresh disposable stack)" >&2
+  echo "[restore-drill]   3. db:migrate + db:seed, then insert one synthetic client/brand_assets row" >&2
+  echo "[restore-drill]   4. pg_dump (custom format) + copy the synthetic artifact bytes to a host backup file" >&2
+  echo "[restore-drill]   5. DESTRUCTIVE: 'docker compose down -v' again (simulates real data loss)" >&2
+  echo "[restore-drill]   6. staging:up from scratch, pg_restore --clean --if-exists, restore the artifact bytes" >&2
+  echo "[restore-drill]   7. verify migrations/row/checksum/health, delete the synthetic client, exit" >&2
+  echo "[restore-drill]   8. (always, on exit) tear the stack + volume back down" >&2
+  echo "[restore-drill] To actually execute this drill: DRY_RUN=0 RESTORE_DRILL_CONFIRM=yes bash scripts/restore-drill-staging.sh" >&2
+  exit 0
+fi
+
+if [ "$RESTORE_DRILL_CONFIRM" != "yes" ]; then
+  echo "[restore-drill] REFUSING to run: DRY_RUN=0 but RESTORE_DRILL_CONFIRM is not 'yes'. This drill performs destructive resets ('docker compose down -v', 'pg_restore --clean') against the target printed above. Set RESTORE_DRILL_CONFIRM=yes to proceed, or leave DRY_RUN unset/1 (default) for a safe dry run." >&2
+  exit 1
+fi
+
+echo "[restore-drill] LIVE run confirmed (DRY_RUN=0, RESTORE_DRILL_CONFIRM=yes) — proceeding with the destructive drill." >&2
 
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -115,7 +187,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-set -e
+# (set -e already active from the top of the script; no need to re-enable it
+# here — kept as a single declaration to avoid ambiguity about scope.)
 
 # ── setup ──────────────────────────────────────────────────────────────────
 
