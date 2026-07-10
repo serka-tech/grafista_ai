@@ -17,8 +17,17 @@ toplar:
 - [ ] Giriş sayfasını aç: `https://grafista-dashboard-staging.onrender.com/login`
       (staging dashboard; incognito sekmede).
 - [ ] Giriş yap, **Müşteriler** ana sayfasının açıldığını gör.
+- [ ] **Deploy tazeliği:** en güncel demo cilasının canlı olduğunu doğrula (iki görünür işaret aşağıda).
 - [ ] Bildirimleri kapat, fazla sekmeleri kapat, ekran paylaşımını hazırla.
 - [ ] 30 saniyelik açılışı bir kez sessizce prova et.
+
+> **Deploy tazeliği nasıl anlaşılır:** Staging'de otomatik deploy **yoktur**;
+> GitHub'a push sonrası Render panelinde **grafista-dashboard-staging** servisine
+> **Manual Deploy** tetiklenmesi gerekir. En son cila canlı mı iki işaretten bak:
+> (1) müşteri hub rehberinde 3. adım **"Görsel / varlık yükleme"** yazar (eski
+> "asset intake" değil), (2) **İçerik Üretici** sayfasında üstte
+> **"🎬 MVP Demo Akışı · 5-6. Adım"** rozeti görünür. İkisi de görünüyorsa en son
+> commit (`d8dcc71`) canlıdır; görünmüyorsa demo öncesi Manual Deploy iste.
 
 ## 2. Giriş bilgisi (demo hesabı) — TEK KAYNAK
 
@@ -42,6 +51,9 @@ toplar:
 ## 3. İlk açılacak müşteri
 
 - [ ] Galeri finali için **Turyap Sistem Demo** müşterisini aç.
+- ⚠️ **Dikkat:** listede ismi benzeyen iki müşteri olabilir. Render'lı olan
+  **"Turyap Sistem Demo"** olanı aç; boş olan **"Turyap Sistem"** olanı açma.
+  Doğru müşterinin filtreli galerisinde üstte **"3 Render Hazır"** yazar.
 - **Neden:** bu müşterinin gerçek bir render çıktısı vardır, **⬇ İndir** butonu
   çalışır. Demonun finalini buradan göster.
 - Turyap Sistem Demo, staging'de önceden hazırlanmış demo müşterisidir (gerçek
@@ -102,9 +114,17 @@ Tam kelime kelime metin: [`demo-sales-script.md`](./demo-sales-script.md) §2.
 - Galeride başlığı "**Demo Brief:**" ile başlayan kart **seed örneğidir**, canlı
   üretim değildir.
 - Bazı etiketler TR/EN karışıktır (kozmetik, akışı etkilemez).
+- Render önizlemelerinde şablon üzerinde küçük koordinat yazıları (ör.
+  "(30, 30)", "(540, 540)") görünebilir; görselin şablona tam kompoze
+  edilmemesinden gelen kozmetik bir izdir (F8). Gerçek render çıktısıdır, akışı
+  etkilemez; kartı yakından değil bütün olarak göster.
 - Çıktı adedi gibi sayılar demo ortamına göre değişir; ezbere sayı verme.
 
 ---
+
+> **Son canlı prova:** 2026-07-10, staging'de uçtan uca geçti (giriş → müşteri
+> hub → İçerik Üretici → filtreli galeri → indirme byte düzeyinde doğrulandı),
+> demo-blocker yok; HEAD `d8dcc71` canlı doğrulandı.
 
 Daha fazla ayrıntı: [`demo-sales-script.md`](./demo-sales-script.md) (kelime
 kelime), [`demo-day-checklist.md`](./demo-day-checklist.md) (teknik ön uçuş +
