@@ -145,8 +145,13 @@ manually per deploy.
 
 ## 4. Known limitations for a demo
 
-- **No central render/export gallery.** Outputs live under each layout
-  plan's own page, not a single client-wide or global gallery screen.
+- **Central gallery is live, but view/download-only.** The Product Gallery
+  at `/outputs` (nav "📦 Çıktı Geçmişi", also reached via the "Çıktı
+  Galerisi" buttons) aggregates every client's rendered outputs, and each
+  client hub carries a "Son Çıktılar" strip. It only previews and
+  downloads — approve/reject stays on the brief side. (Was previously "no
+  central gallery"; that is no longer true — see `outputs/page.tsx` and
+  `components/client-recent-outputs.tsx`.)
 - **Mixed TR/EN UI labels** (e.g. status badges) — cosmetic, not a
   functional bug.
 - Real image generation requires `KIE_AI_API_KEY` + `KIE_AI_BASE_URL`; the
@@ -165,6 +170,8 @@ walkthrough) and the exact failure-path behaviors, see
 
 | Doc | What it covers |
 |---|---|
+| [`demo-rehearsal-checklist.md`](./demo-rehearsal-checklist.md) | One-page "before you speak" rehearsal checklist — login, first client, the 6 clicks, success signals, do-not-touch list. |
+| [`demo-sales-script.md`](./demo-sales-script.md) | 30-second elevator + word-for-word 3-4 min walkthrough script. |
 | [`mvp-demo-flow.md`](./mvp-demo-flow.md) | Full local fake-provider runbook + 12-step dashboard walkthrough. |
 | [`manual-demo-pass.md`](./manual-demo-pass.md) | Real-provider walkthrough, failure paths, UI-friction list. |
 | [`ci-stable-profile.md`](./ci-stable-profile.md) | `smoke:staging` semantics (WARN vs FAIL) and its role as a CI merge gate. |

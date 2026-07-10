@@ -205,8 +205,11 @@ export default function OutputsPage() {
   return (
     <div className="animate-fade-in">
       <div className="page-header">
-        <h2>📦 Çıktı Geçmişi</h2>
-        <p>Tamamlanmış render çıktılarını görüntüleyin ve indirin. Onay/red işlemleri brief sayfasında yapılır.</p>
+        <h2>
+          📦 Çıktı Geçmişi{' '}
+          <span style={{ fontSize: '0.7em', fontWeight: 400, color: 'var(--color-text-muted)' }}>· Çıktı Galerisi</span>
+        </h2>
+        <p>Tüm müşterilerin tamamlanmış render çıktıları tek galeride — görüntüleyin ve indirin. Onay/red işlemleri brief sayfasında yapılır.</p>
       </div>
 
       {filterClientId && matchedGroup && (

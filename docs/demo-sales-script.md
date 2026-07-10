@@ -156,6 +156,8 @@ adım adım, tıklanabilir olarak da duruyor. Rehber demonun kılavuzu olarak ku
 ## 6. Sonraki adım
 
 - Demo sonrası: müşterinin kendi markasıyla bir hesap kurulumu teklif et.
+- Prova öncesi son kontrol: `docs/demo-rehearsal-checklist.md` — tek sayfalık,
+  "konuşmadan önce bak" çeklisti (giriş, ilk müşteri, 6 adım, dokunma listesi).
 - Teknik ekip için: bu repodaki `docs/mvp-demo-flow.md` ve `docs/demo-day-checklist.md`
   daha ayrıntılı kurulum/akış rehberidir.
 
