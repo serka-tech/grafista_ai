@@ -14,8 +14,8 @@ toplar:
 ## 1. Demoya girmeden (2 dakika)
 
 - [ ] Tarayıcıyı **incognito** aç (temiz oturum, cache sorunu olmaz).
-- [ ] Giriş sayfasını aç: staging dashboard adresi (`grafista-dashboard-staging`
-      Render URL'i).
+- [ ] Giriş sayfasını aç: `https://grafista-dashboard-staging.onrender.com/login`
+      (staging dashboard; incognito sekmede).
 - [ ] Giriş yap, **Müşteriler** ana sayfasının açıldığını gör.
 - [ ] Bildirimleri kapat, fazla sekmeleri kapat, ekran paylaşımını hazırla.
 - [ ] 30 saniyelik açılışı bir kez sessizce prova et.
@@ -44,9 +44,10 @@ toplar:
 - [ ] Galeri finali için **Turyap Sistem Demo** müşterisini aç.
 - **Neden:** bu müşterinin gerçek bir render çıktısı vardır, **⬇ İndir** butonu
   çalışır. Demonun finalini buradan göster.
-- Çıktı Galerisi boşsa (taze ortam): tekrar
-  `pnpm --filter @grafista/api run db:seed-demo-all` çalıştır. Galeriye başlığı
-  "Demo Brief:" ile başlayan bir seed kartı gelir.
+- Turyap Sistem Demo, staging'de önceden hazırlanmış demo müşterisidir (gerçek
+  render'ları vardır). Taze/yeniden kurulmuş bir ortamda yoksa: `pnpm --filter
+  @grafista/api run db:seed-demo-all` çalıştır; bu, başlığı "Demo Brief:" ile
+  başlayan seed kartlı bir müşteri ekler, o müşteriyi aç.
 
 ## 4. İlk 30 saniyede ne söylenir
 
@@ -67,12 +68,14 @@ Tam kelime kelime metin: [`demo-sales-script.md`](./demo-sales-script.md) §2.
 | 2 | **Brief** | Müşteri hub'ında 🎬 MVP Demo Akışı rehberini göster → **İçerik Üretici**'ye gir → onaylı fikirden "Tasarım Brifi Oluştur". |
 | 3 | **İçerik / Tasarım** | Brief'ten layout planı + **Kalite Kontrolü** + yapay zeka görseli. |
 | 4 | **Render** | Layout Planları çıktı kartında **Post (1080×1080)** ve **Story (1080×1920)** render (ücretsiz). |
-| 5 | **Galeri** | Üstteki "📦 **Çıktı Galerisini Aç**" ile galeriye git. |
+| 5 | **Galeri** | Galeriye git — temiz final için hub'daki "Son Çıktılar → **Tümü →**" (filtreli, sadece bu müşterinin çıktıları); alternatif: ana sayfadaki "📦 **Çıktı Galerisini Aç**". |
 | 6 | **İndir** | Bir render kartında **⬇ İndir**'e bas, dosyanın indiğini göster. Demo biter. |
 
 > "Çıktı Galerisi" butonu ile "Çıktı Geçmişi" sayfası **aynı ekrandır** (sayfa
 > başlığında ikisi de yazar). Aynı ekranın müşteri hub'ındaki özeti ise
-> "Son Çıktılar" şerididir.
+> "Son Çıktılar" şerididir. Genel (filtresiz) galeride örnek/seed kartlar (ör.
+> boş beyaz önizleme) da görünebilir; en temiz final için Turyap'ın filtreli
+> "Tümü →" görünümünü kullan.
 
 ## 6. Başarı neye benziyor
 

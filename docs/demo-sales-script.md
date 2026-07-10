@@ -15,15 +15,16 @@ veya yanlış vaat yoktur.
 ## 1. Demo öncesi hazırlık (2 dakika)
 
 1. Tarayıcıyı **incognito** aç (temiz oturum, cache sorunu olmaz).
-2. `grafista-dashboard-staging` adresine gir, giriş yap
+2. `https://grafista-dashboard-staging.onrender.com` adresine gir, giriş yap
    (`demo-verify@grafista.local` / `DemoVerify2026!` ya da kendi hesabın).
 3. **Müşteriler** ana sayfasında dur, buradan başla.
 4. Galeri anı için hazır müşteri: **"Turyap Sistem Demo"** — bu müşterinin gerçek
    bir render çıktısı var, İndir butonu çalışıyor. Demonun finalini buradan göster.
 5. (Opsiyonel, taze bir ortamdaysan) Çıktı Galerisi boşsa, staging Shell'de
-   `pnpm --filter @grafista/api run db:seed-demo-all` çalıştır — galeriye bir
-   demo kartı ("Demo Brief") gelir. Bu komut güvenlidir, tekrar çalıştırılabilir,
-   veriyi silmez.
+   `ADMIN_EMAIL=demo-verify@grafista.local ADMIN_PASSWORD='DemoVerify2026!' pnpm --filter @grafista/api run db:seed-demo-all`
+   çalıştır — galeriye bir demo kartı ("Demo Brief") gelir ve giriş hesabı seed
+   ile eşitlenir (yukarıdaki 2. adımla aynı hesap). Bu komut güvenlidir, tekrar
+   çalıştırılabilir, veriyi silmez.
 6. Sekmeleri sadeleştir, bildirimleri kapat.
 
 **Demo modunu seç:**
