@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { GalleryOutputCard } from '@/components/gallery-output-card';
+import { compareGalleryEntries } from '@/lib/output-ordering';
 
 const MAX_ITEMS = 4;
 
@@ -93,9 +94,12 @@ export function ClientRecentOutputs({ clientId, clientName }: { clientId: string
       })
     );
 
-    const sorted = perPlan.flat().sort(
-      (a, b) => new Date(b.renderJob.createdAt ?? 0).getTime() - new Date(a.renderJob.createdAt ?? 0).getTime()
-    );
+    // Same demo-quality ordering as the /outputs gallery (see
+    // lib/output-ordering.ts): render-ready real renders lead, demo-seed
+    // placeholders trail, newest-first within a quality group — so the top-4
+    // strip shows this client's strongest recent renders, not whichever seed
+    // row happens to be newest.
+    const sorted = perPlan.flat().sort(compareGalleryEntries);
     setEntries(sorted.slice(0, MAX_ITEMS));
   }, [clientId]);
 

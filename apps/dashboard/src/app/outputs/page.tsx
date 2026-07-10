@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { GalleryOutputCard } from '@/components/gallery-output-card';
+import { compareGalleryEntries, compareGalleryGroups } from '@/lib/output-ordering';
 
 // Design brief status badges — copied verbatim from
 // apps/dashboard/src/app/briefs/[id]/page.tsx's BRIEF_STATUS_BADGES, used
@@ -155,15 +156,20 @@ export default function OutputsPage() {
           })
         );
 
-        const entries = perPlanEntries.flat().sort((a, b) => {
-          const aTime = new Date(a.renderJob.createdAt ?? 0).getTime();
-          const bTime = new Date(b.renderJob.createdAt ?? 0).getTime();
-          return bTime - aTime; // newest first
-        });
+        // Demo-quality ordering (see lib/output-ordering.ts): render-ready
+        // real renders with a real artifact lead, honest demo-seed placeholders
+        // trail, newest-first within an otherwise-equal quality group. Replaces
+        // the old newest-first-only sort.
+        const entries = perPlanEntries.flat().sort(compareGalleryEntries);
 
         return { client, entries, briefs: clientBriefs };
       })
     );
+
+    // Lead with the client whose strongest render is strongest overall (e.g.
+    // Turyap's real renders ahead of the Flavora demo-seed group); brief-only
+    // clients with no renders yet sink to the bottom.
+    clientGroups.sort(compareGalleryGroups);
 
     setGroups(clientGroups);
   }, []);
