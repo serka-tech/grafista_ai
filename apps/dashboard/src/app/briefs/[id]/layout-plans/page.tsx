@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, friendlyAiErrorMessage } from '@/lib/api';
 import { CreativeQAReportCard } from '@/components/creative-qa-report';
 import { VisualOutputsPanel } from '@/components/visual-outputs-panel';
+import { DemoStepNote } from '@/components/demo-step-note';
 
 const STATUS_BADGES: Record<string, { class: string; label: string }> = {
   generated: { class: 'badge-info', label: 'Oluşturuldu' },
@@ -186,6 +187,11 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
           <a href={`/briefs/${designBriefId}`} className="btn btn-secondary">← Brife Dön</a>
         </div>
       </div>
+
+      <DemoStepNote
+        step="MVP Demo Akışı · 7-9. Adım"
+        text="Layout planını üretip kalite kontrolünden geçirin ve onaylayın, sonra bu sayfadaki çıktı kartında görsel üretip render alın ve indirin."
+      />
 
       <ErrorNote message={loadError} />
 

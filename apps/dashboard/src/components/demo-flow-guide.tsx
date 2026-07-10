@@ -53,7 +53,7 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
     {
       n: 3,
       icon: '📐',
-      label: 'Görsel / asset intake',
+      label: 'Görsel / varlık yükleme',
       desc: 'Müşteri/mülk görsellerini YÜKLE (internetten değil). Stil analizinde kullanılır.',
       href: `/clients/${clientId}/references`,
       hrefLabel: 'Referans Kütüphanesi',
@@ -80,7 +80,7 @@ export function DemoFlowGuide({ clientId }: { clientId: string }) {
       label: 'Brief oluştur + onayla',
       desc: 'Onaylı fikirden "Tasarım Brifi Oluştur" ile brief üret, aç ve onayla.',
       href: `/clients/${clientId}/content`,
-      hrefLabel: 'İçerik Üretici (aynı sayfa)',
+      hrefLabel: 'İçerik Üretici',
       note: 'Onaylı fikrin altından brief oluşturulur (5. adımla aynı sayfa).',
     },
     {

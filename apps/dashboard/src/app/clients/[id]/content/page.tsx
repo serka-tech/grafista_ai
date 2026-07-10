@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { DemoStepNote } from '@/components/demo-step-note';
 
 // Same local ErrorNote idiom as briefs/[id]/page.tsx and layout-plans/page.tsx.
 function ErrorNote({ message }: { message: string | null }) {
@@ -124,6 +125,11 @@ export default function ContentPage({ params }: { params: { id: string } }) {
           <a href={`/clients/${params.id}`} className="btn btn-secondary">← Geri</a>
         </div>
       </div>
+
+      <DemoStepNote
+        step="MVP Demo Akışı · 5-6. Adım"
+        text="Fikir üretip onaylayın, sonra onaylı fikrin altından tasarım brifi oluşturup onaylayın."
+      />
 
       {/* Generator Form */}
       <div className="card" style={{ marginBottom: '32px' }}>
