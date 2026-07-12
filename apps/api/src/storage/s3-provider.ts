@@ -18,18 +18,23 @@ export interface S3ProviderConfig {
   accessKeyId: string;
   secretAccessKey: string;
   forcePathStyle?: boolean;
+  /** Signed download URL validity in seconds — see factory.ts (S3_SIGNED_URL_EXPIRY_SECONDS). */
+  signedUrlExpirySeconds?: number;
 }
 
-/** Time-limited signed download URL validity. */
-const SIGNED_URL_EXPIRY_SECONDS = 300;
+/** Default signed download URL validity when S3_SIGNED_URL_EXPIRY_SECONDS is unset.
+ * Kept short — the authenticated route re-mints a fresh URL on every request. */
+const DEFAULT_SIGNED_URL_EXPIRY_SECONDS = 300;
 
 export class S3StorageProvider implements StorageProvider {
   readonly name = 's3' as const;
   private readonly client: S3Client;
   private readonly bucket: string;
+  private readonly signedUrlExpirySeconds: number;
 
   constructor(config: S3ProviderConfig) {
     this.bucket = config.bucket;
+    this.signedUrlExpirySeconds = config.signedUrlExpirySeconds ?? DEFAULT_SIGNED_URL_EXPIRY_SECONDS;
     this.client = new S3Client({
       region: config.region,
       endpoint: config.endpoint || undefined,
@@ -59,7 +64,7 @@ export class S3StorageProvider implements StorageProvider {
         Key: key,
         ResponseContentDisposition: `attachment; filename="${filename.replace(/"/g, '')}"`,
       });
-      const url = await getSignedUrl(this.client, command, { expiresIn: SIGNED_URL_EXPIRY_SECONDS });
+      const url = await getSignedUrl(this.client, command, { expiresIn: this.signedUrlExpirySeconds });
       return { kind: 'redirect', url };
     } catch (err) {
       throw new StorageError(`S3 signed URL generation failed: ${(err as Error).message}`, 502);

@@ -85,6 +85,12 @@ export function getStorageProviderByName(name: StorageProviderName): StorageProv
     }
   }
 
+  // Optional: override the signed-URL validity (default 300s in the provider).
+  // Invalid/unset -> undefined -> provider default.
+  const expiryRaw = Number(process.env.S3_SIGNED_URL_EXPIRY_SECONDS);
+  const signedUrlExpirySeconds =
+    Number.isFinite(expiryRaw) && expiryRaw > 0 ? Math.floor(expiryRaw) : undefined;
+
   return new S3StorageProvider({
     endpoint,
     region: S3_REGION!,
@@ -92,6 +98,7 @@ export function getStorageProviderByName(name: StorageProviderName): StorageProv
     accessKeyId: S3_ACCESS_KEY_ID!,
     secretAccessKey: S3_SECRET_ACCESS_KEY!,
     forcePathStyle: S3_FORCE_PATH_STYLE === 'true',
+    signedUrlExpirySeconds,
   });
 }
 

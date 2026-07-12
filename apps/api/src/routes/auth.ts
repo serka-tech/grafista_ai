@@ -8,6 +8,7 @@ import { generateSessionToken, hashSessionToken, SESSION_COOKIE_NAME, SESSION_TT
 import { requireAuth } from '../auth/middleware.js';
 import { env } from '../config/env.js';
 import { asyncHandler } from '../middleware/async-handler.js';
+import { loginLimiter } from '../middleware/rate-limit.js';
 
 export const authRouter: Router = Router();
 
@@ -26,8 +27,8 @@ function cookieOptions() {
   };
 }
 
-// POST /api/auth/login
-authRouter.post('/auth/login', asyncHandler(async (req: Request, res: Response) => {
+// POST /api/auth/login — stricter per-(IP+email) limiter in front (go-live M2.2).
+authRouter.post('/auth/login', loginLimiter, asyncHandler(async (req: Request, res: Response) => {
   const parsed = LoginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request body', issues: parsed.error.issues });

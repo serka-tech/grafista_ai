@@ -12,9 +12,11 @@ const PG_ERROR_STATUS: Record<string, number> = {
 const STATUS_LABELS: Record<number, string> = {
   400: 'Bad Request',
   401: 'Unauthorized',
+  402: 'Payment Required', // per-client AI budget ceiling reached (visual-generation-budget.ts)
   403: 'Forbidden',
   404: 'Not Found',
   409: 'Conflict',
+  429: 'Too Many Requests', // rate limiter (middleware/rate-limit.ts) — also sends its own body
   500: 'Internal Server Error',
   502: 'Bad Gateway', // AI-provider / upstream failures (services throw { status: 502 })
 };

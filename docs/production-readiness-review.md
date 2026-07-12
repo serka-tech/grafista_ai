@@ -1560,6 +1560,38 @@ dashboard gate'i AÇIK. **Production hâlâ BLOKEDE.** **Sıradaki:** kullanıc�
 `grafista-dashboard-staging`'i §28c ile oluşturur → URL'i verir → ben
 proxy'nin `/api/health`'i geçirdiğini (bağlantı kanıtı) doğrularım.
 
+## 28. Doc-sync — CANLI durum güncellemesi (2026-07-12)
+
+> §26/§27 dashboard'ı "oluşturulmadı" ve Step 19'da "production BLOKEDE" olarak
+> bırakmıştı. Aradan geçen CANLI çalıştırmalar bu bölümde kayda geçiriliyor —
+> kod/altyapı değişmedi, sadece gerçek durum belgeleniyor.
+
+**Step 19 KAPANDI (canlı):** kullanıcı dashboard staging servisini oluşturdu +
+`API_PROXY_TARGET`'ı çalışan `grafista-api-staging`'e yöneltti; canlı smoke yeşil
+(dashboard `/api/health` 200 proxy üzerinden + `/login` 200).
+
+**Step 20 TAMAMLANDI (canlı):** staging authenticated login E2E geçti — gerçek
+kullanıcı ile login 200 + `grafista_session` cookie (Secure/HttpOnly/SameSite=Lax),
+`/api/clients` 200, `/api/auth/me` 200; throwaway kullanıcı sonrasında silindi.
+
+**Step 21 TAMAMLANDI (canlı):** tam ürün E2E staging'de gerçek sağlayıcılarla geçti
+(gerçek OpenAI + KIE `nano-banana-2` + Playwright): login -> DesignDNA -> brief ->
+layout -> QA -> gerçek KIE görsel (346KB JPEG) -> production -> render -> artifact
+indirme, byte-byte doğrulandı. Not: standing demo config'de KIE anahtarı maliyet
+için KAPALI tutuluyor (demo seed/sentetik görsel + full-canvas fallback kullanır).
+
+**Go-live hazırlık (M2, 2026-07-12) branch'e indi — production'ın ÖN KOŞULU:**
+güvenlik başlıkları (`middleware/security-headers.ts`) + rate limiting
+(`middleware/rate-limit.ts`, default ON; health hariç), per-client aylık AI görsel
+bütçe guard'ı (`services/visual-generation-budget.ts`, count-based, 402), F8 render
+fix (`services/visual-prompt-layout.ts` — görsel prompt'una ham koordinat JSON'u
+yerine anlamsal tarif), yapılandırılabilir signed-URL expiry. `build+typecheck+lint`
+yeşil, `test:ci` 469/469 yeşil. Henüz commit edilmedi (kullanıcı onayı bekliyor).
+
+**HÂLÂ AÇIK (production go-live):** ayrı production ortamı (prod DB + domain +
+standing KIE bütçesi + monitoring), managed restore drill (Render+R2), worker queue
+canlı gözlem. Bkz. `plans/` içindeki go-live yol haritası (M3-M5).
+
 ## İlgili dokümanlar
 
 - [`docs/managed-infrastructure-plan.md`](./managed-infrastructure-plan.md) —

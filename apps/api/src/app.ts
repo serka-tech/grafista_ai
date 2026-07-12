@@ -30,13 +30,33 @@ import { revisionsRouter } from './routes/revisions.js';
 import { healthRouter } from './routes/health.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { installDebugRoutesMiddleware } from './middleware/debug-routes.js';
+import { securityHeaders } from './middleware/security-headers.js';
+import { generalLimiter } from './middleware/rate-limit.js';
 
 export const app: Express = express();
+
+// Never advertise the framework/version (Production go-live M2.2 — helmet does this too).
+app.disable('x-powered-by');
+
+// Behind a reverse proxy (Render), TRUST_PROXY must describe the proxy topology so
+// req.ip resolves to the REAL client IP (used by the rate limiter) instead of the
+// proxy's — and so a spoofed X-Forwarded-For leftmost hop can't be used to evade
+// limits. Set TRUST_PROXY=1 on Render (one proxy hop). Unset (default) trusts
+// nothing, which is correct for direct/local connections. Accepts a numeric hop
+// count or any Express trust-proxy value (e.g. a subnet).
+const trustProxy = process.env.TRUST_PROXY?.trim();
+if (trustProxy) {
+  app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
+}
 
 // Opt-in diagnostic logging for the intermittent bare-405 flake (Production Step 5).
 // No-op unless CI_DEBUG_ROUTES=1 is set — see middleware/debug-routes.ts doc comment.
 // Mounted first, before cors/cookie-parser/json, so it reflects the raw incoming request.
 installDebugRoutesMiddleware(app);
+
+// Security response headers on every response, before anything else runs
+// (Production go-live M2.2 — see middleware/security-headers.ts).
+app.use(securityHeaders);
 
 // Middleware
 app.use(cors({ origin: process.env.API_CORS_ORIGIN ?? 'http://localhost:3000', credentials: true }));
@@ -58,6 +78,12 @@ app.use('/api', healthRouter);
 // serves both without duplicating the handler. No auth. Non-health paths just
 // fall through this mount (the router only matches /health and /health/ready).
 app.use(healthRouter);
+
+// General rate limiter on the API surface (Production go-live M2.2). Mounted
+// AFTER the health/readiness probes above so they are never throttled, and
+// BEFORE the routers below so every business route is covered. No-op unless
+// RATE_LIMIT_ENABLED !== 'false' (the login route adds a stricter limiter).
+app.use('/api', generalLimiter);
 
 // Routes
 app.use('/api', authRouter);

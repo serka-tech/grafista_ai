@@ -331,6 +331,9 @@ beforeEach(() => {
   aiControl.mode = 'success';
   aiControl.imageCalls = 0;
   storageControl.failPut = false;
+  // Budget guard is OFF by default — each test opts in explicitly (go-live M2.1).
+  delete process.env.CLIENT_MONTHLY_BUDGET_USD;
+  delete process.env.KIE_IMAGE_COST_USD;
 });
 
 const SOME_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
@@ -758,6 +761,54 @@ describe('9. Protected file download — GET /api/visual-outputs/:id/file', () =
         expect(fileRes.status).toBe(404);
         expect(fileRes.body.error).toBe('File not found');
       }
+    },
+    30_000
+  );
+});
+
+describe('11. Monthly budget guard (go-live M2.1)', () => {
+  it(
+    'blocks generation with 402 once the client is over its monthly budget — and never calls the provider',
+    async () => {
+      const { layoutPlanId } = await createQaClearedLayoutPlan('Visual Gen Budget Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      // First run is under budget (guard disabled) and succeeds — 2 images generated.
+      const firstRes = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(firstRes.status).toBe(201);
+      expect(firstRes.body.total).toBe(2);
+
+      // Enforce a ceiling the client has already blown: $1/image, $1.50 cap, 2 generated = $2.
+      process.env.KIE_IMAGE_COST_USD = '1';
+      process.env.CLIENT_MONTHLY_BUDGET_USD = '1.5';
+      const callsBefore = aiControl.imageCalls;
+
+      const blockedRes = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(blockedRes.status).toBe(402);
+      expect(blockedRes.body.error).toBe('Payment Required');
+      expect(blockedRes.body.message).toMatch(/budget/i);
+      // The guard ran BEFORE the provider — no paid image call happened for the blocked run.
+      expect(aiControl.imageCalls).toBe(callsBefore);
+
+      // No new rows were written for the blocked run (still just the first run's 2).
+      const rows = await pool.query('SELECT * FROM generated_outputs WHERE layout_plan_id = $1', [layoutPlanId]);
+      expect(rows.rows.length).toBe(2);
+    },
+    30_000
+  );
+
+  it(
+    'allows generation while comfortably under budget',
+    async () => {
+      const { layoutPlanId } = await createQaClearedLayoutPlan('Visual Gen Under Budget Client');
+      const owner = await loginAs(TEST_USERS.OWNER);
+
+      process.env.KIE_IMAGE_COST_USD = '0.05';
+      process.env.CLIENT_MONTHLY_BUDGET_USD = '100';
+
+      const res = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
+      expect(res.status).toBe(201);
+      expect(res.body.total).toBe(2);
     },
     30_000
   );

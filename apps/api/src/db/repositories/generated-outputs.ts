@@ -155,6 +155,25 @@ export const generatedOutputsRepo = {
     return rows.map(mapRow);
   },
 
+  /**
+   * Count of this client's successfully-generated outputs in the current
+   * calendar month (server time). The durable, provider-independent spend
+   * proxy for the monthly AI-image budget guard (see
+   * ../../services/visual-generation-budget.ts). Only status='generated' rows
+   * count — 'failed'/'pending' rows never produced a billable image.
+   */
+  async countGeneratedThisMonth(clientId: string): Promise<number> {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS count
+         FROM generated_outputs
+        WHERE client_id = $1
+          AND status = 'generated'
+          AND created_at >= date_trunc('month', now())`,
+      [clientId]
+    );
+    return Number(rows[0]?.count ?? 0);
+  },
+
   /** All generated outputs for one design brief (across its layout plan alternatives). */
   async listByDesignBrief(designBriefId: string): Promise<GeneratedOutput[]> {
     const { rows } = await pool.query(

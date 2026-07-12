@@ -43,6 +43,10 @@ export default defineConfig({
       // Playwright/Chromium browser. Production default (RENDERER_PROVIDER unset -> 'playwright',
       // see .env.example) is untouched.
       RENDERER_PROVIDER: 'fake',
+      // Rate limiting is ON by default in production; disable it for the whole suite so
+      // repeated logins / request bursts across tests are never throttled. The dedicated
+      // security-middleware test flips it back on for its own 429 assertion (go-live M2.2).
+      RATE_LIMIT_ENABLED: 'false',
     },
   },
 });

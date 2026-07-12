@@ -30,6 +30,8 @@ import { store } from '../data/store.js';
 import { getStorageProvider } from '../storage/factory.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 import { assertClientAccessible } from '../auth/client-access.js';
+import { assertWithinClientBudget } from './visual-generation-budget.js';
+import { describeLayoutForImagePrompt } from './visual-prompt-layout.js';
 
 const modelRouter = new ModelRouter();
 
@@ -141,6 +143,11 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
   // Phase 3 Step 4 — client isolation hardening.
   await assertClientAccessible(requestedBy, client.id);
 
+  // Production go-live M2.1 — monthly per-client AI-image budget guard. Runs
+  // before any provider call so a client that hit its ceiling never triggers
+  // paid generation. No-op unless CLIENT_MONTHLY_BUDGET_USD is set.
+  await assertWithinClientBudget(client.id);
+
   // The gate already guaranteed at least one cleared report exists.
   const qaReports = await store.creativeQaReports.listByLayoutPlan(layoutPlanId);
   const clearedReport = pickClearedReport(qaReports);
@@ -168,9 +175,14 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
       )
     : 'No additional QA notes.';
 
+  // F8 fix (go-live M2.3): feed a SEMANTIC layout description, not the raw
+  // layout JSON. The image model was rendering literal position coordinates
+  // ("(30, 30)") from the JSON as visible text on the generated visual; the
+  // description carries the same composition intent (roles, copy, colors,
+  // relative placement) without the pixel-coordinate numbers that leaked.
   const prompt = createPromptBuilder(visualGenerationTemplate)
     .setVariables({
-      layoutPlan: JSON.stringify(layoutPlan, null, 2),
+      layoutPlan: describeLayoutForImagePrompt(layoutPlan),
       designBrief: JSON.stringify(brief, null, 2),
       qaSummary,
       canvasWidth: String(layoutPlan.canvas.width),

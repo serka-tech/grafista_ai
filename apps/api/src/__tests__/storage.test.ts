@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import request from 'supertest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3StorageProvider } from '../storage/s3-provider.js';
 import { app } from '../app.js';
 import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
@@ -263,6 +264,29 @@ describe('Phase 2 Step 3 — S3-compatible storage', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.data.storageProvider).toBe('local');
+    });
+  });
+
+  describe('13. Signed download URL expiry is configurable (go-live M2.4)', () => {
+    const baseConfig = {
+      region: 'us-east-1',
+      bucket: 'test-bucket',
+      accessKeyId: 'test-access-key',
+      secretAccessKey: 'test-secret-key',
+    };
+
+    it('uses the configured expiry (S3_SIGNED_URL_EXPIRY_SECONDS) in the presigned URL', async () => {
+      const provider = new S3StorageProvider({ ...baseConfig, signedUrlExpirySeconds: 900 });
+      const access = await provider.getObjectAccess({ key: 'generated-outputs/x.png', filename: 'x.png' });
+      expect(access.kind).toBe('redirect');
+      expect(access.kind === 'redirect' && access.url).toContain('X-Amz-Expires=900');
+    });
+
+    it('defaults to 300s when no expiry is configured', async () => {
+      const provider = new S3StorageProvider(baseConfig);
+      const access = await provider.getObjectAccess({ key: 'generated-outputs/y.png', filename: 'y.png' });
+      expect(access.kind).toBe('redirect');
+      expect(access.kind === 'redirect' && access.url).toContain('X-Amz-Expires=300');
     });
   });
 });

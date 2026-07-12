@@ -1,9 +1,19 @@
 # Grafista AI Studio — Roadmap
 
-> **Last synced with code reality:** 2026-07-04, commit `dda634f` (Phase 2 Step 10R).
+> **Last synced with code reality:** 2026-07-12 (branch `phase-2-checkpoint`,
+> single-customer production go-live track — see `docs/production-readiness-review.md`
+> and the go-live milestones below).
 > If you are an agent picking up work: THIS file reflects what actually exists;
-> when in doubt, trust the test suite (274 tests, `apps/api` + see
+> when in doubt, trust the test suite (469 tests, `apps/api` + see
 > `docs/mvp-demo-flow.md`) over any older planning language you find elsewhere.
+>
+> **Current status in one line:** Phases 1-3 CLOSED; the full product pipeline was
+> proven end-to-end on **staging with real providers** (login -> DesignDNA -> brief ->
+> layout -> QA -> real KIE image -> render -> downloaded PNG, byte-verified), dashboard
+> is live on staging, ~469 tests green. The remaining work is **opening a real
+> production environment** for a single customer (go-live). Security + cost hardening
+> (rate limiting, helmet-equivalent headers, per-client AI budget guard, F8 render fix,
+> configurable signed-URL expiry) has landed on the branch as the go-live prerequisites.
 
 ## Production strategy (read this first)
 
@@ -121,9 +131,15 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
       contract) — still Step 7 as originally scoped, but **deferred**: the
       closure record recommends a Production Readiness Review /
       Deployment-Monitoring Plan first (see `docs/phase-3-final-state.md` §6)
-- [ ] Deployment & monitoring — **recommended as the actual next step**, not
-      yet started; no deployment or monitoring has ever been performed for
-      this project
+- [~] Deployment & monitoring — **IN PROGRESS (single-customer go-live track).**
+      Staging is deployed on Render (API + dashboard live; full product E2E with
+      real providers passed on staging). Real **production** environment is NOT
+      yet opened — that is the current focus (prod DB + domain + standing KIE
+      budget + monitoring + managed restore drill). Go-live prerequisites landed
+      on branch: security headers + rate limiting (`middleware/security-headers.ts`,
+      `middleware/rate-limit.ts`), per-client AI budget guard
+      (`services/visual-generation-budget.ts`), F8 render fix
+      (`services/visual-prompt-layout.ts`), configurable signed-URL expiry.
 - Other earlier Phase-3 candidates (kept as backlog, not committed): real-time
   approval notifications, A/B content suggestions, campaign calendar, Figma
   plugin, template library, multi-user collaboration polish
