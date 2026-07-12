@@ -30,6 +30,7 @@ export default function ClientProfilePage({ params }: { params: { id: string } }
     { href: `/clients/${params.id}/references`, icon: '📐', label: 'Referans Kütüphanesi', desc: 'Önceki onaylanmış tasarımlar' },
     { href: `/clients/${params.id}/design-dna`, icon: '🧬', label: 'Tasarım DNA', desc: 'Yapay zeka ile analiz edilmiş stil profili' },
     { href: `/clients/${params.id}/content`, icon: '💡', label: 'İçerik Üretici', desc: 'İçerik fikirleri üret ve onayla' },
+    { href: `/clients/${params.id}/listing-card`, icon: '🏡', label: 'İlan Kartı', desc: 'Mülk fotoğrafını yükle, yayına hazır kart üret' },
   ];
 
   return (

@@ -133,6 +133,12 @@ export const api = {
   uploadDesignReference: (clientId: string, formData: FormData) =>
     uploadAPI<{ data: any }>(`/api/clients/${clientId}/design-references`, formData),
 
+  // Listing Cards (go-live M6, direct-photo) — upload a property photo + listing
+  // details -> a production-ready 'uploaded' generated_output (composited into the
+  // curated real-estate template's hero slot by the existing render pipeline).
+  createListingCard: (clientId: string, formData: FormData) =>
+    uploadAPI<{ data: any }>(`/api/clients/${clientId}/listing-cards`, formData),
+
   // Analytics (Phase 3 Step 6A)
   getClientAnalyticsSummary: (clientId: string) => fetchAPI<{ data: any }>(`/api/clients/${clientId}/analytics/summary`),
 

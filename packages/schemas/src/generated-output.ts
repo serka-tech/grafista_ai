@@ -56,7 +56,9 @@ export const GeneratedOutputSchema = z.object({
     height: z.number().int().positive(),
   }).optional(),
 
-  generationMethod: z.enum(['ai_generated', 'template_based', 'manual', 'photoshop_worker']),
+  // 'uploaded' (go-live M6): the output's bytes are a user-uploaded photo (e.g. a
+  // real-estate property photo) composited into a layout slot, NOT AI-generated.
+  generationMethod: z.enum(['ai_generated', 'template_based', 'manual', 'photoshop_worker', 'uploaded']),
   // AI provider (e.g. 'openai', 'kie-ai') and model that produced this output.
   provider: z.string().max(50).optional(),
   aiModel: z.string().max(100).optional(),
