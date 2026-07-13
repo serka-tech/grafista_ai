@@ -416,8 +416,8 @@ describe('Phase 3 Step 6B — Revision Entries', () => {
       expect(match!.after_snapshot.revisionNotes).toBe('Logo needs to be bigger');
     });
 
-    it('design_dna approve() cannot recover a needs_revision row (409) and produces NO revision entry', async () => {
-      const clientId = await createClient('Revisions Lifecycle DNA Regression Client');
+    it('design_dna approve() recovers a needs_revision row (200) and records design_dna_approved (revise → re-approve loop)', async () => {
+      const clientId = await createClient('Revisions Lifecycle DNA Recover Client');
       const dnaId = await analyzeDesignDna(clientId);
       const owner = await loginAs(TEST_USERS.OWNER);
       const reviseRes = await owner
@@ -426,18 +426,16 @@ describe('Phase 3 Step 6B — Revision Entries', () => {
       expect(reviseRes.status).toBe(200);
       expect(reviseRes.body.data.status).toBe('needs_revision');
 
-      const beforeCount = (await revisionsFor(clientId)).length;
-
-      // approve() only accepts 'generated'/'waiting_for_approval' — needs_revision -> 409.
+      // approve() now accepts 'needs_revision' too, so the round-trip closes on the
+      // same version (mirrors layout_plan reject-with-notes → approve below).
       const approveRes = await owner.post(`/api/clients/${clientId}/design-dna/approve`);
-      expect(approveRes.status).toBe(409);
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.data.status).toBe('approved');
 
-      const afterCount = (await revisionsFor(clientId)).length;
-      expect(afterCount).toBe(beforeCount);
       const approvedMatch = (await revisionsFor(clientId)).find(
         (r) => r.entity_id === dnaId && r.revision_type === 'design_dna_approved'
       );
-      expect(approvedMatch).toBeUndefined();
+      expect(approvedMatch).toBeDefined();
     });
 
     it('layout_plan approve records layout_plan_approved', async () => {
