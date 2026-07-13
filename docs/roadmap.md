@@ -1,19 +1,20 @@
 # Grafista AI Studio — Roadmap
 
-> **Last synced with code reality:** 2026-07-12 (branch `phase-2-checkpoint`,
-> single-customer production go-live track — see `docs/production-readiness-review.md`
-> and the go-live milestones below).
+> **Last synced with code reality:** 2026-07-13 (branch `go-live/m2-hardening`, HEAD
+> `a6e1e3c` — single-customer go-live DONE + Packaging Phase A deployed; see
+> `docs/production-provisioning-guide.md` and `docs/packaging-phase-a-final-state.md`).
 > If you are an agent picking up work: THIS file reflects what actually exists;
-> when in doubt, trust the test suite (469 tests, `apps/api` + see
+> when in doubt, trust the test suite (~493 tests, `apps/api` + see
 > `docs/mvp-demo-flow.md`) over any older planning language you find elsewhere.
 >
-> **Current status in one line:** Phases 1-3 CLOSED; the full product pipeline was
-> proven end-to-end on **staging with real providers** (login -> DesignDNA -> brief ->
-> layout -> QA -> real KIE image -> render -> downloaded PNG, byte-verified), dashboard
-> is live on staging, ~469 tests green. The remaining work is **opening a real
-> production environment** for a single customer (go-live). Security + cost hardening
-> (rate limiting, helmet-equivalent headers, per-client AI budget guard, F8 render fix,
-> configurable signed-URL expiry) has landed on the branch as the go-live prerequisites.
+> **Current status in one line:** Phases 1-3 CLOSED; **single-customer production is LIVE**
+> (Render: `grafista-api-prod` + `grafista-dashboard-prod`, prod Postgres + Cloudflare R2,
+> migrations 001-028, KIE enabled + budget guard on). The full pipeline was proven
+> end-to-end with real providers on staging and production. **Packaging Phase A** (org/tenant
+> foundation + multi-user team management) is deployed and live-verified on both envs, and is
+> now in real use (first team member invited on prod). Remaining focus: production durability
+> (prod backup + managed restore drill, upload hardening, observability) and, when selling
+> begins, Phase B (billing, white-label, public signup).
 
 ## Production strategy (read this first)
 
@@ -131,15 +132,43 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
       contract) — still Step 7 as originally scoped, but **deferred**: the
       closure record recommends a Production Readiness Review /
       Deployment-Monitoring Plan first (see `docs/phase-3-final-state.md` §6)
-- [~] Deployment & monitoring — **IN PROGRESS (single-customer go-live track).**
-      Staging is deployed on Render (API + dashboard live; full product E2E with
-      real providers passed on staging). Real **production** environment is NOT
-      yet opened — that is the current focus (prod DB + domain + standing KIE
-      budget + monitoring + managed restore drill). Go-live prerequisites landed
-      on branch: security headers + rate limiting (`middleware/security-headers.ts`,
-      `middleware/rate-limit.ts`), per-client AI budget guard
-      (`services/visual-generation-budget.ts`), F8 render fix
-      (`services/visual-prompt-layout.ts`), configurable signed-URL expiry.
+- [x] Deployment & monitoring — **single-customer production LIVE (2026-07-13).**
+      Prod on Render (`grafista-api-prod` + `grafista-dashboard-prod`), prod Postgres +
+      Cloudflare R2, migrations 001-028, Turyap + admin seeded, KIE enabled + per-client
+      budget guard on (`CLIENT_MONTHLY_BUDGET_USD`). Go-live prerequisites shipped: security
+      headers + rate limiting, per-client AI budget guard, F8 render fix, configurable
+      signed-URL expiry. Pre-Deploy migration command set on both API services (auto-migrate
+      on deploy). **Still open (production durability):** prod backup + managed restore drill
+      (never run on prod), upload hardening (magic-byte/EXIF/size), deeper observability
+      (request-id, live storage/renderer readiness), CI gate.
+
+## Packaging Phase A — Tenant Foundation ✅ (deployed + live, 2026-07-13)
+
+> Closure/deploy record: `docs/packaging-phase-a-final-state.md`.
+
+- [x] `organizations` table (migrations 027/028) + founding org "Grafista Ajans" (fixed id);
+      `clients.organization_id` / `users.organization_id` (NOT NULL DEFAULT, backfills all rows)
+- [x] Two-layer isolation: HARD org boundary + unchanged SOFT `client_members` scoping
+      (`assertClientAccessible` signature unchanged, ~26 call sites tenant-aware for free)
+- [x] Org/team management (`routes/org.ts`, `org:manage` OWNER-only): roster, invite (returns
+      accept link, no email), role change, enable/disable, per-user client assignment
+- [x] `POST /auth/accept-invite` — the only user-creation path (no public signup); dashboard
+      OWNER-only **Ekip** screen + standalone accept-invite page
+- [x] 493 API tests incl. `org-isolation.test.ts` (12); deployed + live-verified on staging + prod
+- Business model: NOW = the agency's own multi-user workspace (one org, team users, agency
+  clients). LATER = the same SaaS sells a single-tenant account as a new org.
+- **Phase B (deferred to selling time):** billing/subscription/quota, white-label (per-org
+  theme/logo), public self-signup, "new org" provisioning + org-deletion, org_id
+  denormalization + RLS, invite email (SMTP), cross-org super-admin.
+
+## Direct-photo listing cards (M6) ✅ (shipped as a go-live requirement)
+
+- [x] Upload a real photo (not an AI image) straight into a listing-card design; the pipeline
+      is source-agnostic so the upload becomes a `generated_output` (`generationMethod='uploaded'`)
+      and flows through production → render → export unchanged (`routes/listing-cards.ts`,
+      dashboard `clients/[id]/listing-card`). This is the first customer's (real-estate) core use.
+- [ ] Fast-follow: agency logo as an image (multi-image compositing), reusable per-client photo
+      library, multi-photo/collage, pre-render preview/edit.
 - Other earlier Phase-3 candidates (kept as backlog, not committed): real-time
   approval notifications, A/B content suggestions, campaign calendar, Figma
   plugin, template library, multi-user collaboration polish
@@ -154,14 +183,16 @@ Deliberately NOT done in Phase 2 (moved out of this phase's old wording):
 - [ ] Multi-language content generation
 - [ ] Video content generation (KIE AI / Higgsfield)
 - [ ] API for external integrations
-- [ ] White-label deployment
+- [ ] White-label deployment — **Phase B**; the tenant foundation it needs is already built
+      (Packaging Phase A org layer), so this becomes per-org theming on top, not a rewrite
 - [ ] Mobile app (React Native)
 
 ## Known technical debt (accepted at MVP level — do not "fix" casually)
 
-- **Cross-client isolation** is limited by the global permission model
-  (single-team assumption; every read/write is permission-gated but not
-  client-scoped). Hardening is a Phase 3 item.
+- **Cross-client isolation** — hardened: Phase 3 Step 4 added `client_members`
+  (opt-in intra-team scoping) and Packaging Phase A added the HARD org/tenant
+  boundary (`assertClientAccessible`). Remaining Phase B depth: `organization_id`
+  denormalization onto the ~18 child tables + Postgres RLS (defense in depth).
 - **Render history endpoint N+1 query** (one artifact query per render job)
   — accepted at MVP scale, documented in the route.
 - **Text overflow / safe area QA are heuristics** (average glyph width, AABB

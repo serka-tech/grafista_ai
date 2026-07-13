@@ -1,6 +1,8 @@
 # Packaging Phase A — Final State (Tenant Foundation + Multi-User + Isolation)
 
-Branch: `packaging/phase-a-tenancy` (NOT deployed — staging-first, manual migration).
+Branch: `packaging/phase-a-tenancy` → merged fast-forward into `go-live/m2-hardening`
+(commit `a6e1e3c`). **DEPLOYED and live-verified on staging AND production (2026-07-13)** —
+see "Deploy record" below.
 Plan: `~/.claude/plans/soft-dazzling-flurry.md`.
 
 ## What this phase delivered
@@ -71,14 +73,32 @@ single-tenant account to an external customer as a new org.
   invite → accept → roster updated → DESIGNER gets 403 on org:manage → token reuse 400).
   Browser-driven UI check: Ekip page, invite-link display, accept-invite page all render.
 
-## Deploy notes (next step, separately approved)
+## Deploy record (DONE — 2026-07-13)
 
-Apply 027 then 028 manually via Render Shell (`node dist/scripts/db-migrate.js`),
-**staging first**, then prod. Post-migrate check: `SELECT count(*) FROM users WHERE
-organization_id IS NULL` = 0, `... clients ...` = 0, one `organizations` row. Existing
-Turyap client + admin land in the founding org; the org check is trivially true for them.
-Rollback: columns are additive and old code never references `organization_id` → redeploy
-the prior API image, DB stays.
+Deployed to **staging then production**, both live-verified.
+
+- **Staging:** both services retargeted to `packaging/phase-a-tenancy`; migrations 026/027/028
+  applied via Render Shell (`node dist/scripts/db-migrate.js`; staging was behind at 025).
+  Full HTTP smoke passed (login → org roster → invite → accept → invitee client scope →
+  token reuse 400 → DESIGNER 403). Dashboard `/accept-invite` 200, `/settings/team` gated.
+- **Production:** `packaging/phase-a-tenancy` fast-forward merged into `go-live/m2-hardening`
+  (`a793975..a6e1e3c`) → prod auto-deploy. Full smoke passed: the real admin
+  (`sercanbingol023@gmail.com`) and all existing clients (Turyap Sistem, Yenişehir Merkez
+  Koleji, Prime Proje, Play & Bite) backfilled cleanly into the founding org; invite→accept,
+  isolation, and RBAC all verified. All throwaway smoke users deleted (login 401 after).
+- **Backfill:** `organization_id` is `NOT NULL DEFAULT`, so a clean migration mathematically
+  guarantees zero NULLs; verified functionally via the org-scoped client list on both envs.
+- **Operational finding (fixed):** neither prod nor staging had a Pre-Deploy Command set
+  (docs implied prod did), so migrations did NOT auto-run — new code briefly ran ahead of the
+  027/028 columns on prod until the migration was run manually. Permanently fixed by setting
+  **Pre-Deploy Command = `node dist/scripts/db-migrate.js`** on both API services (verified live
+  in the prod deploy log). Future deploys now migrate automatically and fail the deploy if a
+  migration fails.
+- **First real use (2026-07-13):** first genuine team member invited via the prod Ekip screen
+  and accepted — `grafistaajans33@gmail.com` (DESIGNER), now active in the founding org.
+
+Rollback (unchanged): columns are additive and old code never references `organization_id` →
+redeploy the prior API image, DB stays.
 
 ## Out of scope — Phase B
 
