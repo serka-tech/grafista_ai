@@ -275,6 +275,32 @@ export const api = {
     fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/reject-step`, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   cancelWorkflowRun: (id: string) =>
     fetchAPI<{ data: any }>(`/api/workflow-runs/${id}/cancel`, { method: 'POST' }),
+
+  // Org / Team (Packaging Phase A) — all require the org:manage permission (OWNER).
+  getOrgUsers: () => fetchAPI<{ data: any[]; total: number }>('/api/org/users'),
+  getOrgInvites: () => fetchAPI<{ data: any[]; total: number }>('/api/org/invites'),
+  inviteOrgUser: (email: string, role: string) =>
+    fetchAPI<{ data: { invite: any; token: string; acceptPath: string } }>('/api/org/invites', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+  setOrgUserRole: (userId: string, role: string) =>
+    fetchAPI<{ data: any }>(`/api/org/users/${userId}/roles`, { method: 'POST', body: JSON.stringify({ role }) }),
+  setOrgUserStatus: (userId: string, status: 'active' | 'disabled') =>
+    fetchAPI<{ data: any }>(`/api/org/users/${userId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  getOrgUserClients: (userId: string) =>
+    fetchAPI<{ data: string[]; total: number }>(`/api/org/users/${userId}/clients`),
+  assignOrgUserClient: (userId: string, clientId: string) =>
+    fetchAPI<{ data: any }>(`/api/org/users/${userId}/clients`, { method: 'POST', body: JSON.stringify({ clientId }) }),
+  removeOrgUserClient: (userId: string, clientId: string) =>
+    fetchAPI<{ data: any }>(`/api/org/users/${userId}/clients/${clientId}`, { method: 'DELETE' }),
+
+  // Accept an invite (the only user-creation path). Public — used by /accept-invite.
+  acceptInvite: (token: string, password: string, name?: string) =>
+    fetchAPI<{ data: { user: any } }>('/api/auth/accept-invite', {
+      method: 'POST',
+      body: JSON.stringify({ token, password, name }),
+    }),
 };
 
 // ─── Render job polling (Phase 3 Step 5A) ──────────────────

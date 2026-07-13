@@ -8,11 +8,15 @@ const SESSION_COOKIE_NAME = 'grafista_session';
 // requireAuth). This prevents rendering any page shell without a cookie at
 // all; a revoked/expired-but-still-present cookie is caught by the API and
 // the dashboard's fetch layer redirects to /login on the first 401.
+// Pages reachable WITHOUT a session cookie: login, and accept-invite (the
+// invitee has no session yet — they set their password from a one-time token).
+const PUBLIC_PATHS = new Set(['/login', '/accept-invite']);
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = request.cookies.has(SESSION_COOKIE_NAME);
 
-  if (!hasSession && pathname !== '/login') {
+  if (!hasSession && !PUBLIC_PATHS.has(pathname)) {
     const loginUrl = new URL('/login', request.url);
     return NextResponse.redirect(loginUrl);
   }

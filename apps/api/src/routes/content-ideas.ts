@@ -6,6 +6,7 @@ import {
   type AiErrorKind,
 } from '../services/content-ideation.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 
 export const contentIdeasRouter: Router = Router();
@@ -18,6 +19,7 @@ contentIdeasRouter.get(
   requireAuth,
   requirePermission('clients:read'),
   asyncHandler(async (req: Request, res: Response) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const status = req.query.status as string | undefined;
     const ideas = await store.contentIdeas.listByClient(req.params.clientId, status);
     res.json({ data: ideas, total: ideas.length });
@@ -32,6 +34,7 @@ contentIdeasRouter.post(
   requireAuth,
   requirePermission('content_ideas:create'),
   asyncHandler(async (req: Request, res: Response) => {
+  await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
   const client = await store.clients.getById(req.params.clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 

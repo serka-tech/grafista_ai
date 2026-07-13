@@ -22,4 +22,8 @@ export const clientMembersRepo = {
       [userId, clientId]
     );
   },
+
+  async removeMember(userId: string, clientId: string): Promise<void> {
+    await pool.query('DELETE FROM client_members WHERE user_id = $1 AND client_id = $2', [userId, clientId]);
+  },
 };

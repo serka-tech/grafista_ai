@@ -43,8 +43,8 @@ designBriefsRouter.get('/design-briefs/:id', requireAuth, requirePermission('cli
 }));
 
 // GET /api/design-briefs — list all
-designBriefsRouter.get('/design-briefs', requireAuth, requirePermission('clients:read'), asyncHandler(async (_req: Request, res: Response) => {
-  const briefs = await store.designBriefs.list();
+designBriefsRouter.get('/design-briefs', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
+  const briefs = await store.designBriefs.list(req.user!.organizationId);
   res.json({ data: briefs, total: briefs.length });
 }));
 

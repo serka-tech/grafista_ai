@@ -69,10 +69,22 @@ export const workflowRunsRepo = {
     return rows[0] ? mapRow(rows[0]) : undefined;
   },
 
-  /** Runs newest-first, joined with the client name; workflow name read from the snapshot. */
-  async list(filters: { clientId?: string; workflowId?: string; status?: string } = {}): Promise<WorkflowRunListItem[]> {
+  /**
+   * Runs newest-first, joined with the client name; workflow name read from the
+   * snapshot. `organizationId` is REQUIRED — it is the tenant boundary: only
+   * runs whose client belongs to the caller's org are returned (workflow_runs
+   * always carries a NOT NULL client_id).
+   */
+  async list(filters: {
+    organizationId: string;
+    clientId?: string;
+    workflowId?: string;
+    status?: string;
+  }): Promise<WorkflowRunListItem[]> {
     const conditions: string[] = [];
     const values: unknown[] = [];
+    values.push(filters.organizationId);
+    conditions.push(`c.organization_id = $${values.length}`);
     if (filters.clientId) {
       values.push(filters.clientId);
       conditions.push(`r.client_id = $${values.length}`);

@@ -9,6 +9,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { authRouter } from './routes/auth.js';
+import { orgRouter } from './routes/org.js';
 import { clientsRouter } from './routes/clients.js';
 import { brandAssetsRouter } from './routes/brand-assets.js';
 import { designReferencesRouter } from './routes/design-references.js';
@@ -88,6 +89,7 @@ app.use('/api', generalLimiter);
 
 // Routes
 app.use('/api', authRouter);
+app.use('/api/org', orgRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/clients', brandAssetsRouter);
 app.use('/api/clients', designReferencesRouter);

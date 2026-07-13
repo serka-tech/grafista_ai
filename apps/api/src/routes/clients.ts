@@ -2,13 +2,14 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 
 export const clientsRouter: Router = Router();
 
 // GET /api/clients — list all
-clientsRouter.get('/', requireAuth, requirePermission('clients:read'), asyncHandler(async (_req: Request, res: Response) => {
-  const clients = await store.clients.listWithCounts();
+clientsRouter.get('/', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
+  const clients = await store.clients.listWithCounts(req.user!.organizationId);
   const clientIdsWithDna = await store.designDna.hasForClientIds(clients.map((c) => c.id));
   const withDna = clients.map((c) => ({ ...c, hasDNA: clientIdsWithDna.has(c.id) }));
   res.json({ data: withDna, total: withDna.length });
@@ -18,6 +19,7 @@ clientsRouter.get('/', requireAuth, requirePermission('clients:read'), asyncHand
 clientsRouter.get('/:id', requireAuth, requirePermission('clients:read'), asyncHandler(async (req: Request, res: Response) => {
   const client = await store.clients.getById(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
+  await assertClientAccessible(req.user!.id, client.id); // cross-org / out-of-scope -> 404
   res.json({ data: client });
 }));
 
@@ -35,6 +37,7 @@ clientsRouter.post('/', requireAuth, requirePermission('clients:create'), asyncH
     contactName,
     contactEmail,
     notes,
+    organizationId: req.user!.organizationId, // new client lands in the caller's tenant
   });
   res.status(201).json({ data: client });
 }));
@@ -43,6 +46,7 @@ clientsRouter.post('/', requireAuth, requirePermission('clients:create'), asyncH
 clientsRouter.put('/:id', requireAuth, requirePermission('clients:update'), asyncHandler(async (req: Request, res: Response) => {
   const client = await store.clients.getById(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
+  await assertClientAccessible(req.user!.id, client.id); // cross-org / out-of-scope -> 404
 
   const updated = await store.clients.update(req.params.id, req.body);
   res.json({ data: updated });

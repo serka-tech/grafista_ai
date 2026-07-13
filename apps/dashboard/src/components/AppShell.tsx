@@ -7,8 +7,9 @@ import { api } from '@/lib/api';
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  // The login page renders standalone, without the app chrome.
-  if (pathname === '/login') {
+  // Login and accept-invite render standalone, without the app chrome
+  // (accept-invite is reached from an emailed link, before any session exists).
+  if (pathname === '/login' || pathname === '/accept-invite') {
     return <>{children}</>;
   }
 
@@ -22,6 +23,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function Sidebar() {
+  // The team/org page is OWNER-only (org:manage) — hide the nav item for
+  // everyone else; the page itself also refuses non-owners.
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    api
+      .getCurrentUser()
+      .then((res) => setIsOwner((res.data.user?.roles ?? []).includes('OWNER')))
+      .catch(() => setIsOwner(false));
+  }, []);
+
+  const systemItems = [
+    ...(isOwner ? [{ href: '/settings/team', icon: '👥', label: 'Ekip' }] : []),
+    { href: '/settings', icon: '⚙️', label: 'Ayarlar' },
+  ];
+
   const navSections = [
     {
       label: 'Çalışma Alanı',
@@ -34,7 +50,7 @@ function Sidebar() {
     },
     {
       label: 'Sistem',
-      items: [{ href: '/settings', icon: '⚙️', label: 'Ayarlar' }],
+      items: systemItems,
     },
   ];
 

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { upload } from '../middleware/upload.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { storeUploadedFile, getFileAccess } from '../storage/file-service.js';
 
@@ -14,6 +15,7 @@ designReferencesRouter.get(
   requireAuth,
   requirePermission('clients:read'),
   asyncHandler(async (req: Request, res: Response) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const refs = await store.designReferences.listByClient(req.params.clientId);
     res.json({ data: refs, total: refs.length });
   })
@@ -28,6 +30,7 @@ designReferencesRouter.post(
   requirePermission('design_references:upload'),
   upload.single('file'),
   asyncHandler(async (req: Request, res: Response) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const client = await store.clients.getById(req.params.clientId);
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -67,6 +70,7 @@ designReferencesRouter.get(
   requireAuth,
   requirePermission('clients:read'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const ref = await store.designReferences.getById(req.params.clientId, req.params.refId);
     if (!ref || !ref.storageKey || !ref.storageProvider || !ref.storageBucket) {
       return res.status(404).json({ error: 'File not found' });

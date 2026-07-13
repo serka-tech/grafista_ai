@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { store } from '../data/store.js';
 import { upload } from '../middleware/upload.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { storeUploadedFile, getFileAccess } from '../storage/file-service.js';
 
@@ -14,6 +15,7 @@ brandAssetsRouter.get(
   requireAuth,
   requirePermission('clients:read'),
   asyncHandler(async (req: Request, res: Response) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const assets = await store.brandAssets.listByClient(req.params.clientId);
     res.json({ data: assets, total: assets.length });
   })
@@ -29,6 +31,7 @@ brandAssetsRouter.post(
   requirePermission('brand_assets:upload'),
   upload.single('file'),
   asyncHandler(async (req: Request, res: Response) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const client = await store.clients.getById(req.params.clientId);
     if (!client) return res.status(404).json({ error: 'Client not found' });
 
@@ -68,6 +71,7 @@ brandAssetsRouter.get(
   requireAuth,
   requirePermission('clients:read'),
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const asset = await store.brandAssets.getById(req.params.clientId, req.params.assetId);
     if (!asset || !asset.storageKey || !asset.storageProvider || !asset.storageBucket) {
       return res.status(404).json({ error: 'File not found' });

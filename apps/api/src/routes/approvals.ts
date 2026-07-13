@@ -11,8 +11,8 @@ approvalsRouter.get(
   '/approvals',
   requireAuth,
   requirePermission('content_ideas:approve'),
-  asyncHandler(async (_req: Request, res: Response) => {
-    const pendingIdeas = await store.approvals.listPendingContentIdeas();
+  asyncHandler(async (req: Request, res: Response) => {
+    const pendingIdeas = await store.approvals.listPendingContentIdeas(req.user!.organizationId);
     res.json({ data: pendingIdeas, total: pendingIdeas.length });
   })
 );

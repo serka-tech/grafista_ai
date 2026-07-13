@@ -52,6 +52,7 @@ export const PERMISSIONS = [
   'export_artifacts:read',
   'analytics:read',
   'revisions:read',
+  'org:manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

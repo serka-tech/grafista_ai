@@ -10,12 +10,23 @@
  * immediately after `store.productionJobs.getById(id)` resolves a row with a
  * `.clientId`, before any further work happens on it.
  *
- * Membership model (see client_members table, 021_client_members.sql):
- *   - A user with ZERO client_members rows is UNRESTRICTED — this preserves
- *     today's pre-existing behavior for every current/seeded user exactly
- *     as-is (nobody gets a row by default), so this hardening step cannot
- *     silently lock anyone out of data they could already reach.
- *   - A user with ONE OR MORE rows is restricted to exactly those clients.
+ * Two orthogonal layers run here, in order:
+ *
+ *   (1) ORGANIZATION boundary — HARD, applies to EVERY user (Packaging Phase A,
+ *       027_organizations.sql). A user can only touch clients in their own
+ *       organization. This is the tenant boundary: it is NOT opt-in and cannot
+ *       be widened by a user. All pre-existing users + clients were backfilled
+ *       into the founding "Grafista Ajans" org, so for today's single-tenant
+ *       deployment this check is trivially true and changes nobody's access.
+ *
+ *   (2) CLIENT MEMBERSHIP scope — SOFT, INTRA-organization (client_members,
+ *       021_client_members.sql). Within the caller's own org:
+ *         - A user with ZERO client_members rows is UNRESTRICTED across that
+ *           org's clients — preserves the pre-Phase-A behavior for every
+ *           current/seeded user exactly (nobody gets a row by default).
+ *         - A user with ONE OR MORE rows is restricted to exactly those clients.
+ *       This lets an OWNER scope, say, a designer to specific clients WITHIN the
+ *       agency, without affecting the org boundary above.
  *
  * Error semantics: a resource that exists but belongs to a client the caller
  * isn't scoped to is treated EXACTLY like a resource that doesn't exist at
@@ -28,6 +39,7 @@
  * outside.
  */
 
+import { pool } from '../db/pool.js';
 import { clientMembersRepo } from '../db/repositories/client-members.js';
 
 /** Thrown by assertClientAccessible(); carries `.status = 404` for the central errorHandler. */
@@ -54,8 +66,25 @@ export class ClientAccessDeniedError extends Error {
  */
 export async function assertClientAccessible(userId: string, clientId: string | null | undefined): Promise<void> {
   if (!clientId) return;
+
+  // (1) Organization boundary — HARD, every user. One query fetches both org
+  // ids; a missing user/client or an org mismatch is a 404 (indistinguishable
+  // from "not found", same as a cross-client access, leaking nothing).
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT organization_id FROM users WHERE id = $1) AS user_org,
+       (SELECT organization_id FROM clients WHERE id = $2) AS client_org`,
+    [userId, clientId]
+  );
+  const userOrg = rows[0]?.user_org as string | null;
+  const clientOrg = rows[0]?.client_org as string | null;
+  if (!userOrg || !clientOrg || userOrg !== clientOrg) {
+    throw new ClientAccessDeniedError();
+  }
+
+  // (2) Client membership scope — SOFT, intra-org. Unchanged semantics.
   const restrictedTo = await clientMembersRepo.listClientIdsForUser(userId);
-  if (restrictedTo.length === 0) return; // unrestricted — no membership rows defined for this user
+  if (restrictedTo.length === 0) return; // unrestricted within the org
   if (!restrictedTo.includes(clientId)) {
     throw new ClientAccessDeniedError();
   }

@@ -11,6 +11,7 @@ import { v4 as uuid } from 'uuid';
 import { pool, closePool } from '../db/pool.js';
 import { usersRepo } from '../db/repositories/users.js';
 import { hashPassword } from '../auth/password.js';
+import { GRAFISTA_ORG_ID } from '../config/tenant.js';
 
 async function main() {
   const email = process.env.ADMIN_EMAIL;
@@ -36,7 +37,7 @@ async function main() {
   }
 
   const passwordHash = await hashPassword(password);
-  const user = await usersRepo.create({ id: uuid(), email, passwordHash, name: 'Owner' });
+  const user = await usersRepo.create({ id: uuid(), email, passwordHash, name: 'Owner', organizationId: GRAFISTA_ORG_ID });
   await usersRepo.assignRole(user.id, 'OWNER');
 
   console.log(`[seed-admin] created OWNER user: ${user.email}`);

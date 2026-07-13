@@ -88,8 +88,15 @@ export const designBriefsRepo = {
     return rows[0] ? mapRow(rows[0]) : undefined;
   },
 
-  async list(): Promise<DesignBrief[]> {
-    const { rows } = await pool.query('SELECT * FROM design_briefs ORDER BY created_at ASC');
+  /** `organizationId` is REQUIRED — only briefs whose client is in the caller's tenant. */
+  async list(organizationId: string): Promise<DesignBrief[]> {
+    const { rows } = await pool.query(
+      `SELECT b.* FROM design_briefs b
+       JOIN clients c ON c.id = b.client_id
+       WHERE c.organization_id = $1
+       ORDER BY b.created_at ASC`,
+      [organizationId]
+    );
     return rows.map(mapRow);
   },
 

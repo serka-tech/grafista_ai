@@ -35,16 +35,20 @@ function mapRow(row: Record<string, unknown>): Approval {
 }
 
 export const approvalsRepo = {
-  async listPendingContentIdeas(): Promise<
+  /** `organizationId` is REQUIRED — only pending ideas of the caller's tenant. */
+  async listPendingContentIdeas(organizationId: string): Promise<
     Array<{ entityType: string; entityId: string; clientId: string; clientName?: string; title: string; status: string; createdAt: string }>
   > {
-    const { rows } = await pool.query(`
+    const { rows } = await pool.query(
+      `
       SELECT i.id, i.client_id, i.title, i.created_at, c.name AS client_name
       FROM content_ideas i
       LEFT JOIN clients c ON c.id = i.client_id
-      WHERE i.status = 'pending_approval'
+      WHERE i.status = 'pending_approval' AND c.organization_id = $1
       ORDER BY i.created_at ASC
-    `);
+    `,
+      [organizationId]
+    );
     return rows.map((row) => ({
       entityType: 'content_idea',
       entityId: row.id as string,

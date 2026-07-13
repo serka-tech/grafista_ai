@@ -27,6 +27,7 @@ workflowRunsRouter.get(
   requirePermission('workflows:read'),
   asyncHandler(async (req: Request, res: Response) => {
     const runs = await store.workflowRuns.list({
+      organizationId: req.user!.organizationId,
       clientId: req.query.clientId as string | undefined,
       workflowId: req.query.workflowId as string | undefined,
       status: req.query.status as string | undefined,

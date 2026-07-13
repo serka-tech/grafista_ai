@@ -24,6 +24,7 @@ import { v4 as uuid } from 'uuid';
 import type { WorkflowRun, WorkflowStepRecord } from '@grafista/schemas';
 import type { UserWithAccess } from '../db/repositories/users.js';
 import { store } from '../data/store.js';
+import { assertClientAccessible } from '../auth/client-access.js';
 import { getWorkflowCatalog } from './catalog.js';
 import { buildSkillStepContext } from './skill-loader.js';
 import {
@@ -216,6 +217,7 @@ export async function startWorkflowRun(params: {
 
   const client = await store.clients.getById(params.clientId);
   if (!client) throw notFound('Client not found');
+  await assertClientAccessible(params.user.id, client.id); // cross-org / out-of-scope -> 404
 
   const missing: string[] = [];
   for (const [key, spec] of Object.entries(def.required_inputs)) {

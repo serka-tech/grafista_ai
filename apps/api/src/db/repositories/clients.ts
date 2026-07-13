@@ -2,6 +2,7 @@ import { pool } from '../pool.js';
 
 export interface Client {
   id: string;
+  organizationId: string;
   name: string;
   slug: string;
   industry?: string;
@@ -32,6 +33,7 @@ const ALLOWED_UPDATE_FIELDS: Record<string, string> = {
 function mapRow(row: Record<string, unknown>): Client {
   return {
     id: row.id as string,
+    organizationId: row.organization_id as string,
     name: row.name as string,
     slug: row.slug as string,
     industry: (row.industry as string) ?? undefined,
@@ -46,14 +48,23 @@ function mapRow(row: Record<string, unknown>): Client {
 }
 
 export const clientsRepo = {
-  async listWithCounts(): Promise<ClientWithCounts[]> {
-    const { rows } = await pool.query(`
+  /**
+   * `organizationId` is REQUIRED — the tenant boundary. Only clients belonging
+   * to the caller's org are listed (a per-record 404 guard does not stop a list
+   * endpoint from leaking other tenants' rows).
+   */
+  async listWithCounts(organizationId: string): Promise<ClientWithCounts[]> {
+    const { rows } = await pool.query(
+      `
       SELECT c.*,
         (SELECT COUNT(*) FROM brand_assets a WHERE a.client_id = c.id) AS brand_assets_count,
         (SELECT COUNT(*) FROM design_references d WHERE d.client_id = c.id) AS design_references_count
       FROM clients c
+      WHERE c.organization_id = $1
       ORDER BY c.created_at ASC
-    `);
+    `,
+      [organizationId]
+    );
     return rows.map((row) => ({
       ...mapRow(row),
       brandAssetsCount: Number(row.brand_assets_count),
@@ -75,21 +86,43 @@ export const clientsRepo = {
     contactName?: string;
     contactEmail?: string;
     notes?: string;
+    /**
+     * Omitted on the founding-tenant path (the column DEFAULT from
+     * 027_organizations.sql applies); passed explicitly when a scoped
+     * org creates a client so it lands in that exact tenant.
+     */
+    organizationId?: string;
   }): Promise<Client> {
-    const { rows } = await pool.query(
-      `INSERT INTO clients (id, name, slug, industry, website, contact_name, contact_email, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [
-        data.id,
-        data.name,
-        data.slug,
-        data.industry ?? null,
-        data.website ?? null,
-        data.contactName ?? null,
-        data.contactEmail ?? null,
-        data.notes ?? null,
-      ]
-    );
+    const { rows } = data.organizationId
+      ? await pool.query(
+          `INSERT INTO clients (id, name, slug, industry, website, contact_name, contact_email, notes, organization_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+          [
+            data.id,
+            data.name,
+            data.slug,
+            data.industry ?? null,
+            data.website ?? null,
+            data.contactName ?? null,
+            data.contactEmail ?? null,
+            data.notes ?? null,
+            data.organizationId,
+          ]
+        )
+      : await pool.query(
+          `INSERT INTO clients (id, name, slug, industry, website, contact_name, contact_email, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+          [
+            data.id,
+            data.name,
+            data.slug,
+            data.industry ?? null,
+            data.website ?? null,
+            data.contactName ?? null,
+            data.contactEmail ?? null,
+            data.notes ?? null,
+          ]
+        );
     return mapRow(rows[0]);
   },
 
