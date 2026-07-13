@@ -265,6 +265,28 @@ describe('7. Approve requires design_dna:approve', () => {
     expect(res.body.data.status).toBe('approved');
     expect(res.body.data.approvedBy).toBeTruthy();
   });
+
+  it('can re-approve a DNA sent back to needs_revision (revise → rework → re-approve loop)', async () => {
+    const clientId = await createClient('Design DNA Revise Then Reapprove Client');
+    await uploadReference(clientId, 'reference-5.png');
+
+    const owner = await loginAs(TEST_USERS.OWNER);
+    expect((await owner.post(`/api/clients/${clientId}/design-dna/analyze`)).status).toBe(201);
+
+    // approve, then send it back for revision (approved → needs_revision is allowed)
+    expect((await owner.post(`/api/clients/${clientId}/design-dna/approve`)).status).toBe(200);
+    const revised = await owner
+      .post(`/api/clients/${clientId}/design-dna/revise`)
+      .send({ notes: 'tighten the palette' });
+    expect(revised.status).toBe(200);
+    expect(revised.body.data.status).toBe('needs_revision');
+
+    // re-approve the SAME version — previously a 409 dead-end, now allowed
+    const reapproved = await owner.post(`/api/clients/${clientId}/design-dna/approve`);
+    expect(reapproved.status).toBe(200);
+    expect(reapproved.body.data.status).toBe('approved');
+    expect(reapproved.body.data.approvedBy).toBeTruthy();
+  });
 });
 
 describe('8. GET routes', () => {

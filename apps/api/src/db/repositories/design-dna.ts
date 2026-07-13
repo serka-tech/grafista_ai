@@ -256,16 +256,19 @@ export const designDnaRepo = {
   },
 
   /**
-   * Approves the given DNA version. Only succeeds from 'generated' or 'waiting_for_approval'
-   * ('draft' isn't approvable — nothing was generated yet; 'approved' is already terminal for
-   * this transition; approving out of 'needs_revision' should go through a fresh analysis run
-   * first). Returns undefined (→ 409 in the route) if no row matched.
+   * Approves the given DNA version. Succeeds from 'generated', 'waiting_for_approval' or
+   * 'needs_revision' ('draft' isn't approvable — nothing was generated yet; 'approved' is
+   * already terminal for this transition). 'needs_revision' is approvable so the natural
+   * revise → rework → re-approve loop closes on the SAME version: `requestRevision` can push
+   * an approved DNA back to 'needs_revision', and this lets it be signed off again without
+   * forcing a full re-analysis (which would spawn a new version and orphan this row).
+   * Returns undefined (→ 409 in the route) if no row matched.
    */
   async approve(id: string, approvedBy: string): Promise<DesignDNA | undefined> {
     const { rows } = await pool.query(
       `UPDATE design_dna
        SET status = 'approved', approved_by = $2, approved_at = NOW(), last_updated_at = NOW()
-       WHERE id = $1 AND status IN ('generated', 'waiting_for_approval')
+       WHERE id = $1 AND status IN ('generated', 'waiting_for_approval', 'needs_revision')
        RETURNING *`,
       [id, approvedBy]
     );
