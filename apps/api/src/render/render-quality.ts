@@ -54,6 +54,77 @@ function hasUsableImageSource(layer: Layer, imageSources?: Record<string, string
 }
 
 /**
+ * F9 (low-contrast text heuristic) — colour helpers. Best-effort by design:
+ * only hex (#rgb/#rrggbb/#rrggbbaa, alpha ignored) and the handful of CSS
+ * named colours the renderer's safeColor() accepts are parsed; rgb()/hsl()/
+ * transparent/unknown resolve to null so the contrast check SKIPS them rather
+ * than guessing (never a false positive on a colour it cannot reason about).
+ */
+const NAMED_RGB: Record<string, [number, number, number]> = {
+  black: [0, 0, 0],
+  white: [255, 255, 255],
+  red: [255, 0, 0],
+  blue: [0, 0, 255],
+  green: [0, 128, 0], // CSS 'green' is #008000, not #00ff00
+  gray: [128, 128, 128],
+  grey: [128, 128, 128],
+};
+
+function parseColorToRgb(value: string | undefined): [number, number, number] | null {
+  if (!value) return null;
+  const v = value.trim().toLowerCase();
+  if (v in NAMED_RGB) return NAMED_RGB[v];
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/.exec(v);
+  if (!m) return null; // rgb()/hsl()/transparent/unrecognized → skip, don't guess
+  let h = m[1];
+  if (h.length === 3 || h.length === 4) h = h.split('').map((c) => c + c).join(''); // expand shorthand
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+/** WCAG relative luminance of an sRGB colour. */
+function relativeLuminance([r, g, b]: [number, number, number]): number {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/** WCAG contrast ratio between two colours (1:1 identical … 21:1 black/white). */
+function contrastRatio(a: [number, number, number], b: [number, number, number]): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * The opaque colour a text layer sits ON: the nearest layer BEHIND it (lower in
+ * the flattened render order) that is a full-canvas `background` or an
+ * overlapping `shape` with a fill. Falls back to the canvas background colour.
+ * Returns undefined when no opaque backdrop can be determined (→ skip the check).
+ */
+function resolveBackgroundColor(
+  ordered: Layer[],
+  textIndex: number,
+  textRect: Rect,
+  canvasBackground?: string
+): string | undefined {
+  for (let i = textIndex - 1; i >= 0; i--) {
+    const l = ordered[i];
+    if (l.visible === false) continue;
+    if (l.type === 'background') return l.shapeProperties?.fillColor ?? canvasBackground;
+    if (l.type === 'shape' && l.shapeProperties?.fillColor && rectsIntersect(textRect, l.position)) {
+      return l.shapeProperties.fillColor;
+    }
+  }
+  return canvasBackground;
+}
+
+/** WCAG AA threshold for large text — headlines/prices, the F9 case, are large. */
+const MIN_TEXT_CONTRAST = 3;
+
+/**
  * Runs every heuristic QA check over one already-resolved render input (the
  * PRESET's target canvas + the layout plan's layers/safeZones — the exact
  * same inputs render-engine.ts hands to buildRenderHtml()). Returns
@@ -61,13 +132,13 @@ function hasUsableImageSource(layer: Layer, imageSources?: Record<string, string
  * warnings; never throws, never fails a render.
  */
 export function assessRenderQuality(input: {
-  canvas: { width: number; height: number };
+  canvas: { width: number; height: number; backgroundColor?: string };
   layers: Layer[];
   safeZones?: SafeZone[];
   /** Phase 3 Step 1 (additive) — layerId -> injected composited source, same map handed to buildRenderHtml(). */
   imageSources?: Record<string, string>;
 }): RenderWarning[] {
-  const { layers, safeZones, imageSources } = input;
+  const { canvas, layers, safeZones, imageSources } = input;
   const warnings: RenderWarning[] = [];
 
   const visibleLayers = flattenLayers(layers).filter((layer) => layer.visible !== false);
@@ -102,6 +173,41 @@ export function assessRenderQuality(input: {
         layerId: layer.id,
         severity: 'warning',
         details: { estimatedLines, capacityLines, maxLines },
+      });
+    }
+  }
+
+  // 6. low_text_contrast — the F9 "white-on-light unreadable" case. For each
+  // visible text layer, compare its colour to the opaque backdrop behind it and
+  // warn when the WCAG contrast ratio is below the large-text threshold. Purely
+  // a REVIEWER-FACING warning (this module never changes render output) and
+  // best-effort: colours it cannot parse (rgb()/hsl()) or backdrops it cannot
+  // determine are skipped, never guessed.
+  for (let i = 0; i < visibleLayers.length; i++) {
+    const layer = visibleLayers[i];
+    if (layer.type !== 'text') continue;
+    const tp = layer.textProperties;
+    if (!tp || !tp.content || tp.content.length === 0) continue;
+
+    const fg = parseColorToRgb(tp.color ?? '#000000'); // html-renderer defaults text to #000000
+    if (!fg) continue;
+    const backdrop = resolveBackgroundColor(visibleLayers, i, layer.position, canvas.backgroundColor);
+    const bg = parseColorToRgb(backdrop);
+    if (!bg) continue;
+
+    const ratio = contrastRatio(fg, bg);
+    if (ratio < MIN_TEXT_CONTRAST) {
+      warnings.push({
+        code: 'low_text_contrast',
+        message: `Text layer "${layer.name}" has low contrast (~${ratio.toFixed(1)}:1) against its background — it may be hard to read`,
+        layerId: layer.id,
+        severity: 'warning',
+        details: {
+          contrastRatio: Number(ratio.toFixed(2)),
+          threshold: MIN_TEXT_CONTRAST,
+          foreground: tp.color ?? '#000000',
+          background: backdrop ?? null,
+        },
       });
     }
   }

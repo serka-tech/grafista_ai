@@ -229,6 +229,11 @@ function buildLayerHtml(
       }
 
       const styles = [...baseStyles, `font-family:'${fontResolution.resolvedFont}', sans-serif`];
+      // F9 (render legibility): break over-long unbreakable strings (long titles,
+      // addresses, URLs) onto the next line instead of letting them spill past the
+      // box's right edge and off the canvas. Only affects text that would otherwise
+      // overflow horizontally — no change to text that already fits.
+      styles.push('overflow-wrap:break-word', 'word-break:break-word');
       if (tp?.fontSize !== undefined) styles.push(`font-size:${tp.fontSize}px`);
 
       const requestedWeight = tp?.fontWeight ?? '400';

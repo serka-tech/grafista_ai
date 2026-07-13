@@ -80,6 +80,22 @@ function safeZone(overrides: Partial<SafeZone> = {}): SafeZone {
   } as SafeZone;
 }
 
+function shapeLayer(overrides: Partial<Layer> = {}): Layer {
+  return {
+    id: 'shape-1',
+    name: 'Panel',
+    type: 'shape',
+    position: { x: 0, y: 0, width: 1080, height: 1080, rotation: 0, anchor: 'top-left' },
+    zIndex: 1,
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    shapeProperties: { fillColor: '#0a1f44' },
+    ...overrides,
+  } as Layer;
+}
+
 const canvas = { width: 1080, height: 1080 };
 
 describe('assessRenderQuality', () => {
@@ -341,6 +357,68 @@ describe('assessRenderQuality', () => {
       expect(warnings.find((w) => w.layerId === 'child-image' && w.code === 'missing_image_source')).toBeDefined();
       // The 'group' parent itself is neither image/logo/text, so it must not raise anything of its own.
       expect(warnings.find((w) => w.layerId === 'group-parent')).toBeUndefined();
+    });
+  });
+
+  describe('low_text_contrast (F9)', () => {
+    const coloredText = (color: string) =>
+      textLayer({
+        textProperties: {
+          content: 'Fiyat 4.500.000 TL',
+          fontFamily: 'Roboto',
+          fontSize: 48,
+          fontWeight: '700',
+          color,
+          alignment: 'left',
+        },
+      });
+
+    it('warns when text is low-contrast against the canvas background', () => {
+      const warnings = assessRenderQuality({
+        canvas: { width: 1080, height: 1080, backgroundColor: '#ffffff' },
+        layers: [coloredText('#ffffff')],
+        safeZones: [],
+      });
+      const w = warnings.find((x) => x.code === 'low_text_contrast');
+      expect(w).toBeDefined();
+      expect(w!.severity).toBe('warning');
+      expect(w!.layerId).toBe('text-1');
+    });
+
+    it('does not warn for dark text on a light background (good contrast)', () => {
+      const warnings = assessRenderQuality({
+        canvas: { width: 1080, height: 1080, backgroundColor: '#ffffff' },
+        layers: [coloredText('#111111')],
+        safeZones: [],
+      });
+      expect(warnings.find((x) => x.code === 'low_text_contrast')).toBeUndefined();
+    });
+
+    it('does not warn for white text on a dark panel behind it (listing-card navy case)', () => {
+      const warnings = assessRenderQuality({
+        canvas: { width: 1080, height: 1080, backgroundColor: '#ffffff' },
+        layers: [shapeLayer(), coloredText('#ffffff')], // shapeLayer defaults to navy #0a1f44
+        safeZones: [],
+      });
+      expect(warnings.find((x) => x.code === 'low_text_contrast')).toBeUndefined();
+    });
+
+    it('skips colours it cannot parse (rgb()) rather than guessing', () => {
+      const warnings = assessRenderQuality({
+        canvas: { width: 1080, height: 1080, backgroundColor: '#ffffff' },
+        layers: [coloredText('rgb(255,255,255)')],
+        safeZones: [],
+      });
+      expect(warnings.find((x) => x.code === 'low_text_contrast')).toBeUndefined();
+    });
+
+    it('skips when no opaque backdrop can be determined', () => {
+      const warnings = assessRenderQuality({
+        canvas: { width: 1080, height: 1080 }, // no backgroundColor, no backdrop layer
+        layers: [coloredText('#ffffff')],
+        safeZones: [],
+      });
+      expect(warnings.find((x) => x.code === 'low_text_contrast')).toBeUndefined();
     });
   });
 });
