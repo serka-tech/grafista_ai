@@ -74,6 +74,13 @@ This is the other half of the actual bug — the palette must WIN over conflicti
 - (r2-3) `extractPaletteFromAsset` returns a discriminated outcome
   `{ palette: BrandPalette; status: 'ok' | 'empty' | 'failed'; stage?: string }` (never throws)
   so the caller can tell an empty extraction apart from a storage/provider/JSON/schema failure.
+- (r3-2) The extraction MUST reach a VISION-capable model regardless of `AI_DEFAULT_PROVIDER`.
+  Do NOT blindly force `provider: env.AI_DEFAULT_PROVIDER` (the router allows capability-bypassing
+  overrides, so a text-only provider like `claude` could be selected and silently ignore the
+  image). First read the model-router routing for `style_analysis`: if that taskType already
+  routes to a vision provider with fallback, omit the explicit `provider` and rely on it (same
+  reasoning as image_generation in visual-generation.ts:196). Otherwise pass an explicitly
+  vision-capable provider. Verify against the router's routing table, don't assume.
 - (r2-4b) `brand-assets` repo: ONE atomic metadata merge that writes BOTH `palette` and
   `paletteExtraction` together — `SET metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb`
   (so a concurrent write is not clobbered and status can never appear without its palette).
@@ -94,9 +101,10 @@ bytes. A pixel-variance guard needs a post-render sampled-pixel stage. Moved to 
 NOT built this cycle.
 
 ### 5. Tests (findings 9, 12 — mirror `apps/api/src/__tests__` patterns)
-- `palette-extraction`: valid `BrandPalette` returned + validated (mock/fake provider);
-  non-raster or missing-bytes asset → `[]`; provider/JSON/schema failure → `[]` and NEVER
-  throws; extraction status recorded.
+- `palette-extraction`: assert the COMPLETE discriminated outcome (r3-1) — a valid extraction
+  returns `{status:'ok', palette:[...]}` (validated); a non-raster or missing-bytes asset
+  returns `{status:'empty', palette:[]}`; a provider/JSON/schema failure returns
+  `{status:'failed', stage:..., palette:[]}` and NEVER throws.
 - `PATCH .../palette`: 200 valid (persisted to `metadata.palette`); 400 invalid hex; 404
   missing asset; 404 wrong asset type; cross-org → 404 (mirror `org-isolation.test.ts`).
 - `visual-generation` injection: with a palette set, the COMPLETE built provider request

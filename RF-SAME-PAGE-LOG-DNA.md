@@ -53,3 +53,13 @@ VERDICT: NOT YET
 - ACCEPTED (r2-4b): single atomic metadata merge writes palette + paletteExtraction together (COALESCE(metadata,'{}') || $3::jsonb).
 - ACCEPTED (r2-5): drop Promise.race; rely on the provider's own request timeout; asset persisted first; abort-signal cancellation deferred (RF-ISSUES).
 - ACCEPTED-clarify (r2-6): added an explicit Post-deploy acceptance section (owner, procedure, success threshold, tracking) for the pixel-level proof.
+
+## Round 3
+### Integrator findings (Codex, verbatim)
+- [FIX] The test plan still expects extraction failures to return `[]`, contradicting the new discriminated `{palette,status,stage}` contract -> Update every extraction assertion to validate the complete outcome object and expected status/stage.
+- [FIX] Palette extraction explicitly passes `AI_DEFAULT_PROVIDER`, and the router permits capability-bypassing overrides, so `claude` can be selected despite ignoring image inputs -> Route extraction through a vision-capable provider by capability instead of forcing the default provider.
+
+VERDICT: NOT YET
+### Visionary response (Fable/Claude)
+- ACCEPTED (r3-1): test wording updated to assert the full { palette, status, stage } outcome, not [].
+- ACCEPTED (r3-2): extraction must reach a vision-capable model regardless of AI_DEFAULT_PROVIDER; verify style_analysis routing, omit forced provider or pass a vision provider explicitly.
