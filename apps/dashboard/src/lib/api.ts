@@ -210,8 +210,11 @@ export const api = {
     fetchAPI<{ data: any }>(`/api/creative-qa/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
   // Visual Generation (Phase 2 Step 7)
-  runVisualGeneration: (layoutPlanId: string) =>
-    fetchAPI<{ data: any[]; total: number }>(`/api/layout-plans/${layoutPlanId}/visual-generation`, { method: 'POST' }),
+  runVisualGeneration: (layoutPlanId: string, provider?: 'openai' | 'kie-ai') =>
+    fetchAPI<{ data: any[]; total: number }>(`/api/layout-plans/${layoutPlanId}/visual-generation`, {
+      method: 'POST',
+      ...(provider ? { body: JSON.stringify({ provider }) } : {}),
+    }),
   listVisualOutputs: (layoutPlanId: string) =>
     fetchAPI<{ data: any[]; total: number }>(`/api/layout-plans/${layoutPlanId}/visual-generation`),
   getVisualOutput: (id: string) => fetchAPI<{ data: any }>(`/api/visual-outputs/${id}`),

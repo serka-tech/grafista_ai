@@ -153,7 +153,14 @@ async function resolveImageBytes(image: VisualGenerationImage): Promise<{ body: 
  * image's download/storage failed). Provider- or schema-level failure persists ONE
  * 'failed' row and then rethrows (502) — never silently swallowed.
  */
-export async function runVisualGeneration(layoutPlanId: string, requestedBy: string): Promise<VisualGenerationResult> {
+/** Image providers a caller may explicitly pick (KIE vs OpenAI comparison). */
+export type VisualProvider = 'openai' | 'kie-ai';
+
+export async function runVisualGeneration(
+  layoutPlanId: string,
+  requestedBy: string,
+  provider?: VisualProvider
+): Promise<VisualGenerationResult> {
   // GATE — must stay the first await; nothing below runs for an uncleared layout plan.
   await assertReadyForVisualProduction(layoutPlanId);
 
@@ -230,9 +237,10 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
   // Snapshot of exactly what was sent to the image provider, persisted on every row.
   const promptSnapshot = `${prompt.system}\n\n${prompt.user}`;
 
-  // No explicit `provider` here (unlike the text services): image_generation has its
-  // own routing entry (primary 'openai', fallback 'kie-ai') and AI_DEFAULT_PROVIDER
-  // only knows text providers — forcing it would break the image fallback chain.
+  // Provider selection: when the caller explicitly picks one (KIE-vs-OpenAI
+  // comparison), pass it through so the router bypasses capability filtering and
+  // uses exactly that adapter. When omitted, image_generation's own routing
+  // entry decides (both openai and kie-ai are image-capable now).
   //
   // Phase 3 Step 3: limited schema-retry via callAiForJson (same N1 pattern as
   // layout-generation), with one deliberate persistence rule — the 'failed'
@@ -244,6 +252,7 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
     router: modelRouter,
     request: {
       taskType: 'image_generation',
+      ...(provider ? { provider } : {}),
       systemPrompt: prompt.system,
       userPrompt: prompt.user,
       outputFormat: 'json',

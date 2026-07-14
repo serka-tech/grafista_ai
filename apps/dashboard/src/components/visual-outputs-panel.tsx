@@ -1046,13 +1046,14 @@ export function VisualOutputsPanel({
     loadOutputs().finally(() => setLoading(false));
   }, [loadOutputs]);
 
-  async function handleGenerate() {
+  async function handleGenerate(provider?: 'openai' | 'kie-ai') {
     setGenerating(true);
     setGenerateError(null);
     try {
       // Each run produces a brand-new alternative set (not idempotent), so
-      // prepend the fresh set on top of the existing history.
-      const res = await api.runVisualGeneration(layoutPlanId);
+      // prepend the fresh set on top of the existing history. An explicit
+      // provider (OpenAI vs KIE) lets the user compare the two side by side.
+      const res = await api.runVisualGeneration(layoutPlanId, provider);
       setOutputs((prev) => [...(res.data ?? []), ...prev]);
     } catch (err: any) {
       const message = err.status === 409
@@ -1078,14 +1079,24 @@ export function VisualOutputsPanel({
         <span className="form-label" style={{ marginBottom: 0 }}>
           🖼️ Görsel Alternatifler {outputs.length > 0 ? `(${outputs.length})` : ''}
         </span>
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={!canRun || !creativeQaApproved || generating}
-          title={generateTitle}
-          onClick={handleGenerate}
-        >
-          {generating ? '⏳ Üretiliyor...' : '▶ Yeni Alternatif Üret'}
-        </button>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={!canRun || !creativeQaApproved || generating}
+            title={`${generateTitle} (OpenAI gpt-image-1)`}
+            onClick={() => handleGenerate('openai')}
+          >
+            {generating ? '⏳ Üretiliyor...' : '▶ OpenAI ile Üret'}
+          </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={!canRun || !creativeQaApproved || generating}
+            title={`${generateTitle} (KIE nano-banana)`}
+            onClick={() => handleGenerate('kie-ai')}
+          >
+            {generating ? '⏳ Üretiliyor...' : '▶ KIE ile Üret'}
+          </button>
+        </div>
       </div>
 
       {!creativeQaApproved && (

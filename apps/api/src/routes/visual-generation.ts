@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { store } from '../data/store.js';
 import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/async-handler.js';
-import { runVisualGeneration } from '../services/visual-generation.js';
+import { runVisualGeneration, type VisualProvider } from '../services/visual-generation.js';
 import { getFileAccess } from '../storage/file-service.js';
 import type { StorageProviderName } from '../storage/types.js';
 import { assertClientAccessible } from '../auth/client-access.js';
@@ -27,7 +27,18 @@ visualGenerationRouter.post(
   requireAuth,
   requirePermission('visual_generation:run'),
   asyncHandler(async (req: Request, res: Response) => {
-    const { outputs } = await runVisualGeneration(req.params.layoutPlanId, req.user!.id);
+    // Optional explicit provider (KIE-vs-OpenAI comparison). Whitelist strictly:
+    // the router bypasses capability filtering for an explicit provider, so an
+    // unvalidated value could force a non-image adapter. Anything else -> 400.
+    const rawProvider = req.body?.provider;
+    let provider: VisualProvider | undefined;
+    if (rawProvider !== undefined) {
+      if (rawProvider !== 'openai' && rawProvider !== 'kie-ai') {
+        return res.status(400).json({ error: "provider must be 'openai' or 'kie-ai'" });
+      }
+      provider = rawProvider;
+    }
+    const { outputs } = await runVisualGeneration(req.params.layoutPlanId, req.user!.id, provider);
     res.status(201).json({ data: outputs, total: outputs.length });
   })
 );
