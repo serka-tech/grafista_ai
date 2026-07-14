@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, friendlyAiErrorMessage, pollRenderJob, resolveApiFileUrl, TERMINAL_RENDER_JOB_STATUSES } from '@/lib/api';
+import { api, friendlyAiErrorMessage, pollForNewVisualOutputs, pollRenderJob, resolveApiFileUrl, TERMINAL_RENDER_JOB_STATUSES } from '@/lib/api';
 
 const OUTPUT_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
@@ -155,6 +155,15 @@ function friendlyErrorSummary(raw: string): string {
   if (lower.includes('provider') || lower.includes('createtask') || lower.includes('attempts failed') || lower.includes('ai response'))
     return 'Provider geçici olarak yanıt vermedi. Tekrar deneyebilirsiniz.';
   return 'Bir hata oluştu.';
+}
+
+/** Prepends `incoming` rows onto `existing`, dropping any duplicate ids (an id
+ * already present in `existing` keeps its incoming version, others stay). Keeps
+ * the newest-first order the panel renders in and makes reconcile-then-prepend
+ * idempotent so a row never appears twice. */
+function mergeOutputsById(incoming: any[], existing: any[]): any[] {
+  const incomingIds = new Set(incoming.map((o) => o.id));
+  return [...incoming, ...existing.filter((o) => !incomingIds.has(o.id))];
 }
 
 function ProviderErrorNote({ message }: { message: string | null | undefined }) {
@@ -1049,19 +1058,42 @@ export function VisualOutputsPanel({
   async function handleGenerate(provider?: 'openai' | 'kie-ai') {
     setGenerating(true);
     setGenerateError(null);
+    // Snapshot the current row ids so a post-failure reconcile can tell which
+    // rows a failed run actually produced server-side (see pollForNewVisualOutputs).
+    const beforeIds = new Set<string>(outputs.map((o) => o.id));
     try {
       // Each run produces a brand-new alternative set (not idempotent), so
       // prepend the fresh set on top of the existing history. An explicit
       // provider (OpenAI vs KIE) lets the user compare the two side by side.
       const res = await api.runVisualGeneration(layoutPlanId, provider);
-      setOutputs((prev) => [...(res.data ?? []), ...prev]);
+      setOutputs((prev) => mergeOutputsById(res.data ?? [], prev));
     } catch (err: any) {
-      const message = err.status === 409
-        ? (err.message ?? 'Görsel üretmek için Creative QA raporunun onaylı veya geçmiş (passed) olması gerekir.')
-        : err.status === 502
-          ? `${friendlyAiErrorMessage(err, 'Görsel üretim başlatılamadı.')} Başarısız deneme kayıt altına alındı.`
-          : (err.message ?? 'Görsel üretim başlatılamadı.');
-      setGenerateError(message);
+      // 409 = Creative QA gate — the run never starts, so no row is written and
+      // there is nothing to reconcile. Show the gating message immediately.
+      if (err?.status === 409) {
+        setGenerateError(err.message ?? 'Görsel üretmek için Creative QA raporunun onaylı veya geçmiş (passed) olması gerekir.');
+        return;
+      }
+      // Any other failure is AMBIGUOUS: image generation is slow (gpt-image-1
+      // ~16-70s) and a front-layer proxy/edge timeout on that long synchronous
+      // request looks identical to a real provider failure here. The server
+      // persists the run's rows either way, so reconcile against the list.
+      const recovered = await pollForNewVisualOutputs(layoutPlanId, beforeIds);
+      const succeeded = recovered.filter((o) => o.status === 'generated');
+      if (succeeded.length > 0) {
+        // A new 'generated' row landed — the run actually SUCCEEDED; the thrown
+        // error was a timeout, not a failure. Surface the images, no error.
+        setOutputs((prev) => mergeOutputsById(recovered, prev));
+      } else if (recovered.length > 0) {
+        // Only new 'failed' rows — a genuine provider failure (already persisted).
+        setOutputs((prev) => mergeOutputsById(recovered, prev));
+        setGenerateError(`${friendlyAiErrorMessage(err, 'Görsel üretim başarısız oldu.')} Başarısız deneme kayıt altına alındı.`);
+      } else {
+        // Nothing new arrived within the window — the run may still be finishing.
+        setGenerateError(
+          `${err?.message ?? 'Görsel üretim başlatılamadı.'} Üretim uzun sürüyorsa alternatifler kısa süre içinde listede görünebilir; sayfayı yenileyin.`
+        );
+      }
     } finally {
       setGenerating(false);
     }

@@ -361,3 +361,46 @@ export function pollRenderJob(
     if (timer) clearTimeout(timer);
   };
 }
+
+/**
+ * Reconciles a visual-generation run against the server's outputs list, used
+ * when the POST /visual-generation call itself failed. Image generation is slow
+ * (gpt-image-1 ~16-70s), and a front-layer proxy/edge timeout on that long
+ * synchronous request is INDISTINGUISHABLE from a real provider failure at the
+ * client — both surface as a thrown ApiError. But the server persists every
+ * run's rows regardless of whether the client's connection survived, so the
+ * outputs list is the source of truth: a NEW 'generated' row means the run
+ * actually succeeded (the error was a timeout), a NEW 'failed' row means a
+ * genuine provider failure.
+ *
+ * Polls GET /visual-generation (first check immediate) until at least one row
+ * whose id is NOT in `beforeIds` appears, or the window elapses. Returns the new
+ * rows (possibly empty on timeout). Transient poll failures are swallowed and
+ * retried — mirrors pollRenderJob's resilience.
+ */
+export async function pollForNewVisualOutputs(
+  layoutPlanId: string,
+  beforeIds: Set<string>,
+  options?: { intervalMs?: number; timeoutMs?: number }
+): Promise<any[]> {
+  const intervalMs = options?.intervalMs ?? 4000;
+  const timeoutMs = options?.timeoutMs ?? 80_000;
+  const deadline = Date.now() + timeoutMs;
+
+  // First check is immediate: a genuine fast failure already wrote its 'failed'
+  // row before the POST threw, so this returns without waiting a full interval.
+  for (let first = true; ; first = false) {
+    if (!first) {
+      if (Date.now() >= deadline) return [];
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    try {
+      const res = await api.listVisualOutputs(layoutPlanId);
+      const fresh = (res.data ?? []).filter((o: any) => o?.id && !beforeIds.has(o.id));
+      if (fresh.length > 0) return fresh;
+    } catch {
+      // Transient poll failure — keep trying until the deadline.
+    }
+    if (Date.now() >= deadline) return [];
+  }
+}
