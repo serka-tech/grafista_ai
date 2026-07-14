@@ -15,7 +15,6 @@
 import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, paletteExtractionTemplate } from '@grafista/prompt-engine';
 import { BrandPaletteSchema, type BrandPalette } from '@grafista/schemas';
-import { env } from '../config/env.js';
 import { getObjectBuffer } from '../storage/file-service.js';
 import { callAiForJson, type ValidateResult } from './ai-call-helper.js';
 import type { BrandAsset } from '../db/repositories/brand-assets.js';
@@ -33,9 +32,19 @@ function validatePalette(raw: unknown): ValidateResult<BrandPalette> {
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, error: parsed.error.message };
 }
 
-export async function extractPaletteFromAsset(asset: BrandAsset, clientName: string): Promise<BrandPalette> {
-  if (!asset.storageKey || !asset.storageProvider || !asset.storageBucket) return [];
-  if (!(asset.mimeType ?? '').startsWith('image/')) return [];
+export type PaletteExtractionOutcome =
+  | { palette: BrandPalette; status: 'ok' }
+  | { palette: BrandPalette; status: 'empty' }
+  | { palette: BrandPalette; status: 'failed'; stage: string };
+
+const RASTER_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+export async function extractPaletteFromAsset(
+  asset: BrandAsset,
+  clientName: string
+): Promise<PaletteExtractionOutcome> {
+  if (!asset.storageKey || !asset.storageProvider || !asset.storageBucket) return { palette: [], status: 'empty' };
+  if (!asset.mimeType || !RASTER_MIME_TYPES.has(asset.mimeType)) return { palette: [], status: 'empty' };
 
   try {
     const buffer = await getObjectBuffer({
@@ -50,10 +59,9 @@ export async function extractPaletteFromAsset(asset: BrandAsset, clientName: str
     const outcome = await callAiForJson<BrandPalette>({
       router: modelRouter,
       request: {
-        // Reuse the vision-capable route already wired for reference analysis —
-        // no model-router change; provider follows the same env as Design DNA.
+        // style_analysis requires vision in the router. Do not supply an explicit
+        // provider: overrides bypass capability filtering.
         taskType: 'style_analysis',
-        provider: env.AI_DEFAULT_PROVIDER,
         images: [dataUri],
         systemPrompt: prompt.system,
         userPrompt: prompt.user,
@@ -68,12 +76,14 @@ export async function extractPaletteFromAsset(asset: BrandAsset, clientName: str
 
     if (!outcome.ok) {
       console.warn(`[palette-extraction] extraction failed for asset ${asset.id} — stage=${outcome.stage}`);
-      return [];
+      return { palette: [], status: 'failed', stage: outcome.stage };
     }
     console.log(`[palette-extraction] asset ${asset.id} — extracted ${outcome.data.length} colors`);
-    return outcome.data;
+    return outcome.data.length > 0
+      ? { palette: outcome.data, status: 'ok' }
+      : { palette: [], status: 'empty' };
   } catch (err) {
     console.warn(`[palette-extraction] error for asset ${asset.id}:`, err instanceof Error ? err.message : err);
-    return [];
+    return { palette: [], status: 'failed', stage: 'storage' };
   }
 }

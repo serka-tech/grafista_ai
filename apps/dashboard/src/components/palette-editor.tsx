@@ -50,6 +50,7 @@ export function PaletteEditor({
     setStatus('idle');
   }
   function add() {
+    if (colors.length >= 24) return;
     setColors((cs) => [...cs, { hex: '#000000', role: 'other', name: '' }]);
     setStatus('idle');
   }
@@ -125,8 +126,8 @@ export function PaletteEditor({
         </div>
       ))}
       <div style={{ display: 'flex', gap: '8px' }}>
-        <button type="button" className="btn btn-secondary" onClick={add}>
-          + Renk Ekle
+        <button type="button" className="btn btn-secondary" onClick={add} disabled={colors.length >= 24}>
+          + Renk Ekle ({colors.length}/24)
         </button>
         <button type="button" className="btn btn-primary" onClick={save} disabled={status === 'saving'}>
           {status === 'saving' ? 'Kaydediliyor...' : status === 'saved' ? 'Kaydedildi ✓' : 'Paleti Kaydet'}

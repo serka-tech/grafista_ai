@@ -52,7 +52,10 @@ export function describeLayoutForImagePrompt(layoutPlan: LayoutPlan): string {
   // can differ from canvas.backgroundColor — prefer it so the description matches.
   const bgLayer = all.find((l) => l.type === 'background' && l.shapeProperties?.fillColor);
   const bg = bgLayer?.shapeProperties?.fillColor || canvas.backgroundColor || '#FFFFFF';
-  lines.push(`Overall format: ${layoutPlan.format}. Background: solid ${bg}.`);
+  lines.push(
+    `Overall format: ${layoutPlan.format}. Background color reference: ${bg}. ` +
+      'The separately supplied brand palette overrides conflicting layout-level color choices; never make the whole canvas one solid color.'
+  );
 
   const visible = all
     .filter((l) => l.visible !== false && l.type !== 'background')

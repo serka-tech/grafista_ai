@@ -90,14 +90,16 @@ export const brandAssetsRepo = {
     return mapRow(rows[0]);
   },
 
-  /** Replaces the asset's metadata blob (used to store/edit the extracted brand palette). */
+  /** Atomically merges fields into the asset metadata JSONB. */
   async updateMetadata(
     clientId: string,
     id: string,
     metadata: Record<string, unknown>
   ): Promise<BrandAsset | undefined> {
     const { rows } = await pool.query(
-      'UPDATE brand_assets SET metadata = $3 WHERE client_id = $1 AND id = $2 RETURNING *',
+      `UPDATE brand_assets
+       SET metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+       WHERE client_id = $1 AND id = $2 RETURNING *`,
       [clientId, id, JSON.stringify(metadata)]
     );
     return rows[0] ? mapRow(rows[0]) : undefined;

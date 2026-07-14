@@ -67,15 +67,16 @@ brandAssetsRouter.post(
     // Best-effort — extraction failure keeps the asset, palette stays empty for
     // the user to fill in manually.
     let finalAsset = asset;
-    if (type === 'color_palette' && asset.mimeType?.startsWith('image/')) {
-      const palette = await extractPaletteFromAsset(asset, client.name);
-      if (palette.length > 0) {
-        finalAsset =
-          (await store.brandAssets.updateMetadata(req.params.clientId, id, {
-            ...(asset.metadata ?? {}),
-            palette,
-          })) ?? asset;
-      }
+    if (type === 'color_palette') {
+      const extraction = await extractPaletteFromAsset(asset, client.name);
+      finalAsset =
+        (await store.brandAssets.updateMetadata(req.params.clientId, id, {
+          palette: extraction.palette,
+          paletteExtraction: {
+            status: extraction.status,
+            ...('stage' in extraction ? { stage: extraction.stage } : {}),
+          },
+        })) ?? asset;
     }
     res.status(201).json({ data: finalAsset });
   })
@@ -90,7 +91,7 @@ brandAssetsRouter.patch(
   asyncHandler(async (req: Request, res: Response) => {
     await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
     const asset = await store.brandAssets.getById(req.params.clientId, req.params.assetId);
-    if (!asset) return res.status(404).json({ error: 'Varlık bulunamadı' });
+    if (!asset || asset.type !== 'color_palette') return res.status(404).json({ error: 'Varlık bulunamadı' });
 
     const parsed = BrandPaletteSchema.safeParse(req.body?.palette);
     if (!parsed.success) {
@@ -98,7 +99,6 @@ brandAssetsRouter.patch(
     }
 
     const updated = await store.brandAssets.updateMetadata(req.params.clientId, req.params.assetId, {
-      ...(asset.metadata ?? {}),
       palette: parsed.data,
     });
     res.json({ data: updated });

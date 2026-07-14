@@ -4,6 +4,8 @@ import { app } from '../app.js';
 import { startTestServer } from '../test/http-test-server.js';
 import { pool } from '../db/pool.js';
 import { TEST_USERS, TEST_USER_PASSWORD } from '../test/global-setup.js';
+import { brandAssetsRepo } from '../db/repositories/brand-assets.js';
+import { v4 as uuid } from 'uuid';
 
 const testServer = startTestServer(app);
 afterAll(() => testServer.close());
@@ -430,6 +432,18 @@ describe('4. Happy path — approved Creative QA, mocked provider, real storage 
         await createQaClearedLayoutPlan('Visual Gen Happy Path Client');
 
       const owner = await loginAs(TEST_USERS.OWNER);
+      await brandAssetsRepo.create({
+        id: uuid(),
+        clientId,
+        type: 'color_palette',
+        name: 'Approved palette',
+        metadata: {
+          palette: [
+            { hex: '#123456', role: 'primary', name: 'Lacivert' },
+            { hex: '#FEDCBA', role: 'accent', name: 'Krem' },
+          ],
+        },
+      });
       const res = await owner.post(`/api/layout-plans/${layoutPlanId}/visual-generation`);
       expect(res.status).toBe(201);
       expect(res.body.total).toBe(2);
@@ -480,6 +494,11 @@ describe('4. Happy path — approved Creative QA, mocked provider, real storage 
       }
       // The prompt snapshot captured what was actually sent (canvas dims are template variables).
       expect(String(rows.rows[0].prompt_snapshot)).toContain('1080');
+      const completePrompt = String(rows.rows[0].prompt_snapshot);
+      expect(completePrompt).toContain('#123456 — primary / main brand color');
+      expect(completePrompt).toContain('#FEDCBA — accent / highlight');
+      expect(completePrompt).toContain('approved BRAND PALETTE overrides every conflicting color value');
+      expect(completePrompt).not.toContain('Background: solid');
 
       // The bytes really landed in object storage and match the provider payload exactly.
       const { getStorageProviderByName } = await import('../storage/factory.js');

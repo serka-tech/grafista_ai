@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api, resolveApiFileUrl } from '@/lib/api';
 import { AssetIntakeNotice } from '@/components/asset-intake-notice';
 import { FileDropzone } from '@/components/file-dropzone';
+import { PaletteEditor } from '@/components/palette-editor';
 
 export default function BrandAssetsPage({ params }: { params: { id: string } }) {
   const [assets, setAssets] = useState<any[]>([]);
@@ -107,8 +108,10 @@ export default function BrandAssetsPage({ params }: { params: { id: string } }) 
               value={file}
               onChange={setFile}
               disabled={status === 'uploading'}
-              accept="image/png,image/jpeg,image/webp,image/svg+xml,application/pdf"
-              hint="Logo, renk kartelası ve görseller için PNG, JPG, WEBP, SVG veya PDF"
+              accept={type === 'color_palette' ? 'image/png,image/jpeg,image/webp' : 'image/png,image/jpeg,image/webp,image/svg+xml,application/pdf'}
+              hint={type === 'color_palette'
+                ? 'Otomatik renk çıkarımı için PNG, JPG veya WEBP kartela yükleyin'
+                : 'Logo ve görseller için PNG, JPG, WEBP, SVG veya PDF'}
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={status === 'uploading'}>
@@ -144,6 +147,14 @@ export default function BrandAssetsPage({ params }: { params: { id: string } }) 
                   )}
                   <div className="card-title">{asset.name}</div>
                   <span className="badge badge-info" style={{ marginTop: '8px' }}>{asset.type}</span>
+                  {asset.type === 'color_palette' && (
+                    <PaletteEditor
+                      clientId={params.id}
+                      assetId={asset.id}
+                      initial={asset.metadata?.palette ?? []}
+                      onSaved={() => loadAssets()}
+                    />
+                  )}
                 </div>
               ))}
             </div>

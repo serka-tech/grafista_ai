@@ -28,8 +28,10 @@ Creative QA — do NOT redesign it. Reproduce it faithfully:
   must be crisp, correctly spelled and fully legible — never cropped, warped or replaced
   with gibberish glyphs.
 - Keep the logo placement and its safe area exactly as planned.
-- Follow the color usage and typography notes verbatim.
-- Use the BRAND PALETTE below across the composition, applying each color in its stated role
+- Follow the typography notes verbatim. Treat layout and brief color usage notes as secondary
+  guidance only when they do not conflict with the approved BRAND PALETTE below.
+- The approved BRAND PALETTE overrides every conflicting color value in the DesignBrief,
+  layout description, or color usage notes. Use it across the composition in each stated role
   (primary, accent, background, text). Build a rich, on-brand design with these colors — do NOT
   reduce the whole canvas to one flat solid color; a single-color output is a failure. When no
   palette is given, take the colors from the layout description instead.

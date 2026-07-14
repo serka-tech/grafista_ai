@@ -54,14 +54,16 @@ const PALETTE_ROLE_LABEL: Record<string, string> = {
  */
 async function loadBrandPaletteText(clientId: string): Promise<string> {
   const assets = await store.brandAssets.listByClient(clientId);
-  for (const a of assets) {
+  for (let i = assets.length - 1; i >= 0; i -= 1) {
+    const a = assets[i];
     if (a.type !== 'color_palette') continue;
     const parsed = BrandPaletteSchema.safeParse((a.metadata as { palette?: unknown } | undefined)?.palette);
-    if (parsed.success && parsed.data.length > 0) {
-      return parsed.data
-        .map((c) => `- ${c.hex} — ${PALETTE_ROLE_LABEL[c.role] ?? c.role}${c.name ? ` (${c.name})` : ''}`)
-        .join('\n');
-    }
+    if (!parsed.success) continue;
+    const distinctHex = new Set(parsed.data.map((c) => c.hex.toUpperCase()));
+    if (distinctHex.size < 2) return '';
+    return parsed.data
+      .map((c) => `- ${c.hex} — ${PALETTE_ROLE_LABEL[c.role] ?? c.role}${c.name ? ` (${c.name})` : ''}`)
+      .join('\n');
   }
   return '';
 }
