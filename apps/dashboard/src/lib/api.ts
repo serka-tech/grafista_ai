@@ -127,6 +127,11 @@ export const api = {
   getBrandAssets: (clientId: string) => fetchAPI<{ data: any[] }>(`/api/clients/${clientId}/brand-assets`),
   uploadBrandAsset: (clientId: string, formData: FormData) =>
     uploadAPI<{ data: any }>(`/api/clients/${clientId}/brand-assets`, formData),
+  updateBrandAssetPalette: (clientId: string, assetId: string, palette: Array<{ hex: string; name?: string; role: string }>) =>
+    fetchAPI<{ data: any }>(`/api/clients/${clientId}/brand-assets/${assetId}/palette`, {
+      method: 'PATCH',
+      body: JSON.stringify({ palette }),
+    }),
 
   // Design References
   getDesignReferences: (clientId: string) => fetchAPI<{ data: any[] }>(`/api/clients/${clientId}/design-references`),

@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, resolveApiFileUrl } from '@/lib/api';
 import { AssetIntakeNotice } from '@/components/asset-intake-notice';
+import { FileDropzone } from '@/components/file-dropzone';
 
 export default function BrandAssetsPage({ params }: { params: { id: string } }) {
   const [assets, setAssets] = useState<any[]>([]);
@@ -100,10 +101,16 @@ export default function BrandAssetsPage({ params }: { params: { id: string } }) 
             İsim
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', marginTop: '4px' }} required />
           </label>
-          <label>
-            Dosya
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ width: '100%', marginTop: '4px' }} required />
-          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span>Dosya</span>
+            <FileDropzone
+              value={file}
+              onChange={setFile}
+              disabled={status === 'uploading'}
+              accept="image/png,image/jpeg,image/webp,image/svg+xml,application/pdf"
+              hint="Logo, renk kartelası ve görseller için PNG, JPG, WEBP, SVG veya PDF"
+            />
+          </div>
           <button type="submit" className="btn btn-primary" disabled={status === 'uploading'}>
             {status === 'uploading' ? 'Yükleniyor...' : 'Yükle'}
           </button>
@@ -127,6 +134,14 @@ export default function BrandAssetsPage({ params }: { params: { id: string } }) 
             <div className="card-grid">
               {items.map((asset: any) => (
                 <div key={asset.id} className="card">
+                  {asset.fileUrl && asset.mimeType?.startsWith('image/') && (
+                    // eslint-disable-next-line @next/next/no-img-element -- asset served by the API protected file route (or a storage redirect); next/image domain allowlisting is not configured
+                    <img
+                      src={resolveApiFileUrl(asset.fileUrl)}
+                      alt={asset.name}
+                      style={{ width: '100%', height: '140px', objectFit: 'contain', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-glass)', marginBottom: '12px' }}
+                    />
+                  )}
                   <div className="card-title">{asset.name}</div>
                   <span className="badge badge-info" style={{ marginTop: '8px' }}>{asset.type}</span>
                 </div>

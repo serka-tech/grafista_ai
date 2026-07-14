@@ -6,6 +6,8 @@ import { requireAuth, requirePermission } from '../auth/middleware.js';
 import { assertClientAccessible } from '../auth/client-access.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { storeUploadedFile, getFileAccess } from '../storage/file-service.js';
+import { extractPaletteFromAsset } from '../services/palette-extraction.js';
+import { BrandPaletteSchema } from '@grafista/schemas';
 
 export const brandAssetsRouter: Router = Router();
 
@@ -59,7 +61,47 @@ brandAssetsRouter.post(
       uploadedBy: req.user!.id,
       metadata: parseMetadata(metadata),
     });
-    res.status(201).json({ data: asset });
+
+    // A color palette (kartela) image: read its swatches now so the real brand
+    // colors reach the visual pipeline instead of being stored and ignored.
+    // Best-effort — extraction failure keeps the asset, palette stays empty for
+    // the user to fill in manually.
+    let finalAsset = asset;
+    if (type === 'color_palette' && asset.mimeType?.startsWith('image/')) {
+      const palette = await extractPaletteFromAsset(asset, client.name);
+      if (palette.length > 0) {
+        finalAsset =
+          (await store.brandAssets.updateMetadata(req.params.clientId, id, {
+            ...(asset.metadata ?? {}),
+            palette,
+          })) ?? asset;
+      }
+    }
+    res.status(201).json({ data: finalAsset });
+  })
+);
+
+// PATCH /api/clients/:clientId/brand-assets/:assetId/palette — replace the editable
+// brand palette on a color_palette asset (the user confirming/correcting extraction).
+brandAssetsRouter.patch(
+  '/:clientId/brand-assets/:assetId/palette',
+  requireAuth,
+  requirePermission('brand_assets:upload'),
+  asyncHandler(async (req: Request, res: Response) => {
+    await assertClientAccessible(req.user!.id, req.params.clientId); // cross-org / out-of-scope -> 404
+    const asset = await store.brandAssets.getById(req.params.clientId, req.params.assetId);
+    if (!asset) return res.status(404).json({ error: 'Varlık bulunamadı' });
+
+    const parsed = BrandPaletteSchema.safeParse(req.body?.palette);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Geçersiz palet', issues: parsed.error.issues });
+    }
+
+    const updated = await store.brandAssets.updateMetadata(req.params.clientId, req.params.assetId, {
+      ...(asset.metadata ?? {}),
+      palette: parsed.data,
+    });
+    res.json({ data: updated });
   })
 );
 

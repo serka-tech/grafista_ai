@@ -28,6 +28,26 @@ export const ColorSchema = z.object({
 });
 export type Color = z.infer<typeof ColorSchema>;
 
+// ─── Brand palette (extracted from an uploaded color-chart / kartela, editable) ──
+// Stored on the color_palette brand asset's metadata.palette. Unlike the older
+// dead ColorSchema, this carries an explicit ROLE so downstream image prompts can
+// use the palette richly (primary/accent/background/text) instead of collapsing
+// the whole design to one flat background color. Role/hex are the only fields the
+// visual pipeline reads; `name` is a human label.
+export const PaletteRoleEnum = z.enum(['primary', 'secondary', 'accent', 'background', 'text', 'other']);
+export type PaletteRole = z.infer<typeof PaletteRoleEnum>;
+
+export const PaletteColorSchema = z.object({
+  hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  name: z.string().max(60).optional(),
+  role: PaletteRoleEnum.default('other'),
+});
+export type PaletteColor = z.infer<typeof PaletteColorSchema>;
+
+/** The full editable brand palette (what vision extraction produces / the user edits). */
+export const BrandPaletteSchema = z.array(PaletteColorSchema).max(24);
+export type BrandPalette = z.infer<typeof BrandPaletteSchema>;
+
 export const FontSchema = z.object({
   name: z.string().max(100),
   family: z.string().max(100),

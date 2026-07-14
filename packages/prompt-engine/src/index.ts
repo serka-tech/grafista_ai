@@ -12,3 +12,4 @@ export { layoutGenerationTemplate } from './templates/layout-generation.js';
 export { creativeQATemplate } from './templates/creative-qa.js';
 export { visualGenerationTemplate } from './templates/visual-generation.js';
 export { revisionLearningTemplate } from './templates/revision-learning.js';
+export { paletteExtractionTemplate } from './templates/palette-extraction.js';

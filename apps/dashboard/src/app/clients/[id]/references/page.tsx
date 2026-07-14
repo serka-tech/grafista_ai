@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, resolveApiFileUrl } from '@/lib/api';
 import { AssetIntakeNotice } from '@/components/asset-intake-notice';
+import { FileDropzone } from '@/components/file-dropzone';
 
 export default function ReferencesPage({ params }: { params: { id: string } }) {
   const [refs, setRefs] = useState<any[]>([]);
@@ -76,10 +77,16 @@ export default function ReferencesPage({ params }: { params: { id: string } }) {
             Açıklama
             <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} style={{ width: '100%', marginTop: '4px' }} />
           </label>
-          <label>
-            Dosya
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ width: '100%', marginTop: '4px' }} required />
-          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span>Dosya</span>
+            <FileDropzone
+              value={file}
+              onChange={setFile}
+              disabled={status === 'uploading'}
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              hint="PNG, JPG, WEBP veya SVG"
+            />
+          </div>
           <button type="submit" className="btn btn-primary" disabled={status === 'uploading'}>
             {status === 'uploading' ? 'Yükleniyor...' : 'Yükle'}
           </button>

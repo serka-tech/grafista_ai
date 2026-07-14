@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const designDnaSynthesisTemplate: PromptTemplate = {
   id: 'design-dna-synthesis',
@@ -37,7 +38,7 @@ Base every conclusion strictly on patterns that actually recur across the provid
 analyses — do not invent colors, rules, or tone that aren't supported by the input data.
 Output must be valid JSON matching the DesignDNAContent schema (do not include id,
 clientId, version, status, referencesUsed, sourceAnalysisCount, approval fields, or
-timestamps — those are set by the server, not by you).`,
+timestamps — those are set by the server, not by you).` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Synthesize a Design DNA profile for client "{{clientName}}".
 

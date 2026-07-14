@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { api, resolveApiFileUrl } from '@/lib/api';
+import { FileDropzone } from '@/components/file-dropzone';
 
 type Step = 'idle' | 'creating' | 'packaging' | 'rendering' | 'done' | 'error';
 
@@ -116,10 +117,16 @@ export default function ListingCardPage({ params }: { params: { id: string } }) 
             Emlak Ofisi / Acente
             <input type="text" value={agencyName} onChange={(e) => setAgencyName(e.target.value)} placeholder="Turyap" style={{ width: '100%', marginTop: '4px' }} />
           </label>
-          <label>
-            Mülk Fotoğrafı
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ width: '100%', marginTop: '4px' }} required />
-          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span>Mülk Fotoğrafı</span>
+            <FileDropzone
+              value={file}
+              onChange={setFile}
+              disabled={busy}
+              accept="image/png,image/jpeg,image/webp"
+              hint="PNG, JPG veya WEBP"
+            />
+          </div>
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {busy ? STEP_LABEL[step] : 'İlan Kartı Üret'}
           </button>

@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const contentIdeationTemplate: PromptTemplate = {
   id: 'content-ideation',
@@ -23,7 +24,7 @@ Consider the client's:
 - Previous approved content patterns
 - Forbidden elements
 
-Output must be an array of ContentIdea objects in JSON format.`,
+Output must be an array of ContentIdea objects in JSON format.` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Generate {{optionCount}} content ideas for client "{{clientName}}".
 

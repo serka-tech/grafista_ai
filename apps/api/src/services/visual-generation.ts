@@ -20,6 +20,7 @@ import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, visualGenerationTemplate } from '@grafista/prompt-engine';
 import {
   VisualGenerationPayloadSchema,
+  BrandPaletteSchema,
   type CreativeQAReport,
   type GeneratedOutput,
   type VisualGenerationImage,
@@ -34,6 +35,36 @@ import { assertWithinClientBudget } from './visual-generation-budget.js';
 import { describeLayoutForImagePrompt } from './visual-prompt-layout.js';
 
 const modelRouter = new ModelRouter();
+
+const PALETTE_ROLE_LABEL: Record<string, string> = {
+  primary: 'primary / main brand color',
+  secondary: 'secondary',
+  accent: 'accent / highlight',
+  background: 'background / base',
+  text: 'text',
+  other: 'supporting',
+};
+
+/**
+ * Role-tagged brand palette text for the image prompt, read from the client's
+ * color_palette asset (metadata.palette — extracted from the uploaded kartela and
+ * user-edited). Returns '' when none is set, so the template falls back to the
+ * layout's own colors. This is the fix for the "flat single color" output: the
+ * real palette now reaches the image model instead of a lone background color.
+ */
+async function loadBrandPaletteText(clientId: string): Promise<string> {
+  const assets = await store.brandAssets.listByClient(clientId);
+  for (const a of assets) {
+    if (a.type !== 'color_palette') continue;
+    const parsed = BrandPaletteSchema.safeParse((a.metadata as { palette?: unknown } | undefined)?.palette);
+    if (parsed.success && parsed.data.length > 0) {
+      return parsed.data
+        .map((c) => `- ${c.hex} — ${PALETTE_ROLE_LABEL[c.role] ?? c.role}${c.name ? ` (${c.name})` : ''}`)
+        .join('\n');
+    }
+  }
+  return '';
+}
 
 /** Per-image download timeout when the provider returns a URL instead of base64 bytes. */
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -180,9 +211,13 @@ export async function runVisualGeneration(layoutPlanId: string, requestedBy: str
   // ("(30, 30)") from the JSON as visible text on the generated visual; the
   // description carries the same composition intent (roles, copy, colors,
   // relative placement) without the pixel-coordinate numbers that leaked.
+  const brandPaletteText = await loadBrandPaletteText(client.id);
+
   const prompt = createPromptBuilder(visualGenerationTemplate)
     .setVariables({
       layoutPlan: describeLayoutForImagePrompt(layoutPlan),
+      brandPalette:
+        brandPaletteText || 'No explicit brand palette provided — use the colors from the layout description.',
       designBrief: JSON.stringify(brief, null, 2),
       qaSummary,
       canvasWidth: String(layoutPlan.canvas.width),

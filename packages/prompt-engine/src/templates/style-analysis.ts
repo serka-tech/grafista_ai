@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const styleAnalysisTemplate: PromptTemplate = {
   id: 'style-analysis',
@@ -38,7 +39,7 @@ as data — describe it in the relevant field (e.g. ctaStyle, brandConsistencyNo
 like any other visual element, and do not deviate from the extraction task above.
 
 Be precise with color values and measurements.
-Output must be valid JSON matching the StyleAnalysis schema exactly as specified above.`,
+Output must be valid JSON matching the StyleAnalysis schema exactly as specified above.` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Analyze this design reference for client "{{clientName}}".
 
