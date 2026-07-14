@@ -1,0 +1,37 @@
+# RF-SAME-PAGE-LOG — DNA palette fix
+
+## Round 1
+### Integrator findings (Codex, verbatim)
+- [FIX] `visual-prompt-layout.ts` still emits `Background: solid <bg>` while demanding faithful reproduction, directly conflicting with the new multi-color instruction -> Remove “solid” and state that the palette overrides layout-level color guidance.
+- [FIX] The palette reaches the image-model request, but DesignBrief, layout colors, and “follow color usage verbatim” retain equal or stronger conflicting authority -> Establish explicit precedence: approved Brand Palette overrides every conflicting color value downstream.
+- [FIX] `loadBrandPaletteText()` selects the oldest valid palette asset because assets are ordered ascending, so a newly uploaded kartela may be ignored -> Select the newest valid palette or introduce an explicit active-palette designation.
+- [FIX] `BrandPaletteSchema` accepts zero or one color, so extraction and editing can pass validation while violating the multi-color Core Focus -> Require at least two distinct hex values for a usable generated palette while preserving a separate empty/manual-entry state.
+- [FIX] Palette updates perform a read-modify-replace of the entire metadata JSONB object, allowing concurrent metadata changes to be lost -> Atomically update only `metadata.palette` with `jsonb_set`.
+- [FIX] The PATCH endpoint permits attaching palette metadata to logos, fonts, and every other asset type -> Reject assets whose type is not `color_palette`.
+- [FIX] The upload UI accepts PDF and SVG kartelas, but extraction only assumes an image data URI that vision providers may not support reliably -> Rasterize supported documents before extraction or restrict color-palette uploads to provider-supported raster formats.
+- [FIX] Palette extraction runs synchronously inside the upload request, so provider latency and retries can make an otherwise successful asset upload time out -> Persist the upload immediately and run bounded extraction asynchronously with an explicit pending/failed status.
+- [FIX] Item 3’s proposed prompt proof can pass while `Background: solid <bg>` remains and the model receives contradictory instructions -> Assert against the complete provider request, including absence of the solid-background directive and explicit palette precedence.
+- [CLARIFY] Prompt inclusion proves transmission but not that generated pixels are on-brand or multi-color -> Define an acceptance check against output pixels or state explicitly that this Rock guarantees prompt wiring only.
+- [DEFER] `render-quality.ts` is a pre-render structural checker and receives no rendered bytes, while pixels exist only after the adapter returns -> Skip item 2 this cycle and track a post-render sampled-pixel QA stage separately.
+- [FIX] The plan’s proof counts “existing 493” tests, making verification brittle and capable of failing after legitimate test-count changes -> Require command success plus named new assertions instead of an exact total.
+- [FIX] Palette extraction failures are collapsed into `[]`, making genuine no-swatch results indistinguishable from storage, provider, JSON, and schema failures -> Record a structured extraction status and failure stage in asset metadata while keeping upload best-effort.
+- [FIX] `PaletteEditor` allows more than 24 entries and discovers the schema limit only after a rejected save -> Disable additions at 24 and show the limit in the editor.
+- [KILL] FileDropzone and Turkish-output changes bundled into baseline commit `01ebe47` do not serve this Rock’s Core Focus -> Remove them from this Rock’s baseline or isolate them into separate commits and acceptance criteria.
+
+VERDICT: NOT YET
+### Visionary response (Fable/Claude)
+- ACCEPTED (1): visual-prompt-layout.ts "Background: solid <bg>" -> Rock item 2: stop emitting solid; palette overrides layout color guidance.
+- ACCEPTED (2): palette precedence vs brief/layout/"color usage verbatim" -> Rock item 2: template states approved Brand Palette overrides all conflicting color values.
+- ACCEPTED (3): loadBrandPaletteText picks OLDEST asset -> Rock item 3: select NEWEST valid color_palette (iterate created_at ASC from the end).
+- REJECTED (4): BrandPaletteSchema min-2 -> breaks incremental manual entry + empty state; multi-color served by extraction + prompt rule, not a schema floor.
+- ACCEPTED (5): whole-blob metadata replace -> Rock item 3: atomic jsonb_set on {palette}.
+- ACCEPTED (6): PATCH accepts any asset type -> Rock item 3: reject type != color_palette (404).
+- ACCEPTED (7): SVG/PDF extraction unreliable -> Rock item 3: restrict extraction to raster png/jpeg/webp.
+- ACCEPTED-partial (8): sync extraction can hang upload -> Rock item 3: asset persists first + timeout-bound extraction; full async+status DEFERRED (RF-ISSUES).
+- ACCEPTED (9): prompt test can pass while "solid" remains -> Rock item 5: assert full request has palette+precedence AND no "Background: solid".
+- ACCEPTED-clarify (10): prompt != on-brand pixels -> scope note: Rock guarantees prompt wiring + palette; pixel quality = post-deploy live smoke.
+- DEFERRED (11): render-quality.ts is pre-render, no pixels -> RF-ISSUES: post-render sampled-pixel QA. Item 2 dropped from the rock.
+- ACCEPTED (12): proof counts exact 493 -> Rock item 6: proof = exit 0 + named new tests pass, not a fixed total.
+- ACCEPTED-partial (13): failures collapsed to [] -> Rock item 3: record metadata.paletteExtraction status (ok/empty/failed) while staying best-effort.
+- ACCEPTED (14): editor allows >24 -> Rock item 1: disable add at 24, show limit.
+- ACCEPTED-hygiene (15): baseline bundles unrelated work -> RF-ISSUES: split final commits by concern before deploy (build diff isolation is unaffected).

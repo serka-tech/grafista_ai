@@ -39,6 +39,10 @@ the 3 upload screens; TURKISH_OUTPUT_DIRECTIVE on 5 content templates. Both alre
 build/test green — do not touch.)
 
 ## The Rock — remaining work (implement exactly)
+Revised after Same Page round 1 (see RF-SAME-PAGE-LOG.md). Scope note (finding 10):
+this Rock guarantees the palette is EXTRACTED, EDITABLE, and WIRED into the image
+prompt with explicit precedence — it does NOT unit-assert pixel-level on-brand output;
+that is verified by the post-deploy live smoke (a real generation), tracked separately.
 
 ### 1. Wire PaletteEditor into the brand page
 `apps/dashboard/src/app/clients/[id]/brand/page.tsx`: for each asset whose
@@ -46,33 +50,65 @@ build/test green — do not touch.)
 initial={asset.metadata?.palette ?? []} onSaved={() => loadAssets()} />` inside the asset
 card, below the existing thumbnail block. Import from `@/components/palette-editor`. Do not
 change the upload form or other asset types.
+- (finding 14) `PaletteEditor`: disable "+ Renk Ekle" at 24 entries and show the limit.
 
-### 2. Flat-color QA guard (best-effort, do not force)
-FIRST verify whether `apps/api/src/render/render-quality.ts` has access to the rendered
-image bytes. If it does, add a cheap near-solid / low-color-variance detector that emits a
-structured `flat_color_output` warning (follow the existing warning shape/severity in that
-file). If it does NOT have the pixels cheaply available, SKIP this item and say so in the
-report — do not thread a large new data path just for a warning. Keep any check O(sampled
-pixels), not full-image.
+### 2. Kill the "solid <bg>" flattening + establish palette precedence (findings 1, 2)
+This is the other half of the actual bug — the palette must WIN over conflicting color guidance.
+- `apps/api/src/services/visual-prompt-layout.ts`: stop emitting `Background: solid <bg>`.
+  State the background as a plain color reference and add that the brand palette (passed
+  separately) overrides layout-level color choices; never call the whole canvas one solid color.
+- `packages/prompt-engine/src/templates/visual-generation.ts`: make precedence explicit —
+  the approved Brand Palette overrides any conflicting color value in the DesignBrief, the
+  layout description, or the "color usage notes". Reword the "follow color usage verbatim"
+  line so it cannot fight the palette.
 
-### 3. Tests (mirror existing patterns in `apps/api/src/__tests__` and dashboard)
-- `palette-extraction`: with the fake/deterministic provider (or a mocked model call),
-  assert a valid `BrandPalette` is returned and validated; a non-image or missing-bytes
-  asset returns `[]`; a provider/JSON failure returns `[]` (never throws).
-- `PATCH .../palette`: 200 on valid body (palette persisted to `metadata.palette`);
-  400 on invalid hex; 404 on missing asset; cross-org → 404 (mirror `org-isolation.test.ts`
-  / `client-isolation.test.ts`).
-- `visual-generation` brandPalette injection: when a `color_palette` asset has a palette,
-  the built image prompt contains the palette hex values and the role tag; assert the
-  prompt does NOT reduce to a lone "solid <bg>" (palette section present). Reuse the
-  existing visual-generation test harness/fixtures.
-- If item 2 ships: a test that a near-solid rendered image raises `flat_color_output` and a
-  varied one does not.
+### 3. Palette selection + storage correctness (findings 3, 5, 6, 7, 8, 13)
+- `visual-generation.ts` `loadBrandPaletteText`: select the NEWEST valid `color_palette`
+  asset with a non-empty palette (assets are ordered `created_at ASC`, so iterate from the
+  end), not the oldest.
+- `brand-assets` repo: replace the whole-blob metadata write with an ATOMIC palette update
+  (`jsonb_set(metadata, '{palette}', $3::jsonb, true)`) so a concurrent metadata write is not
+  clobbered; add/keep a small `setPalette`/`updateMetadata` used by both the extractor and PATCH.
+- PATCH `/:clientId/brand-assets/:assetId/palette`: reject assets whose `type !== 'color_palette'`
+  (404, indistinguishable from not-found).
+- Extraction guard: only attempt vision extraction for RASTER images (`image/png`,
+  `image/jpeg`, `image/webp`); skip `image/svg+xml`, `application/pdf`, others → `[]`.
+- Bound the extraction so a slow provider can't hang the upload: the asset is already
+  persisted before extraction; wrap extraction in a timeout (e.g. ~20s) and on timeout return
+  the asset without a palette (user adds manually). Full async+status pipeline is DEFERRED
+  (RF-ISSUES).
+- (finding 13) Record a small extraction status on the asset metadata alongside the palette
+  (`metadata.paletteExtraction = { status: 'ok' | 'empty' | 'failed', stage? }`) so the UI /
+  logs can tell "no swatches found" apart from "provider/JSON/schema failure". Upload stays
+  best-effort (never throws).
 
-### 4. Full verification (PROOF)
-- `cd apps/api && npx vitest run --maxWorkers=2` — existing 493 + new tests all green.
+### 4. ~~Flat-color QA guard~~ — DEFERRED (finding 11)
+Codex confirmed `render-quality.ts` is a PRE-render structural checker with no rendered
+bytes. A pixel-variance guard needs a post-render sampled-pixel stage. Moved to RF-ISSUES.md;
+NOT built this cycle.
+
+### 5. Tests (findings 9, 12 — mirror `apps/api/src/__tests__` patterns)
+- `palette-extraction`: valid `BrandPalette` returned + validated (mock/fake provider);
+  non-raster or missing-bytes asset → `[]`; provider/JSON/schema failure → `[]` and NEVER
+  throws; extraction status recorded.
+- `PATCH .../palette`: 200 valid (persisted to `metadata.palette`); 400 invalid hex; 404
+  missing asset; 404 wrong asset type; cross-org → 404 (mirror `org-isolation.test.ts`).
+- `visual-generation` injection: with a palette set, the COMPLETE built provider request
+  (system+user) contains every palette hex + its role tag AND explicit palette precedence,
+  AND contains no `Background: solid` / lone-flat-color directive. (finding 9)
+- Proof is "the command exits 0 and the NAMED new tests pass", not an exact total count. (finding 12)
+
+### 6. Full verification (PROOF — the driver runs these too)
+- `cd apps/api && npx vitest run --maxWorkers=2` — exits 0; the named new tests pass; no prior
+  test regressed.
 - `cd apps/dashboard && npx tsc --noEmit && npx next build` — clean.
 - `cd apps/api && npx tsc --noEmit` and `npx eslint src --ext .ts` on touched files — clean.
+
+## Rejected finding
+- (finding 4) Requiring `BrandPaletteSchema` min 2 colors: REJECTED — it breaks incremental
+  manual entry (adding one color at a time) and the legitimate empty state. Multi-color is
+  served by extraction typically returning several colors + the prompt's explicit "do not
+  flatten to one color" rule, not by a schema floor.
 
 ## Constraints
 - Reuse existing code patterns and helpers; match file style.
