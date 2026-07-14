@@ -51,6 +51,9 @@ initial={asset.metadata?.palette ?? []} onSaved={() => loadAssets()} />` inside 
 card, below the existing thumbnail block. Import from `@/components/palette-editor`. Do not
 change the upload form or other asset types.
 - (finding 14) `PaletteEditor`: disable "+ Renk Ekle" at 24 entries and show the limit.
+- (r2-2) In the brand upload form, when the selected `type === 'color_palette'`, narrow the
+  FileDropzone `accept` to raster (`image/png,image/jpeg,image/webp`) and note that palette
+  auto-extraction needs a raster image (SVG/PDF still allowed for other asset types).
 
 ### 2. Kill the "solid <bg>" flattening + establish palette precedence (findings 1, 2)
 This is the other half of the actual bug — the palette must WIN over conflicting color guidance.
@@ -62,25 +65,28 @@ This is the other half of the actual bug — the palette must WIN over conflicti
   layout description, or the "color usage notes". Reword the "follow color usage verbatim"
   line so it cannot fight the palette.
 
-### 3. Palette selection + storage correctness (findings 3, 5, 6, 7, 8, 13)
-- `visual-generation.ts` `loadBrandPaletteText`: select the NEWEST valid `color_palette`
-  asset with a non-empty palette (assets are ordered `created_at ASC`, so iterate from the
-  end), not the oldest.
-- `brand-assets` repo: replace the whole-blob metadata write with an ATOMIC palette update
-  (`jsonb_set(metadata, '{palette}', $3::jsonb, true)`) so a concurrent metadata write is not
-  clobbered; add/keep a small `setPalette`/`updateMetadata` used by both the extractor and PATCH.
+### 3. Palette selection + storage correctness (findings 3,5,6,7,8,13 + round 2: 4,3,4b,5)
+- (r2-4) `visual-generation.ts` `loadBrandPaletteText`: select the NEWEST valid `color_palette`
+  asset (assets ordered `created_at ASC`, iterate from the end). A palette is only USABLE for
+  generation when it has **at least 2 distinct hex values**; a 0/1-color palette returns `''`
+  (falls back to layout colors) so a lone color never flattens the output. Storage/edit schema
+  stays permissive (manual entry, empty state) — the ≥2 gate lives in this generation selector.
+- (r2-3) `extractPaletteFromAsset` returns a discriminated outcome
+  `{ palette: BrandPalette; status: 'ok' | 'empty' | 'failed'; stage?: string }` (never throws)
+  so the caller can tell an empty extraction apart from a storage/provider/JSON/schema failure.
+- (r2-4b) `brand-assets` repo: ONE atomic metadata merge that writes BOTH `palette` and
+  `paletteExtraction` together — `SET metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb`
+  (so a concurrent write is not clobbered and status can never appear without its palette).
+  PATCH reuses the same atomic merge for `{palette}`.
 - PATCH `/:clientId/brand-assets/:assetId/palette`: reject assets whose `type !== 'color_palette'`
   (404, indistinguishable from not-found).
 - Extraction guard: only attempt vision extraction for RASTER images (`image/png`,
-  `image/jpeg`, `image/webp`); skip `image/svg+xml`, `application/pdf`, others → `[]`.
-- Bound the extraction so a slow provider can't hang the upload: the asset is already
-  persisted before extraction; wrap extraction in a timeout (e.g. ~20s) and on timeout return
-  the asset without a palette (user adds manually). Full async+status pipeline is DEFERRED
-  (RF-ISSUES).
-- (finding 13) Record a small extraction status on the asset metadata alongside the palette
-  (`metadata.paletteExtraction = { status: 'ok' | 'empty' | 'failed', stage? }`) so the UI /
-  logs can tell "no swatches found" apart from "provider/JSON/schema failure". Upload stays
-  best-effort (never throws).
+  `image/jpeg`, `image/webp`); skip `image/svg+xml`, `application/pdf`, others → `status:'empty'`.
+- (r2-5) Do NOT wrap extraction in `Promise.race` (it bounds the HTTP wait but cannot cancel
+  the provider call — wasted work/cost). Rely on the model/provider's own request timeout
+  (already configured); the asset is persisted BEFORE extraction, so a slow/failed provider
+  returns the asset with `status:'failed'` and an empty palette. Real abort-signal cancellation
+  is DEFERRED (RF-ISSUES).
 
 ### 4. ~~Flat-color QA guard~~ — DEFERRED (finding 11)
 Codex confirmed `render-quality.ts` is a PRE-render structural checker with no rendered
@@ -104,11 +110,22 @@ NOT built this cycle.
 - `cd apps/dashboard && npx tsc --noEmit && npx next build` — clean.
 - `cd apps/api && npx tsc --noEmit` and `npx eslint src --ext .ts` on touched files — clean.
 
-## Rejected finding
-- (finding 4) Requiring `BrandPaletteSchema` min 2 colors: REJECTED — it breaks incremental
-  manual entry (adding one color at a time) and the legitimate empty state. Multi-color is
-  served by extraction typically returning several colors + the prompt's explicit "do not
-  flatten to one color" rule, not by a schema floor.
+## Post-deploy acceptance (finding 10 / r2-6 — the real pixel-level proof)
+This Rock's unit tests prove wiring only. The actual fix is proven live, AFTER deploy:
+- Owner: the driver (Claude) + user, in the post-deploy live smoke.
+- Procedure: for a client with a ≥2-color palette (Yenişehir Merkez Koleji), run one real
+  visual generation through the deployed pipeline and download the output.
+- Success threshold: the output is visibly multi-color / on-brand (NOT a near-solid single
+  color), and the generated colors relate to the saved palette. (The automated post-render
+  low-variance check that would make this a hard gate is tracked in RF-ISSUES.)
+- Tracking: recorded in the deploy smoke notes; a fail sends the palette-precedence prompt
+  wording back as a new rock.
+
+## Resolved finding (was rejected in round 1, refined in round 2)
+- (finding 4 / r2-1) `BrandPaletteSchema` stays permissive (no min length) so manual entry and
+  the empty state work; the "usable palette needs ≥2 distinct colors" rule moved to the
+  GENERATION selector (`loadBrandPaletteText`, Rock item 3), which is where a 1-color palette
+  would actually cause a flat output.
 
 ## Constraints
 - Reuse existing code patterns and helpers; match file style.

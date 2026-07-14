@@ -35,3 +35,21 @@ VERDICT: NOT YET
 - ACCEPTED-partial (13): failures collapsed to [] -> Rock item 3: record metadata.paletteExtraction status (ok/empty/failed) while staying best-effort.
 - ACCEPTED (14): editor allows >24 -> Rock item 1: disable add at 24, show limit.
 - ACCEPTED-hygiene (15): baseline bundles unrelated work -> RF-ISSUES: split final commits by concern before deploy (build diff isolation is unaffected).
+
+## Round 2
+### Integrator findings (Codex, verbatim)
+- [FIX] Finding 4 remains unresolved because a saved one-color palette becomes the newest valid palette and directly violates the multi-color Core Focus -> Keep storage schema permissive, but require at least two distinct colors before using a palette for generation.
+- [FIX] Finding 7 is only partially addressed because the unchanged upload form still presents SVG/PDF as valid kartelas even though they will never auto-drive generation -> Conditionally restrict color-palette uploads to PNG/JPEG/WEBP or clearly require manual palette entry for unsupported formats.
+- [FIX] `extractPaletteFromAsset()` still returns only `BrandPalette`, so the caller cannot reliably distinguish empty extraction from provider, JSON, schema, storage, or timeout failure -> Return a discriminated `{ palette, status, stage? }` outcome while preserving never-throw behavior.
+- [FIX] Atomicity is specified only for `metadata.palette`, while separately writing `metadata.paletteExtraction` can race or expose an `ok` status without its corresponding palette -> Atomically write palette and extraction status together, using `COALESCE(metadata, '{}'::jsonb)`.
+- [FIX] A `Promise.race` timeout bounds the HTTP wait but does not cancel the provider request, so model work and cost can continue after upload returns -> Pass a real abort signal through the model call or describe the mechanism honestly as response-time bounding rather than extraction cancellation.
+- [CLARIFY] Pixel-level correctness is said to be verified by a separately tracked post-deploy smoke, but no owner, procedure, success threshold, or tracking reference appears in either file -> Where is the executable acceptance criterion proving the live output uses multiple palette colors?
+
+VERDICT: NOT YET
+### Visionary response (Fable/Claude)
+- ACCEPTED (r2-1 / finding 4 refined): keep schema permissive; require >=2 distinct colors in loadBrandPaletteText before a palette is used for generation (else '' -> layout colors).
+- ACCEPTED (r2-2): brand upload form narrows FileDropzone accept to raster when type=color_palette + note.
+- ACCEPTED (r2-3): extractPaletteFromAsset returns { palette, status: ok|empty|failed, stage? }, never throws.
+- ACCEPTED (r2-4b): single atomic metadata merge writes palette + paletteExtraction together (COALESCE(metadata,'{}') || $3::jsonb).
+- ACCEPTED (r2-5): drop Promise.race; rely on the provider's own request timeout; asset persisted first; abort-signal cancellation deferred (RF-ISSUES).
+- ACCEPTED-clarify (r2-6): added an explicit Post-deploy acceptance section (owner, procedure, success threshold, tracking) for the pixel-level proof.
