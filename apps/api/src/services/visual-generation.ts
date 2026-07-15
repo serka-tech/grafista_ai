@@ -20,7 +20,6 @@ import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, visualGenerationTemplate } from '@grafista/prompt-engine';
 import {
   VisualGenerationPayloadSchema,
-  BrandPaletteSchema,
   type CreativeQAReport,
   type GeneratedOutput,
   type VisualGenerationImage,
@@ -33,40 +32,9 @@ import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helpe
 import { assertClientAccessible } from '../auth/client-access.js';
 import { assertWithinClientBudget } from './visual-generation-budget.js';
 import { describeLayoutForImagePrompt } from './visual-prompt-layout.js';
+import { loadBrandPaletteText } from './brand-palette-text.js';
 
 const modelRouter = new ModelRouter();
-
-const PALETTE_ROLE_LABEL: Record<string, string> = {
-  primary: 'primary / main brand color',
-  secondary: 'secondary',
-  accent: 'accent / highlight',
-  background: 'background / base',
-  text: 'text',
-  other: 'supporting',
-};
-
-/**
- * Role-tagged brand palette text for the image prompt, read from the client's
- * color_palette asset (metadata.palette — extracted from the uploaded kartela and
- * user-edited). Returns '' when none is set, so the template falls back to the
- * layout's own colors. This is the fix for the "flat single color" output: the
- * real palette now reaches the image model instead of a lone background color.
- */
-async function loadBrandPaletteText(clientId: string): Promise<string> {
-  const assets = await store.brandAssets.listByClient(clientId);
-  for (let i = assets.length - 1; i >= 0; i -= 1) {
-    const a = assets[i];
-    if (a.type !== 'color_palette') continue;
-    const parsed = BrandPaletteSchema.safeParse((a.metadata as { palette?: unknown } | undefined)?.palette);
-    if (!parsed.success) continue;
-    const distinctHex = new Set(parsed.data.map((c) => c.hex.toUpperCase()));
-    if (distinctHex.size < 2) return '';
-    return parsed.data
-      .map((c) => `- ${c.hex} — ${PALETTE_ROLE_LABEL[c.role] ?? c.role}${c.name ? ` (${c.name})` : ''}`)
-      .join('\n');
-  }
-  return '';
-}
 
 /** Per-image download timeout when the provider returns a URL instead of base64 bytes. */
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;

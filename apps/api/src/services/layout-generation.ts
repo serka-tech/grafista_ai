@@ -18,6 +18,7 @@ import { store } from '../data/store.js';
 import { env } from '../config/env.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 import { assertClientAccessible } from '../auth/client-access.js';
+import { loadBrandPaletteText } from './brand-palette-text.js';
 
 const modelRouter = new ModelRouter();
 
@@ -119,6 +120,15 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
       )
     : 'No approved DesignDNA available for this client yet — proceed using only the design brief and general best practices. designDnaRulesUsed must be [] in every alternative.';
 
+  // Brand palette (from the client's color_palette asset — the real, user-edited
+  // kartela) fed straight into layout generation so text/element colors are chosen
+  // FROM the brand palette, not from DesignDNA's colorUsageRules. This is the fix
+  // for "headline comes out DNA-green instead of the brand's blue": the palette was
+  // previously only a weak override at the final image step, losing to the specific
+  // per-layer color the layout had already committed to. Empty string when no usable
+  // palette exists, in which case the template keeps using DNA/brief colors.
+  const brandPalette = await loadBrandPaletteText(client.id);
+
   const prompt = createPromptBuilder(layoutGenerationTemplate)
     .setVariables({
       designBrief: JSON.stringify(brief, null, 2),
@@ -127,6 +137,9 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
       alternativeCount: String(REQUESTED_ALTERNATIVE_COUNT),
       dnaContext,
       referenceDesignIds: JSON.stringify(brief.referenceDesignIds ?? []),
+      brandPalette:
+        brandPalette ||
+        'No explicit brand palette provided — use the colors from the design brief and DesignDNA color rules.',
     })
     .build();
 

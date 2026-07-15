@@ -22,6 +22,14 @@ or omit required ones):
   - The background layer is always first (lowest zIndex).
   - The logo layer follows brand placement rules from the brief/DesignDNA.
   - Text layers must have complete textProperties (content, fontFamily, fontSize, fontWeight, color, alignment).
+  - COLOR SOURCE (important): when a BRAND PALETTE is provided below, every layer color
+    (text color, background color, shape/accent fills) MUST be a hex value taken from
+    that palette, matching each color's role — text layers use the palette's "text"
+    color (or its primary/accent for emphasis), the background layer uses the palette's
+    "background" (or primary) color, accents use "accent". The BRAND PALETTE OVERRIDES
+    any conflicting color in the DesignDNA color rules: never emit a color that is not
+    in the provided palette when one is given. When no palette is provided, fall back to
+    the DesignDNA color rules and the brief.
   - Image layers must specify imageProperties.sourceType and fit mode.
   - All positions are absolute, pixel-based, within the canvas bounds.
 - gridStructure (optional): { columns?, rows?, gutter?, description? } describing the underlying grid system used
@@ -61,6 +69,9 @@ LayoutPlanContent schema exactly as specified above.` + TURKISH_OUTPUT_DIRECTIVE
 Width: {{canvasWidth}}px
 Height: {{canvasHeight}}px
 
+--- BRAND PALETTE (role-tagged; use these hex colors for all layer colors — overrides DesignDNA colors) ---
+{{brandPalette}}
+
 --- DESIGN REFERENCE IDS (brief-linked, cite only if genuinely used) ---
 {{referenceDesignIds}}
 
@@ -70,7 +81,7 @@ Height: {{canvasHeight}}px
 Return a JSON array of {{alternativeCount}} distinct LayoutPlanContent objects.`,
 
   requiredVariables: ['designBrief', 'canvasWidth', 'canvasHeight', 'alternativeCount'],
-  optionalVariables: ['dnaContext', 'referenceDesignIds'],
+  optionalVariables: ['dnaContext', 'referenceDesignIds', 'brandPalette'],
   outputFormat: 'json',
   expectedSchema: 'LayoutPlanContent[]',
   maxTokens: 8000,
