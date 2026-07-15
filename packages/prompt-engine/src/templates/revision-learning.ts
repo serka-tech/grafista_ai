@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const revisionLearningTemplate: PromptTemplate = {
   id: 'revision-learning',
@@ -22,7 +23,7 @@ Also analyze:
 Rules with higher frequency should have higher confidence.
 Conflicting rules should be flagged.
 
-Output must be valid JSON matching the RevisionMemory schema.`,
+Output must be valid JSON matching the RevisionMemory schema.` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Process revision feedback for client "{{clientName}}".
 

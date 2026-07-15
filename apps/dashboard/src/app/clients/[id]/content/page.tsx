@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { DemoStepNote } from '@/components/demo-step-note';
+import { platformLabel, formatLabel, prettify } from '@/lib/enum-labels';
 
 // Same local ErrorNote idiom as briefs/[id]/page.tsx and layout-plans/page.tsx.
 function ErrorNote({ message }: { message: string | null }) {
@@ -28,41 +29,8 @@ const IDEA_STATUS_LABELS: Record<string, { class: string; label: string }> = {
   revision_requested: { class: 'badge-info', label: 'Revizyon İstendi' },
 };
 
-const PLATFORM_LABELS: Record<string, string> = {
-  instagram_post: 'Instagram Gönderisi',
-  instagram_story: 'Instagram Hikayesi',
-  instagram_reel: 'Instagram Reels',
-  instagram_carousel: 'Instagram Karusel',
-  facebook_post: 'Facebook Gönderisi',
-  facebook_story: 'Facebook Hikayesi',
-  twitter_post: 'Twitter/X Gönderisi',
-  linkedin_post: 'LinkedIn Gönderisi',
-  tiktok: 'TikTok',
-  youtube_thumbnail: 'YouTube Kapak Görseli',
-  youtube_short: 'YouTube Shorts',
-  pinterest: 'Pinterest',
-  email_header: 'E-posta Başlığı',
-  web_banner: 'Web Banner',
-  other: 'Diğer',
-};
-
-const FORMAT_LABELS: Record<string, string> = {
-  single_image: 'Tekli Görsel',
-  carousel: 'Karusel',
-  video: 'Video',
-  story: 'Hikaye',
-  reel: 'Reels',
-  animated: 'Animasyonlu',
-  text_only: 'Sadece Metin',
-  infographic: 'İnfografik',
-  other: 'Diğer',
-};
-
-/** Title-cases a raw snake_case enum value as a last-resort fallback — never
- * shows an untouched raw string like the pre-F2 badges did. */
-function prettify(raw: string): string {
-  return raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
+// Platform / format Turkish labels + prettify() fallback now live in the shared
+// @/lib/enum-labels module (imported above) so every screen reads the same maps.
 
 // F3 fix: legacy 'draft' rows (older seed data, predating this UI — new ideas
 // are always created as 'pending_approval', see content-ideation.ts) used to
@@ -180,8 +148,8 @@ export default function ContentPage({ params }: { params: { id: string } }) {
                   <span className={`badge ${statusInfo.class}`}>{statusInfo.label}</span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-                  <span className="tag">{PLATFORM_LABELS[idea.platform] ?? prettify(idea.platform)}</span>
-                  {idea.format && <span className="tag">{FORMAT_LABELS[idea.format] ?? prettify(idea.format)}</span>}
+                  <span className="tag">{platformLabel(idea.platform)}</span>
+                  {idea.format && <span className="tag">{formatLabel(idea.format)}</span>}
                   {idea.campaignName && <span className="tag tag-accent">{idea.campaignName}</span>}
                 </div>
                 {idea.hook && <p style={{ color: 'var(--color-text-accent)', fontSize: '0.9rem', marginTop: '12px', fontStyle: 'italic' }}>&quot;{idea.hook}&quot;</p>}

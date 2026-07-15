@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const captionGenerationTemplate: PromptTemplate = {
   id: 'caption-generation',
@@ -21,7 +22,7 @@ Platform guidelines:
 - Facebook: Shorter, conversational, less hashtags
 - Twitter: 280 char max, concise and punchy
 - LinkedIn: Professional, value-driven, moderate length
-- TikTok: Short, trendy, hashtag-heavy`,
+- TikTok: Short, trendy, hashtag-heavy` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Write a caption for client "{{clientName}}" on {{platform}}.
 

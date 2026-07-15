@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const toneExtractionTemplate: PromptTemplate = {
   id: 'tone-extraction',
@@ -17,7 +18,7 @@ Identify:
 - CTA language style
 - Hashtag style
 
-Output as structured JSON.`,
+Output as structured JSON.` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Extract the tone of voice for client "{{clientName}}" based on the following:
 

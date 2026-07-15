@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, friendlyAiErrorMessage } from '@/lib/api';
+import { platformLabel, formatLabel } from '@/lib/enum-labels';
 import { CreativeQAReportCard } from '@/components/creative-qa-report';
 import { VisualOutputsPanel } from '@/components/visual-outputs-panel';
 import { DemoStepNote } from '@/components/demo-step-note';
@@ -182,7 +183,7 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <h2>🎨 Yerleşim Planı Alternatifleri</h2>
-            <p>{brief ? `${brief.title} • ${brief.platform?.replace(/_/g, ' ')}` : 'Tasarım brifi için üretilen yerleşim planları'}</p>
+            <p>{brief ? `${brief.title} • ${platformLabel(brief.platform)}` : 'Tasarım brifi için üretilen yerleşim planları'}</p>
           </div>
           <a href={`/briefs/${designBriefId}`} className="btn btn-secondary">← Brife Dön</a>
         </div>
@@ -256,7 +257,7 @@ export default function LayoutPlansPage({ params }: { params: { id: string } }) 
                 </div>
 
                 <div className="tag-list" style={{ marginBottom: '10px' }}>
-                  <span className="tag">{plan.format ?? '—'}</span>
+                  <span className="tag">{formatLabel(plan.format)}</span>
                   <span className="tag">{plan.canvas?.width ?? '?'} × {plan.canvas?.height ?? '?'}</span>
                   {plan.canvas?.dpi && <span className="tag">{plan.canvas.dpi} dpi</span>}
                   {plan.provider && <span className="tag tag-accent">{plan.provider}{plan.model ? ` / ${plan.model}` : ''}</span>}

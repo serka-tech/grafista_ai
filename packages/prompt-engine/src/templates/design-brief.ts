@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const designBriefTemplate: PromptTemplate = {
   id: 'design-brief',
@@ -21,7 +22,7 @@ The brief must be faithful to:
 - The client's Design DNA and brand rules
 - Previous approval patterns
 
-Output must be valid JSON matching the DesignBrief schema.`,
+Output must be valid JSON matching the DesignBrief schema.` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Create a design brief for client "{{clientName}}".
 

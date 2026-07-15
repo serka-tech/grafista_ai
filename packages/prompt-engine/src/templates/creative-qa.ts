@@ -76,7 +76,7 @@ these top-level fields (do not rename, nest, or omit required ones):
 - mediumPriorityFixes: array of strings — issues that should be fixed but are not blocking
 - lowPriorityFixes: array of strings — minor/optional polish suggestions
 - designerNotes (optional): a short string with rationale/notes for a human designer
-- finalRecommendation: string — a short actionable one-line verdict, e.g. "Approve as-is", "Revise headline contrast before proceeding", or "Reject — brand mismatch"
+- finalRecommendation: string — a short actionable one-line verdict IN TURKISH, e.g. "Olduğu gibi onayla", "Devam etmeden önce başlık kontrastını revize et", or "Reddet — marka uyumsuzluğu"
 - designDnaReasons: array of strings — specifically which DesignDNA rules were checked and whether they were followed or violated, and why that affected the score
 - designBriefReasons: array of strings — specifically which DesignBrief requirements were checked and whether they were met, and why that affected the score
 - risksBeforeProduction: array of strings — concrete risks if this layout proceeds to visual generation/Photoshop production as-is (return [] only if genuinely none)

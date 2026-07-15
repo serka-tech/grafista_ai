@@ -1,4 +1,5 @@
 import { PromptTemplate } from '../builder.js';
+import { TURKISH_OUTPUT_DIRECTIVE } from './_language.js';
 
 export const brandIntakeTemplate: PromptTemplate = {
   id: 'brand-intake',
@@ -16,7 +17,7 @@ Rules:
 - Note any competitor brands mentioned
 - Be thorough but concise in descriptions
 
-Output must be valid JSON matching the BrandProfile schema.`,
+Output must be valid JSON matching the BrandProfile schema.` + TURKISH_OUTPUT_DIRECTIVE,
 
   userPromptTemplate: `Normalize the following brand information for client "{{clientName}}":
 

@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, friendlyAiErrorMessage, pollForNewVisualOutputs, pollRenderJob, resolveApiFileUrl, TERMINAL_RENDER_JOB_STATUSES } from '@/lib/api';
+import { RENDER_PRESET_LABELS } from '@/lib/enum-labels';
 
 const OUTPUT_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   pending: { class: 'badge-warning', label: 'Bekliyor' },
@@ -112,10 +113,10 @@ const RENDER_WARNING_CODE_LABELS: Record<string, string> = {
 // EXPORT_FORMATS list is gone; every format <select> now derives its options
 // from the currently selected preset's own allowedFormats instead.
 const RENDER_PRESETS: Array<{ value: string; label: string; allowedFormats: string[] }> = [
-  { value: 'instagram_post', label: 'Instagram Post (1080×1080)', allowedFormats: ['png', 'jpg'] },
-  { value: 'instagram_story', label: 'Story (1080×1920)', allowedFormats: ['png', 'jpg'] },
-  { value: 'landscape', label: 'Landscape (1920×1080)', allowedFormats: ['png', 'jpg', 'pdf'] },
-  { value: 'ad_creative', label: 'Ad Creative (1200×628)', allowedFormats: ['png', 'jpg', 'pdf'] },
+  { value: 'instagram_post', label: RENDER_PRESET_LABELS.instagram_post, allowedFormats: ['png', 'jpg'] },
+  { value: 'instagram_story', label: RENDER_PRESET_LABELS.instagram_story, allowedFormats: ['png', 'jpg'] },
+  { value: 'landscape', label: RENDER_PRESET_LABELS.landscape, allowedFormats: ['png', 'jpg', 'pdf'] },
+  { value: 'ad_creative', label: RENDER_PRESET_LABELS.ad_creative, allowedFormats: ['png', 'jpg', 'pdf'] },
 ];
 
 function ErrorNote({ message }: { message: string | null }) {

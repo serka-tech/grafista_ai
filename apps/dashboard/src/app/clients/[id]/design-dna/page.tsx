@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, friendlyAiErrorMessage } from '@/lib/api';
+import { formatLabel, moodLabel } from '@/lib/enum-labels';
 
 const STATUS_BADGES: Record<string, { class: string; label: string }> = {
   draft: { class: 'badge-neutral', label: 'Taslak' },
@@ -328,7 +329,7 @@ export default function DesignDNAPage({ params }: { params: { id: string } }) {
                 <>
                   <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tercih edilen formatlar</div>
                   <div className="tag-list" style={{ marginBottom: '8px' }}>
-                    {dna.approvalBias.preferredFormats.map((f: string) => <span key={f} className="tag">{f}</span>)}
+                    {dna.approvalBias.preferredFormats.map((f: string) => <span key={f} className="tag">{formatLabel(f)}</span>)}
                   </div>
                 </>
               )}
@@ -336,7 +337,7 @@ export default function DesignDNAPage({ params }: { params: { id: string } }) {
                 <>
                   <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tercih edilen ruh halleri</div>
                   <div className="tag-list" style={{ marginBottom: '8px' }}>
-                    {dna.approvalBias.preferredMoods.map((m: string) => <span key={m} className="tag tag-accent">{m}</span>)}
+                    {dna.approvalBias.preferredMoods.map((m: string) => <span key={m} className="tag tag-accent">{moodLabel(m)}</span>)}
                   </div>
                 </>
               )}

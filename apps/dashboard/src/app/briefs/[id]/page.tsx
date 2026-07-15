@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, friendlyAiErrorMessage } from '@/lib/api';
+import { platformLabel, formatLabel, moodLabel } from '@/lib/enum-labels';
 
 const BRIEF_STATUS_BADGES: Record<string, { class: string; label: string }> = {
   draft: { class: 'badge-neutral', label: 'Taslak' },
@@ -123,7 +124,7 @@ export default function BriefPage({ params }: { params: { id: string } }) {
     <div className="animate-fade-in">
       <div className="page-header">
         <h2>📋 {brief.title}</h2>
-        <p>{brief.platform?.replace(/_/g, ' ')} • {brief.format?.replace(/_/g, ' ')} • {brief.dimensions?.width}×{brief.dimensions?.height}px</p>
+        <p>{platformLabel(brief.platform)} • {formatLabel(brief.format)} • {brief.dimensions?.width}×{brief.dimensions?.height}px</p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '24px' }}>
@@ -136,7 +137,7 @@ export default function BriefPage({ params }: { params: { id: string } }) {
 
         <div className="card">
           <h3 style={{ fontFamily: 'Outfit', fontSize: '1rem', color: 'var(--color-text-accent)', marginBottom: '12px' }}>🎨 Görsel Yönlendirme</h3>
-          {brief.visualDirection?.mood && <div style={{ marginBottom: '8px' }}><span className="form-label">Ruh Hali</span><span className="tag tag-accent">{brief.visualDirection.mood}</span></div>}
+          {brief.visualDirection?.mood && <div style={{ marginBottom: '8px' }}><span className="form-label">Ruh Hali</span><span className="tag tag-accent">{moodLabel(brief.visualDirection.mood)}</span></div>}
           {brief.visualDirection?.imageDirection && <div><span className="form-label">Görsel Yönü</span><p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{brief.visualDirection.imageDirection}</p></div>}
         </div>
 
