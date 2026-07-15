@@ -169,6 +169,133 @@ async function loadSelectedVisual(
 }
 
 /**
+ * Loads the client's REAL uploaded brand logo file into an embeddable base64
+ * data URI so it can be composited over the render output. Text-to-image models
+ * can only draw a hallucinated emblem (they never see the real logo file), so
+ * the real logo is overlaid separately at render time — in the normal layer path
+ * by injecting it as the logo layer's image source, and in the full-canvas path
+ * as an <img> overlay (see runRenderPipeline / buildFullCanvasHtml).
+ *
+ * Mirrors loadSelectedVisual: reads storage bytes in-process (getObjectBuffer),
+ * NEVER the authenticated fileUrl (the Playwright adapter has no session cookie,
+ * so the image must be self-contained in the HTML). Prefers the newest 'logo'
+ * asset, then the newest 'logo_variant'. NEVER throws — a missing/unreadable
+ * logo degrades to `null` (+ a structured warning only when a logo existed but
+ * could not be read) and the render proceeds without an overlaid logo.
+ */
+async function loadClientLogo(clientId: string): Promise<{ dataUri: string | null; warnings: RenderWarning[] }> {
+  const assets = await store.brandAssets.listByClient(clientId);
+  // listByClient is created_at ASC → reverse for newest-first.
+  const newestFirst = [...assets].reverse();
+  const preferred =
+    newestFirst.find((a) => a.type === 'logo') ?? newestFirst.find((a) => a.type === 'logo_variant');
+  if (!preferred) {
+    // No brand logo uploaded — not an error; the render simply has none to overlay.
+    return { dataUri: null, warnings: [] };
+  }
+
+  const provider = preferred.storageProvider;
+  const key = preferred.storageKey;
+  if (!key || (provider !== 'local' && provider !== 's3')) {
+    return {
+      dataUri: null,
+      warnings: [
+        {
+          code: 'brand_logo_storage_missing',
+          message: 'Brand logo asset has no usable storage coordinates — no logo overlaid',
+          severity: 'warning',
+          details: { assetId: preferred.id },
+        },
+      ],
+    };
+  }
+
+  try {
+    const buffer = await getObjectBuffer({
+      storageProvider: provider as StorageProviderName,
+      storageBucket: preferred.storageBucket ?? '',
+      storageKey: key,
+    });
+    if (buffer.length === 0) {
+      return {
+        dataUri: null,
+        warnings: [
+          {
+            code: 'brand_logo_storage_missing',
+            message: 'Brand logo read back as 0 bytes from storage — no logo overlaid',
+            severity: 'warning',
+            details: { assetId: preferred.id, storageKey: key },
+          },
+        ],
+      };
+    }
+    const mimeType =
+      preferred.mimeType && preferred.mimeType.startsWith('image/') ? preferred.mimeType : 'image/png';
+    return { dataUri: `data:${mimeType};base64,${buffer.toString('base64')}`, warnings: [] };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`[render-engine] brand logo could not be read from storage — skipping overlay: ${reason}`);
+    return {
+      dataUri: null,
+      warnings: [
+        {
+          code: 'brand_logo_storage_missing',
+          message: `Brand logo could not be read from storage (${reason}) — no logo overlaid`,
+          severity: 'warning',
+          details: { assetId: preferred.id, storageKey: key },
+        },
+      ],
+    };
+  }
+}
+
+/** Logo overlay geometry (percent of canvas) for the full-canvas render path. */
+interface LogoOverlayBox {
+  xPct: number;
+  yPct: number;
+  wPct: number;
+  hPct: number;
+}
+
+/**
+ * Where to place the overlaid logo in full-canvas mode. Uses the layout's own
+ * logo layer position (relative to the layout canvas) when present, so the real
+ * logo lands exactly where the layout intended; falls back to a conservative
+ * bottom-center placement otherwise. Percentages are clamped to stay on-canvas.
+ */
+function computeLogoOverlayBox(layers: Layer[], layoutCanvas: { width?: unknown; height?: unknown } | undefined): LogoOverlayBox {
+  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+  const lw = typeof layoutCanvas?.width === 'number' ? layoutCanvas.width : undefined;
+  const lh = typeof layoutCanvas?.height === 'number' ? layoutCanvas.height : undefined;
+  const logoLayer = flattenLayersForLogo(layers).find((l) => l.type === 'logo');
+  if (logoLayer && lw && lh && lw > 0 && lh > 0) {
+    const p = logoLayer.position;
+    return {
+      xPct: clamp((p.x / lw) * 100, 0, 100),
+      yPct: clamp((p.y / lh) * 100, 0, 100),
+      wPct: clamp((p.width / lw) * 100, 2, 100),
+      hPct: clamp((p.height / lh) * 100, 2, 100),
+    };
+  }
+  // Conservative default: bottom-center, ~22% wide.
+  return { xPct: 39, yPct: 83, wPct: 22, hPct: 12 };
+}
+
+/** Local flatten for logo lookup (children may nest); mirrors html-renderer's flatten. */
+function flattenLayersForLogo(layers: Layer[]): Layer[] {
+  const out: Layer[] = [];
+  const walk = (ls: Layer[]) => {
+    for (const l of ls) {
+      out.push(l);
+      const children = (l as { children?: Layer[] }).children;
+      if (Array.isArray(children)) walk(children);
+    }
+  };
+  walk(layers);
+  return out;
+}
+
+/**
  * Renders a package_ready/approved production job into one exported file
  * (PNG/JPG/PDF) at the requested preset. Synchronous — the whole pipeline
  * (HTML build -> adapter render -> checksum -> storage write -> artifact row
@@ -364,7 +491,30 @@ export async function runRenderPipeline(
   // creative (see visual-composition.ts / html-renderer.ts).
   const fullCanvasVisual = compositionPlan.fullCanvasVisual;
 
-  const { html, warnings: htmlWarnings, usedFullCanvas } = buildRenderHtml({ canvas, layers, imageSources, fullCanvasVisual });
+  // Composite the client's REAL brand logo over the render (both paths). The AI
+  // visual can only draw a hallucinated emblem, so the real logo file is overlaid
+  // separately: in the normal layer path by injecting it as the logo layer's own
+  // image source (overriding the gray placeholder), and in the full-canvas path —
+  // where every template layer is suppressed — as an <img> overlay positioned at
+  // the layout's own logo placement. No logo uploaded → no overlay (never fails).
+  const { dataUri: logoDataUri, warnings: logoWarnings } = await loadClientLogo(job.clientId);
+  let logoOverlay: { dataUri: string; box: LogoOverlayBox } | undefined;
+  if (logoDataUri) {
+    for (const layer of flattenLayersForLogo(layers)) {
+      if (layer.type === 'logo') imageSources[layer.id] = logoDataUri;
+    }
+    const layoutCanvas = (manifestSnapshot?.layoutPlanSnapshot as { canvas?: { width?: unknown; height?: unknown } } | undefined)
+      ?.canvas;
+    logoOverlay = { dataUri: logoDataUri, box: computeLogoOverlayBox(layers, layoutCanvas) };
+  }
+
+  const { html, warnings: htmlWarnings, usedFullCanvas } = buildRenderHtml({
+    canvas,
+    layers,
+    imageSources,
+    fullCanvasVisual,
+    logoOverlay,
+  });
   // Step 9B — pre-render heuristic QA pass (see render-quality.ts's module
   // header: heuristics surfacing risk, not typographic ground truth).
   // Composition warnings come first (they explain what the renderer was
@@ -382,7 +532,7 @@ export async function runRenderPipeline(
   // those layers must still get their QA warnings surfaced (never silently
   // wrong).
   const qualityWarnings = usedFullCanvas ? [] : assessRenderQuality({ canvas, layers, safeZones, imageSources });
-  const warnings = [...visualLoadWarnings, ...compositionPlan.warnings, ...htmlWarnings, ...qualityWarnings];
+  const warnings = [...visualLoadWarnings, ...logoWarnings, ...compositionPlan.warnings, ...htmlWarnings, ...qualityWarnings];
 
   const adapter = getRendererAdapter();
   const { buffer, mimeType } = await adapter.render({

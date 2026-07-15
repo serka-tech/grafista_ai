@@ -378,8 +378,23 @@ function buildLayerHtml(
  * can), those pixels composite over a defined color rather than leaking through
  * to bare white.
  */
-function buildFullCanvasHtml(canvas: RenderableCanvas, dataUri: string): HtmlRenderResult {
+/** Real brand logo composited over a full-canvas visual: a base64 image data URI
+ * plus its box in percent-of-canvas coordinates (see render-engine.ts). */
+export interface LogoOverlay {
+  dataUri: string;
+  box: { xPct: number; yPct: number; wPct: number; hPct: number };
+}
+
+function buildFullCanvasHtml(canvas: RenderableCanvas, dataUri: string, logoOverlay?: LogoOverlay): HtmlRenderResult {
   const background = safeColor(canvas.backgroundColor, '#ffffff').color;
+  // The client's REAL brand logo, composited ON TOP of the full-bleed AI visual
+  // (which draws no usable logo of its own). `object-fit:contain` preserves the
+  // logo's aspect ratio inside its box; only a valid base64 image data URI is
+  // ever interpolated (same guard the layer path uses).
+  const logoMarkup =
+    logoOverlay && IMAGE_DATA_URI_RE.test(logoOverlay.dataUri.trim())
+      ? `\n    <img class="logo-overlay" src="${escapeHtml(logoOverlay.dataUri.trim())}" alt="" style="position:absolute; left:${logoOverlay.box.xPct}%; top:${logoOverlay.box.yPct}%; width:${logoOverlay.box.wPct}%; height:${logoOverlay.box.hPct}%; object-fit:contain;">`
+      : '';
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -392,7 +407,7 @@ function buildFullCanvasHtml(canvas: RenderableCanvas, dataUri: string): HtmlRen
 </head>
 <body>
   <div class="canvas">
-    <img class="full-canvas-visual" src="${escapeHtml(dataUri)}" alt="">
+    <img class="full-canvas-visual" src="${escapeHtml(dataUri)}" alt="">${logoMarkup}
   </div>
 </body>
 </html>`;
@@ -425,14 +440,16 @@ export function buildRenderHtml(input: {
   layers: Layer[];
   imageSources?: Record<string, string>;
   fullCanvasVisual?: string;
+  /** Real brand logo composited over the full-canvas visual (see render-engine.ts). */
+  logoOverlay?: LogoOverlay;
 }): HtmlRenderResult {
-  const { canvas, layers, imageSources, fullCanvasVisual } = input;
+  const { canvas, layers, imageSources, fullCanvasVisual, logoOverlay } = input;
   const warnings: RenderWarning[] = [];
 
   if (fullCanvasVisual !== undefined) {
     const trimmed = fullCanvasVisual.trim();
     if (IMAGE_DATA_URI_RE.test(trimmed)) {
-      return buildFullCanvasHtml(canvas, trimmed);
+      return buildFullCanvasHtml(canvas, trimmed, logoOverlay);
     }
     // Never silently wrong: an invalid full-canvas source (should be
     // impossible — render-engine.ts builds it from real bytes) degrades to the

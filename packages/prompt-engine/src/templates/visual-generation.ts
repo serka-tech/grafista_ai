@@ -27,7 +27,10 @@ Creative QA — do NOT redesign it. Reproduce it faithfully:
 - Render each text element with its exact quoted copy, font family, size and color. Text
   must be crisp, correctly spelled and fully legible — never cropped, warped or replaced
   with gibberish glyphs.
-- Keep the logo placement and its safe area exactly as planned.
+- Keep the logo's safe area exactly as planned, but do NOT draw a logo there: never
+  invent, draw, or write any brand logo, emblem, badge, monogram, or wordmark anywhere in
+  the image. Leave the logo area as clean empty space — the real brand logo is composited
+  onto the render separately, and any logo you draw would clash with it.
 - Follow the typography notes verbatim. Treat layout and brief color usage notes as secondary
   guidance only when they do not conflict with the approved BRAND PALETTE below.
 - The approved BRAND PALETTE overrides every conflicting color value in the DesignBrief,

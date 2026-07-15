@@ -74,7 +74,12 @@ export function describeLayoutForImagePrompt(layoutPlan: LayoutPlan): string {
         break;
       }
       case 'logo': {
-        lines.push(`- Brand logo placed ${where} (keep it clean, do not distort or relabel it).`);
+        // The real brand logo file is composited over the render separately
+        // (see render-engine.ts loadClientLogo) — the image model must NOT draw
+        // one, or it invents a wrong emblem that clashes with the real overlay.
+        lines.push(
+          `- Keep the logo area (${where}) CLEAN and empty: do not draw, invent, or write any logo, emblem, badge, or brand wordmark there — leave clear space for a logo that is added afterwards.`
+        );
         break;
       }
       case 'image': {

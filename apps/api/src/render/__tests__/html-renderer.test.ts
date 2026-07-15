@@ -331,6 +331,33 @@ describe('buildRenderHtml — full-canvas visual fallback (Option A)', () => {
     }
   });
 
+  it('composites the real brand logo as an overlay over the full-canvas visual (aspect-preserving, at the given box)', () => {
+    const LOGO_URI = `data:image/png;base64,${Buffer.from('real-brand-logo-bytes').toString('base64')}`;
+    const { html, usedFullCanvas } = buildRenderHtml({
+      canvas,
+      layers: [textLayer()],
+      fullCanvasVisual: FULL_CANVAS_URI,
+      logoOverlay: { dataUri: LOGO_URI, box: { xPct: 39, yPct: 83, wPct: 22, hPct: 12 } },
+    });
+    expect(usedFullCanvas).toBe(true);
+    // The real logo is drawn ON TOP of the full-bleed visual, aspect-preserving.
+    expect(html).toContain(`<img class="logo-overlay" src="${LOGO_URI}"`);
+    expect(html).toContain('left:39%; top:83%; width:22%; height:12%; object-fit:contain;');
+    // Overlay comes after the full-canvas visual so it renders above it.
+    expect(html.indexOf('full-canvas-visual')).toBeLessThan(html.indexOf('logo-overlay'));
+  });
+
+  it('ignores a logoOverlay whose dataUri is not a valid image data URI (no broken <img>)', () => {
+    const { html } = buildRenderHtml({
+      canvas,
+      layers: [textLayer()],
+      fullCanvasVisual: FULL_CANVAS_URI,
+      logoOverlay: { dataUri: 'javascript:alert(1)', box: { xPct: 39, yPct: 83, wPct: 22, hPct: 12 } },
+    });
+    expect(html).not.toContain('class="logo-overlay"');
+    expect(html).toContain('class="full-canvas-visual"');
+  });
+
   it.each([
     ['javascript:alert(1)', 'a non-data-URI string'],
     ['data:image/png;base64,', 'an empty-payload data URI (e.g. a 0-byte visual)'],
