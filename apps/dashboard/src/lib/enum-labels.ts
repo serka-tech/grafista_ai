@@ -76,8 +76,12 @@ export const RENDER_PRESET_LABELS: Record<string, string> = {
 
 export const platformLabel = (raw: string | undefined | null): string =>
   raw ? PLATFORM_LABELS[raw] ?? prettify(raw) : '—';
+// A "format" field can carry either a ContentFormatEnum value (single_image…) or a
+// platform-style value (a layout plan's `format` is 'instagram_post'), so fall back
+// through the platform map before prettify — otherwise 'instagram_post' would show as
+// the English "Instagram Post" instead of "Instagram Gönderisi".
 export const formatLabel = (raw: string | undefined | null): string =>
-  raw ? FORMAT_LABELS[raw] ?? prettify(raw) : '—';
+  raw ? FORMAT_LABELS[raw] ?? PLATFORM_LABELS[raw] ?? prettify(raw) : '—';
 export const moodLabel = (raw: string | undefined | null): string =>
   raw ? MOOD_LABELS[raw] ?? prettify(raw) : '—';
 export const renderPresetLabel = (raw: string | undefined | null): string =>
