@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, friendlyAiErrorMessage } from '@/lib/api';
+import { api, friendlyAiErrorMessage, pollForNewerDesignDna } from '@/lib/api';
 import { formatLabel, moodLabel } from '@/lib/enum-labels';
 
 const STATUS_BADGES: Record<string, { class: string; label: string }> = {
@@ -75,11 +75,21 @@ export default function DesignDNAPage({ params }: { params: { id: string } }) {
   async function handleAnalyze() {
     setAnalyzing(true);
     setAnalyzeError(null);
+    const beforeId = dna?.id ?? null;
     try {
       await api.analyzeDesignDNA(clientId);
       await loadAll();
     } catch (err: any) {
-      setAnalyzeError(friendlyAiErrorMessage(err, 'Analiz başarısız oldu.'));
+      // The analysis is synchronous (one vision call per reference + a synthesis call)
+      // and can exceed the proxy/edge timeout even though the backend completes and
+      // persists a new DNA version. Reconcile before declaring failure: if a newer
+      // version appeared, it actually succeeded — load it and show no error.
+      const newer = await pollForNewerDesignDna(clientId, beforeId);
+      if (newer) {
+        await loadAll();
+      } else {
+        setAnalyzeError(friendlyAiErrorMessage(err, 'Analiz başarısız oldu.'));
+      }
     } finally {
       setAnalyzing(false);
     }

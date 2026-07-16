@@ -404,3 +404,37 @@ export async function pollForNewVisualOutputs(
     if (Date.now() >= deadline) return [];
   }
 }
+
+/**
+ * Reconcile a Design DNA (re)analysis that appeared to fail. The analysis runs one
+ * vision call per reference plus a synthesis call synchronously, which can exceed the
+ * proxy/edge timeout even though the backend completes and persists a NEW dna version.
+ * After the analyze POST throws, poll the latest DNA: if its id differs from the
+ * pre-analysis id, a new version was genuinely created (the "failure" was only a
+ * timeout) — return it. Returns null if nothing new appears before the deadline
+ * (a real failure). Mirrors pollForNewVisualOutputs for the same timeout class.
+ */
+export async function pollForNewerDesignDna(
+  clientId: string,
+  beforeId: string | null,
+  options?: { intervalMs?: number; timeoutMs?: number }
+): Promise<any | null> {
+  const intervalMs = options?.intervalMs ?? 4000;
+  const timeoutMs = options?.timeoutMs ?? 90_000;
+  const deadline = Date.now() + timeoutMs;
+
+  for (let first = true; ; first = false) {
+    if (!first) {
+      if (Date.now() >= deadline) return null;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    try {
+      const res = await api.getDesignDNA(clientId);
+      const latest = res?.data;
+      if (latest?.id && latest.id !== beforeId) return latest;
+    } catch {
+      // Transient poll failure — keep trying until the deadline.
+    }
+    if (Date.now() >= deadline) return null;
+  }
+}
