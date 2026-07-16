@@ -34,7 +34,11 @@ const DEFAULT_ROUTING: TaskRouting[] = [
   { taskType: 'caption_generation', primaryProvider: 'fake', fallbackProviders: ['claude', 'openai', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'design_brief', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'layout_generation', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude'], requiredCapabilities: ['text'] },
-  { taskType: 'creative_qa', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text', 'vision'] },
+  // Creative QA is a text-only structural review today — it sends NO rendered image
+  // (see apps/api creative-qa.ts). It must require only 'text', otherwise capability
+  // enforcement would needlessly reroute a text-only default provider away. When a
+  // render-image QA phase lands, re-add 'vision' AND attach the image together.
+  { taskType: 'creative_qa', primaryProvider: 'fake', fallbackProviders: ['openai', 'claude', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'revision_learning', primaryProvider: 'fake', fallbackProviders: ['claude', 'openai', 'gemini'], requiredCapabilities: ['text'] },
   { taskType: 'image_generation', primaryProvider: 'fake', fallbackProviders: ['openai', 'kie-ai'], requiredCapabilities: ['image_generation'] },
   { taskType: 'video_generation', primaryProvider: 'kie-ai', fallbackProviders: ['higgsfield'], requiredCapabilities: ['video_generation'] },
@@ -100,16 +104,29 @@ export class ModelRouter {
    * Select the best available provider for a task
    */
   private selectProvider(request: AIRequest): ProviderAdapter | null {
-    // If explicit provider requested, try it. This is a deliberate user override,
-    // so only availability is checked here — no capability filtering — to keep
-    // the pre-existing override behavior intact.
+    const routingForTask = this.getRouting(request.taskType);
+    const requiredForTask = routingForTask?.requiredCapabilities ?? [];
+
+    // If an explicit provider is requested, honor it ONLY when it is available AND
+    // actually implements the task's required capabilities. A text-only provider
+    // (e.g. claude) explicitly requested for a vision task must NOT silently run
+    // blind — we fall through to capability-filtered routing so a vision-capable
+    // provider is chosen instead. An empty requiredCapabilities list keeps the
+    // pre-existing override behavior (explicit provider honored on availability alone,
+    // e.g. the image_generation openai/kie buttons).
     if (request.provider) {
       const adapter = this.adapters.get(request.provider);
-      if (adapter?.isAvailable()) return adapter;
+      if (adapter?.isAvailable() && requiredForTask.every((cap) => adapter.capabilities.includes(cap))) {
+        return adapter;
+      }
+      // Otherwise (unavailable OR missing a required capability) fall through to
+      // capability-filtered routing below. complete() detects the substitution
+      // (selected adapter !== requested provider), logs it, and clears any
+      // provider-specific model so it can't leak into the different adapter.
     }
 
     // Use routing table
-    const routing = this.getRouting(request.taskType);
+    const routing = routingForTask;
     if (!routing) {
       // Fallback: try openai → claude → gemini
       for (const name of ['openai', 'claude', 'gemini'] as AIProvider[]) {
@@ -162,12 +179,32 @@ export class ModelRouter {
       };
     }
 
+    // When an explicitly-requested provider was NOT the one selected (unavailable,
+    // unknown, or missing a required capability), dispatch a COPY with any
+    // provider-specific model cleared — a model string is only valid for its own
+    // provider and must never leak into a different adapter. The caller's request
+    // object is left untouched (no hidden mutation for retries/logging/reuse).
+    let dispatch = request;
+    if (request.provider && adapter.name !== request.provider) {
+      const requested = this.adapters.get(request.provider);
+      const reason = !requested
+        ? 'unknown_provider'
+        : !requested.isAvailable()
+          ? 'provider_unavailable'
+          : 'capability_mismatch';
+      console.warn(
+        `[model-router] task "${request.taskType}": requested provider "${request.provider}" not used ` +
+          `(reason=${reason}) — routed to "${adapter.name}".`
+      );
+      if (request.model !== undefined) dispatch = { ...request, model: undefined };
+    }
+
     // Phase 3 Step 3: classified retry replaces the previous blind 3-attempt
     // loop (which retried even 401s, back-to-back, with no backoff). Only
     // transient / rate-limit / timeout / unknown failures are retried, with
     // per-kind limits and exponential backoff — auth, permanent and
     // provider-configuration failures fail fast on the first attempt.
-    return executeWithClassifiedRetry(() => adapter.complete(request), {
+    return executeWithClassifiedRetry(() => adapter.complete(dispatch), {
       delayFn: this.delayFn,
       buildFailure: (error) => ({
         success: false,

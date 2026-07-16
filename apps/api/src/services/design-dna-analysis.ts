@@ -11,7 +11,13 @@
 import { v4 as uuid } from 'uuid';
 import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, styleAnalysisTemplate, designDnaSynthesisTemplate } from '@grafista/prompt-engine';
-import { StyleAnalysisSchema, DesignDNAContentSchema, type StyleAnalysis, type DesignDNA } from '@grafista/schemas';
+import {
+  StyleAnalysisSchema,
+  DesignDNAContentSchema,
+  normalizeColorsToPalette,
+  type StyleAnalysis,
+  type DesignDNA,
+} from '@grafista/schemas';
 import { z } from 'zod';
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
@@ -19,6 +25,89 @@ import { getObjectBuffer } from '../storage/file-service.js';
 import type { DesignReference } from '../db/repositories/design-references.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 import { assertClientAccessible } from '../auth/client-access.js';
+import { loadBrandPaletteColors } from './brand-palette-text.js';
+
+type DnaContent = z.infer<typeof DesignDNAContentSchema>;
+
+/**
+ * Deterministically ground synthesized DesignDNA in the client's real brand truth,
+ * BEFORE persistence. Two independent, pure adjustments (Rock 2):
+ *
+ *  - COLOR (only when a valid palette exists): every colorUsageRules[].colors entry is
+ *    snapped to the nearest palette member; if no rule ends up carrying a palette color
+ *    (or there were no color rules at all), a single fallback rule of the whole palette
+ *    is prepended — so a valid palette always yields >=1 palette-colored rule and the
+ *    model can never persist a color that conflicts with the brand (e.g. DNA green).
+ *
+ *  - LOGO (always, from the per-reference observations): the logo position is derived
+ *    from the observed logoPosition values — requires >=2 references that reported a
+ *    real position AND a strict majority (>50%) for one position. When confident, that
+ *    single canonical position overwrites every logo rule's preferredPosition (adding one
+ *    rule if none exist); otherwise every preferredPosition is omitted (no hallucinated
+ *    "top-left" is ever asserted).
+ */
+export function groundDesignDna(
+  dnaContent: DnaContent,
+  analyses: StyleAnalysis[],
+  orderedHexes: string[] | null
+): DnaContent {
+  let grounded: DnaContent = dnaContent;
+
+  // ── COLOR grounding (palette-gated) ──
+  if (orderedHexes && orderedHexes.length > 0) {
+    const normalizedRules = grounded.colorUsageRules.map((r) =>
+      r.colors && r.colors.length > 0
+        ? { ...r, colors: normalizeColorsToPalette(r.colors, orderedHexes) }
+        : r
+    );
+    const hasPaletteColor = normalizedRules.some((r) => (r.colors?.length ?? 0) > 0);
+    const colorUsageRules = hasPaletteColor
+      ? normalizedRules
+      : [{ rule: 'Marka ana renkleri (paletten)', colors: [...orderedHexes] }, ...normalizedRules];
+    grounded = { ...grounded, colorUsageRules };
+  }
+
+  // ── LOGO grounding (observation-driven, always) ──
+  const observed = analyses
+    .map((a) => a.logoPosition)
+    .filter((p): p is NonNullable<StyleAnalysis['logoPosition']> => !!p && p !== 'none');
+
+  let canonicalPosition: string | undefined;
+  if (observed.length >= 2) {
+    const counts = new Map<string, number>();
+    for (const p of observed) counts.set(p, (counts.get(p) ?? 0) + 1);
+    let modal = '';
+    let modalCount = 0;
+    for (const [p, c] of counts) {
+      if (c > modalCount) {
+        modal = p;
+        modalCount = c;
+      }
+    }
+    // Strict majority guarantees a unique winner (no tie to break).
+    if (modalCount / observed.length > 0.5) canonicalPosition = modal;
+  }
+
+  if (canonicalPosition) {
+    const rules =
+      grounded.logoUsageRules.length === 0
+        ? [{ rule: 'Logo konumu (referanslardan çıkarıldı)', preferredPosition: canonicalPosition }]
+        : grounded.logoUsageRules.map((r) => ({ ...r, preferredPosition: canonicalPosition }));
+    grounded = { ...grounded, logoUsageRules: rules };
+  } else {
+    // Not confident → drop every preferredPosition; never assert an unfounded position.
+    grounded = {
+      ...grounded,
+      logoUsageRules: grounded.logoUsageRules.map((r) => {
+        const rest = { ...r };
+        delete rest.preferredPosition;
+        return rest;
+      }),
+    };
+  }
+
+  return grounded;
+}
 
 const modelRouter = new ModelRouter();
 
@@ -144,6 +233,18 @@ export async function runDesignDnaAnalysis(clientId: string, requestedBy: string
     analyses.push(persisted);
   }
 
+  // The client's authoritative brand palette (real, user-edited color_palette kartela).
+  // When present it anchors the synthesized colorUsageRules to the true brand colors and
+  // deterministically grounds them post-synthesis; when absent, DNA colors are unchanged.
+  const palette = await loadBrandPaletteColors(clientId);
+  const paletteSection = palette
+    ? `\n--- AUTHORITATIVE BRAND PALETTE (current source of truth for brand color) ---\n` +
+      palette.palette
+        .map((c) => `- ${c.hex} (${c.role}${c.name ? `, ${c.name}` : ''})`)
+        .join('\n') +
+      `\nThese are the client's confirmed brand colors — every colorUsageRules[].colors entry MUST be drawn from this palette.\n`
+    : '';
+
   const synthesisPrompt = createPromptBuilder(designDnaSynthesisTemplate)
     .setVariables({
       clientName: client.name,
@@ -151,6 +252,7 @@ export async function runDesignDnaAnalysis(clientId: string, requestedBy: string
       clientNotes: client.notes ?? 'none',
       analysisCount: String(analyses.length),
       styleAnalyses: JSON.stringify(analyses, null, 2),
+      paletteSection,
     })
     .build();
 
@@ -173,7 +275,9 @@ export async function runDesignDnaAnalysis(clientId: string, requestedBy: string
   if (!synthesisOutcome.ok) {
     throw aiCallError(synthesisOutcome);
   }
-  const dnaContent = synthesisOutcome.data;
+  // Deterministic brand-truth grounding (Rock 2) — snap colorUsageRules to the palette
+  // and derive the logo position from the per-reference observations, before persistence.
+  const dnaContent = groundDesignDna(synthesisOutcome.data, analyses, palette?.orderedHexes ?? null);
 
   const confidenceScore =
     dnaContent.confidenceScore ?? analyses.reduce((sum, a) => sum + a.confidence, 0) / analyses.length;

@@ -96,3 +96,37 @@ VERDICT: SAME PAGE
 
 ### Visionary response (Claude)
 Meeting KAPANDI — SAME PAGE round 4 (4 tur, Codex toplam 33 bulgu: 28 kabul/işlendi, 3 defer RF-ISSUES-DNA2, 1 CLARIFY yanıtlandı, 1 KILL uygulandı). Plan implementable. BUILD A ROCK'a geç.
+
+## Build + Level 10 Review (rol takası — Codex write-mode 4x timeout)
+Codex build çağrıları write-modda üst üste 4 kez 10dk timeout verdi (kök neden: schemas/model-router/
+prompt-engine'de vitest YOK; contract olmayan test script'ini çağırınca Codex test altyapısı kurmaya
+çalışıp tavşan deliğine düştü). Failure ladder → Visionary takeover: kodu Claude yazdı (plan zaten
+SAME PAGE deterministik), Codex read-only ADVERSARIAL REVIEW yaptı (cross-model doğrulama korundu).
+
+### Codex adversarial review R1 (verbatim, kısalt)
+- [KILL] Explicit-but-unavailable providers don't clear request.model → gemini model leaks to openai
+- [KILL] Layout reads palette twice (loadBrandPaletteColors + loadBrandPaletteText) → TOCTOU desync
+- [FIX] Router mutates caller-owned AIRequest
+- [FIX] Substitution logging before selection, no selected provider, none on unavailable path
+- [FIX] "Newest palette" non-deterministic on created_at ties
+- [FIX] normalizeLayoutColors JSON-clone precondition undocumented
+- [CLARIFY] colorDistance canonical-input contract
+- [FIX] proof cmd `pnpm --filter @grafista/model-router test` invalid (no test runner)
+- [FIX] gemini test uses stub not real adapter; misses unavailable model-leak case
+- [FIX] palette tests miss malformed/single-swatch/role-order/tie
+
+### Claude response → all addressed
+- KILL model-leak → complete() clears model for ANY substitution (dispatch copy, no caller mutation)
+- KILL palette TOCTOU → load ONCE; formatBrandPaletteText from same snapshot
+- logging after selection (requested/selected/task/reason: unknown_provider|unavailable|capability_mismatch)
+- deterministic newest palette (max created_at, tie-break id)
+- normalizeLayoutColors JSON-serializable precondition documented; colorDistance canonical contract documented
+- proof updated to build+typecheck+lint+test:stable (all tests under apps/api)
+- new tests: real GeminiAdapter unavailable + unavailable model-leak; brand-palette-text (malformed fail-closed/single/role-order/tie)
+
+### Codex review R2 → 2 FIX left → addressed
+- formatBrandPaletteText role-order (was original order) → sorted by PALETTE_ROLE_ORDER + test
+- plan model-router test cmd removed (verified)
+
+### Codex review R3: VERDICT: SHIP IT
+Proof (Claude ran): build + typecheck + lint clean; test:stable **558 passed (41 files)**.

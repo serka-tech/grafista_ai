@@ -32,8 +32,10 @@ layout'a "pişirilerek" tüm downstream tüketicilerde tutarlı olsun.
 
 ## Constraints / stack
 - pnpm workspace, TS strict. `model-router`+`prompt-engine` dist'ten tüketiliyor → değişince önce build.
-- Türkçe çıktı; enum/hex/koordinat İngilizce. Proof: `pnpm run test:stable` +
-  `pnpm --filter @grafista/model-router test`. Her rock kendi hedef testini ekler.
+- Türkçe çıktı; enum/hex/koordinat İngilizce. **NOT: yalnız `apps/api` paketinde vitest var**
+  (schemas/model-router/prompt-engine'de test runner YOK) → color-normalize + router testleri dahil TÜM
+  testler `apps/api/src/**/__tests__/`'e konur, değişen paketlerin build dist'inden import eder.
+  Proof: `pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:stable`.
 
 ---
 
@@ -92,11 +94,11 @@ Var olan her renk `nearestPaletteHex`'e snap edilir; opsiyonel/eksik alanlara do
 **Done looks like:** vision görevinde explicit non-vision sağlayıcı → vision-capable seçilir ve görsel
 byte'ları o adapter'a ULAŞIR; explicit image_generation (openai/kie) onurlanır; caps'siz görevde explicit
 onurlanır; creative_qa text-only ile çalışır; gemini asla seçilmez.
-**Proof:** `packages/model-router/src/__tests__/router-capability.test.ts` ÇALIŞTIRILABİLİR stub'larla:
+**Proof:** `apps/api/src/services/__tests__/router-capability.test.ts` (apps/api vitest, dist'ten import) ÇALIŞTIRILABİLİR stub'larla:
 (a) explicit 'claude'+style_analysis → seçilen adapter `request.images`'ı GERÇEKTEN alır; (b) 'openai'+
 image_generation→openai; (c) 'kie-ai'+image_generation→kie-ai; (d) caps'siz+explicit→o provider;
 (e) 'claude'+creative_qa→claude (yeniden yönlendirilmez); (f) gemini hiç seçilmez; (g) takasta model temizlenir.
-`pnpm --filter @grafista/model-router test` + `pnpm run test:stable` yeşil.
+`pnpm run test:stable` yeşil (router testi apps/api altında).
 
 ## Rock 2 — DNA'yı kaynakta marka gerçeğine çapala (renk + logo), stage 1 SAF
 **Ne:**
@@ -141,7 +143,7 @@ korunur. `pnpm run test:stable` yeşil.
 ---
 
 ## Genel proof (tüm rock'lardan sonra)
-- `pnpm run test:stable` + `pnpm --filter @grafista/model-router test` yeşil; `typecheck`+`build` temiz.
+- `pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:stable` yeşil (tüm testler apps/api vitest).
 - Claude adversarial: (a) explicit claude+style_analysis vision'a düşer, görsel byte ulaşır; (b) çelişen
   per-reference+palet → persisted DNA renk = palet + boş-colorUsageRules'ta fallback kural; (c) paletsiz
   müşteride SIFIR davranış değişimi; (d) off-palette layout hex → persist'te palete snap.

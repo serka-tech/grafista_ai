@@ -13,12 +13,17 @@
 import { v4 as uuid } from 'uuid';
 import { ModelRouter } from '@grafista/model-router';
 import { createPromptBuilder, layoutGenerationTemplate } from '@grafista/prompt-engine';
-import { LayoutPlanContentSchema, type LayoutPlan, type LayoutPlanContent } from '@grafista/schemas';
+import {
+  LayoutPlanContentSchema,
+  normalizeLayoutColors,
+  type LayoutPlan,
+  type LayoutPlanContent,
+} from '@grafista/schemas';
 import { store } from '../data/store.js';
 import { env } from '../config/env.js';
 import { aiCallError, callAiForJson, type ValidateResult } from './ai-call-helper.js';
 import { assertClientAccessible } from '../auth/client-access.js';
-import { loadBrandPaletteText } from './brand-palette-text.js';
+import { loadBrandPaletteColors, formatBrandPaletteText } from './brand-palette-text.js';
 
 const modelRouter = new ModelRouter();
 
@@ -105,6 +110,13 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
   const latestDna = await store.designDna.getLatestByClientId(client.id);
   const approvedDna = latestDna && latestDna.status === 'approved' ? latestDna : undefined;
 
+  // The client's authoritative brand palette (structured), when one exists. When present
+  // it is the SINGLE source of truth for color: DNA's colorUsageRules are dropped from the
+  // prompt context (below) and the generated layer colors are deterministically snapped to
+  // the palette before persistence (Rock 3). When absent, DNA colors are used as before.
+  const palette = await loadBrandPaletteColors(client.id);
+  const hasPalette = !!palette;
+
   const dnaContext = approvedDna
     ? JSON.stringify(
         {
@@ -113,21 +125,20 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
           typographyRules: approvedDna.typographyRules,
           logoUsageRules: approvedDna.logoUsageRules,
           imageTreatmentRules: approvedDna.imageTreatmentRules,
-          colorUsageRules: approvedDna.colorUsageRules,
+          // When a real brand palette exists it wins on color — do NOT feed the DNA's
+          // (possibly off-brand) colorUsageRules alongside it, or the two conflict.
+          ...(hasPalette ? {} : { colorUsageRules: approvedDna.colorUsageRules }),
         },
         null,
         2
       )
     : 'No approved DesignDNA available for this client yet — proceed using only the design brief and general best practices. designDnaRulesUsed must be [] in every alternative.';
 
-  // Brand palette (from the client's color_palette asset — the real, user-edited
-  // kartela) fed straight into layout generation so text/element colors are chosen
-  // FROM the brand palette, not from DesignDNA's colorUsageRules. This is the fix
-  // for "headline comes out DNA-green instead of the brand's blue": the palette was
-  // previously only a weak override at the final image step, losing to the specific
-  // per-layer color the layout had already committed to. Empty string when no usable
-  // palette exists, in which case the template keeps using DNA/brief colors.
-  const brandPalette = await loadBrandPaletteText(client.id);
+  // The prompt palette text is derived from the SAME snapshot loaded above (never a
+  // second read) so the prompt, the dropped-colorUsageRules decision, and the persisted
+  // color normalization can never desync on a concurrent palette edit. Empty when no
+  // usable palette exists, in which case the template keeps using DNA/brief colors.
+  const brandPalette = palette ? formatBrandPaletteText(palette.palette) : '';
 
   const prompt = createPromptBuilder(layoutGenerationTemplate)
     .setVariables({
@@ -171,6 +182,12 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
 
   const layoutPlans: LayoutPlan[] = [];
   for (const [i, content] of validatedAlternatives.entries()) {
+    // Deterministically bake the brand palette into the persisted layout (Rock 3): even
+    // if the model emitted off-palette hexes despite the prompt, every layer/canvas color
+    // is snapped to the nearest palette member here, so the persisted layout — and every
+    // downstream reader of it (render, production package, creative QA) — is palette-true.
+    // No-op when the client has no usable palette.
+    const finalContent = palette ? normalizeLayoutColors(content, palette.orderedHexes) : content;
     const persisted = await store.layoutPlans.create({
       id: uuid(),
       clientId: client.id,
@@ -179,7 +196,7 @@ export async function runLayoutGeneration(designBriefId: string, requestedBy: st
       designDnaId: approvedDna?.id,
       alternativeIndex: i + 1,
       status: 'generated',
-      content,
+      content: finalContent,
       provider: aiResponse.provider,
       model: aiResponse.model,
       createdBy: requestedBy,
