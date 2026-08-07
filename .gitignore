@@ -36,3 +36,6 @@ coverage/
 
 # Ephemeral test database (embedded-postgres, created/destroyed per test run)
 .test-pgdata/
+
+# Template preview renders (preview-templates.ts) — local inspection only
+.preview/

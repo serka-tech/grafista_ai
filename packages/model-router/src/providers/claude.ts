@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ProviderAdapter, AICapability, AIRequest, AIResponse } from '../types.js';
 
-const DEFAULT_MODEL = 'claude-opus-4-8';
+// Overridable so a deployment can pin an older model without a code change.
+const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5';
 
 export class ClaudeAdapter implements ProviderAdapter {
   name = 'claude' as const;

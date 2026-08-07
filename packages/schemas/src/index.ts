@@ -16,3 +16,4 @@ export * from './production-job.js';
 export * from './render-job.js';
 export * from './analytics.js';
 export * from './color-normalize.js';
+export * from './sector.js';

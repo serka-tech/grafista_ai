@@ -19,7 +19,8 @@
     "smoke:providers": "tsx src/scripts/smoke-real-providers.ts",
     "smoke:staging": "tsx src/scripts/smoke-staging.ts",
     "e2e:full-canvas-render": "tsx src/scripts/e2e-full-canvas-render.ts",
-    "check:chromium": "tsx src/scripts/check-chromium.ts"
+    "check:chromium": "tsx src/scripts/check-chromium.ts",
+    "preview:templates": "tsx src/scripts/preview-templates.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1078.0",

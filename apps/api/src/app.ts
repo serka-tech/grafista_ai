@@ -29,6 +29,7 @@ import { workflowsRouter } from './routes/workflows.js';
 import { workflowRunsRouter } from './routes/workflow-runs.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { revisionsRouter } from './routes/revisions.js';
+import { studioRouter } from './routes/studio.js';
 import { healthRouter } from './routes/health.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { installDebugRoutesMiddleware } from './middleware/debug-routes.js';
@@ -111,6 +112,9 @@ app.use('/api/workflows', workflowsRouter);
 app.use('/api/workflow-runs', workflowRunsRouter);
 app.use('/api/clients', analyticsRouter);
 app.use('/api/clients', revisionsRouter);
+// New simplified flow (sector catalog, monthly plans, designs). Mounted last so
+// it cannot shadow any existing route while the legacy surface is still live.
+app.use('/api', studioRouter);
 
 // Error handler
 app.use(errorHandler);
